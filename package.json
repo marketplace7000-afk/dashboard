@@ -1,0 +1,31 @@
+{
+  "name": "aimarket-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "serve": "tsx server.ts",
+    "check": "tsx scripts/check-periods.ts && tsx scripts/check-repricer.ts && tsx scripts/check-ozon-report.ts && tsx scripts/check-product-econ.ts && tsx scripts/check-wb-ads.ts && tsx scripts/check-tg-gate.ts && tsx scripts/check-ozon-zip.ts && tsx scripts/check-wb-showcase.ts && tsx scripts/check-sklad-layout.ts"
+  },
+  "dependencies": {
+    "@lobehub/icons": "^5.8.0",
+    "@phosphor-icons/react": "^2.1.10",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsx": "^4.22.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vercel/node": "^5.8.3",
+    "@vitejs/plugin-react": "^4.3.3",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

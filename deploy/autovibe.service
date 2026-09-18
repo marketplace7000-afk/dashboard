@@ -1,0 +1,22 @@
+[Unit]
+Description=Auto Vibe (frontend + WB/Ozon proxy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=autovibe
+WorkingDirectory=/opt/autovibe
+EnvironmentFile=/opt/autovibe/.env
+# tsx запускает server.ts (ESM-обёртка над CommonJS api/route.ts)
+ExecStart=/usr/bin/npm run serve
+Restart=always
+RestartSec=3
+# Лёгкий лимит памяти на всякий случай (8 ГБ хоста хватает с запасом)
+Environment=NODE_OPTIONS=--max-old-space-size=1024
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=autovibe
+
+[Install]
+WantedBy=multi-user.target

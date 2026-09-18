@@ -1,0 +1,691 @@
+:root {
+  --bg: #ffffff;
+  --bg-2: #f4f5f7;
+  --bg-3: #eceef2;
+  --border: #e3e6eb;
+  --text: #111418;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-2: #1d4ed8;
+  --accent-soft: #dbe7ff;
+  --good: #16a34a;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --chip: #eef0f4;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font-family: inherit; cursor: pointer; }
+input, select, textarea { font-family: inherit; }
+
+a { color: var(--accent); text-decoration: none; }
+
+/* Layout */
+.app { display: grid; grid-template-columns: 240px 1fr; height: 100vh; transition: grid-template-columns 0.3s ease; }
+.app.sidebar-collapsed { grid-template-columns: 70px 1fr; }
+
+.sidebar {
+  background: #fff;
+  border-right: 1px solid var(--border);
+  padding: 18px 10px;
+  display: flex; flex-direction: column; gap: 2px;
+  overflow: hidden;
+  transition: padding 0.2s ease;
+  white-space: nowrap;
+}
+.app.sidebar-collapsed .sidebar {
+  padding: 18px 6px;
+}
+.app.sidebar-collapsed .nav-item,
+.app.sidebar-collapsed .nav-item.nav-child {
+  padding: 9px 0;
+  justify-content: center;
+  gap: 0;
+}
+.app.sidebar-collapsed .nav-label,
+.app.sidebar-collapsed .nav-caret,
+.app.sidebar-collapsed .nav-section,
+.app.sidebar-collapsed .sidebar-footer,
+.app.sidebar-collapsed .brand span {
+  display: none !important;
+}
+.app.sidebar-collapsed .brand {
+  padding: 4px 0 18px;
+  justify-content: center;
+}
+.app.sidebar-collapsed .nav-item.nav-child::after {
+  display: none;
+}
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 12px 18px;
+  font-weight: 600; font-size: 17px;
+  color: var(--text);
+  justify-content: space-between;
+  width: 100%;
+  transition: all 0.3s ease;
+}
+.app.sidebar-collapsed .brand {
+  padding: 4px 2px 18px;
+  flex-direction: column;
+  gap: 8px;
+}
+.brand span {
+  transition: opacity 0.3s ease;
+}
+.app.sidebar-collapsed .brand span {
+  display: none;
+}
+.sidebar-toggle {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sidebar-toggle:hover {
+  color: var(--text);
+}
+.nav-item {
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 12px; border-radius: 8px;
+  color: var(--muted); cursor: pointer;
+  user-select: none;
+  font-size: 13.5px;
+  position: relative;
+  transition: background .12s, color .12s;
+}
+.app.sidebar-collapsed .nav-item {
+  padding: 9px 8px;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+}
+.nav-item span {
+  transition: opacity 0.3s ease;
+}
+.app.sidebar-collapsed .nav-item span {
+  display: none;
+}
+.nav-item svg {
+  flex-shrink: 0;
+}
+.app.sidebar-collapsed .nav-item svg:not(:first-child) {
+  display: none;
+}
+.nav-item:hover { background: var(--bg-2); color: var(--text); }
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-2);
+  font-weight: 500;
+}
+.nav-item.active::before {
+  content: '';
+  position: absolute; left: -10px; top: 6px; bottom: 6px; width: 3px;
+  background: var(--accent); border-radius: 0 3px 3px 0;
+}
+.app.sidebar-collapsed .nav-item.active::before {
+  display: none;
+}
+.app.sidebar-collapsed .nav-item.active::after {
+  display: none;
+}
+.nav-section { font-size: 11px; color: #94a3b8; padding: 16px 12px 6px; font-weight: 500; text-transform: none; }
+.app.sidebar-collapsed .nav-section {
+  display: none;
+}
+
+.nav-item.nav-child {
+  padding-left: 32px;
+  font-size: 13px;
+  color: var(--muted);
+  position: relative;
+}
+.app.sidebar-collapsed .nav-item.nav-child {
+  display: none;
+}
+.nav-item.nav-child::after {
+  content: '';
+  position: absolute;
+  left: 20px; top: 4px; bottom: 4px;
+  width: 1px;
+  background: var(--border);
+}
+.nav-item.nav-child.active {
+  background: var(--accent-soft);
+  color: var(--accent-2);
+}
+.nav-item.nav-child.active::before { display: none; }
+.nav-item.nav-child.active::after { background: var(--accent); width: 2px; }
+
+.sidebar-footer { margin-top: auto; padding: 12px; color: var(--muted); font-size: 12px; }
+.app.sidebar-collapsed .sidebar-footer {
+  display: none;
+}
+.sidebar-footer .seller { color: var(--text); font-weight: 500; }
+
+.main { overflow: auto; background: var(--bg); }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 28px;
+  position: sticky; top: 0; background: var(--bg); z-index: 5;
+}
+/* Telegram Mini App: контент не должен уезжать под системную строку и кнопки
+   Telegram («Закрыть», «…»). Отступ считает telegramApp.ts и кладёт в --av-tg-top:
+   на CSS-переменные самого Telegram полагаться нельзя, их отдают не все версии.
+   В обычном браузере переменная не задана и отступ остаётся прежним. */
+.topbar, .sidebar {
+  padding-top: calc(16px + var(--av-tg-top, 0px));
+}
+.topbar h1 { font-size: 19px; margin: 0; font-weight: 600; }
+.topbar-meta { display: flex; gap: 10px; align-items: center; color: var(--muted); }
+
+.icon-btn {
+  position: relative;
+  width: 34px; height: 34px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  display: grid; place-items: center;
+  cursor: pointer;
+}
+.icon-btn:hover { background: var(--bg-2); color: var(--text); }
+.icon-btn-dot {
+  position: absolute; top: 7px; right: 8px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--bad); border: 2px solid var(--bg);
+}
+
+.profile-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 3px 4px 3px 4px;
+  background: var(--bg-2);
+  border-radius: 999px;
+}
+.profile-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  display: grid; place-items: center;
+  font-size: 11.5px; font-weight: 600;
+  letter-spacing: .02em;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.8s linear infinite; }
+
+/* Marketplace switcher */
+.mp-tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all .12s;
+}
+.mp-tab:hover { background: var(--bg-3); }
+.mp-tab.active {
+  background: #fff;
+  border-color: var(--accent);
+  color: var(--accent-2);
+}
+.mp-tab-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Period switcher (segmented control) */
+.period-switch {
+  display: inline-flex;
+  background: var(--bg-2);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.period-btn {
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .12s;
+}
+.period-btn:hover { color: var(--text); }
+.period-btn.active {
+  background: #fff;
+  color: var(--accent-2);
+  box-shadow: 0 1px 2px rgba(15,23,42,.06);
+}
+
+.content { padding: 8px 28px 60px; max-width: 1280px; }
+
+/* Cards */
+.card {
+  background: var(--bg-2);
+  border-radius: 12px;
+  padding: 18px;
+}
+.card-title { font-size: 13px; color: var(--muted); margin: 0 0 8px; font-weight: 500; }
+.card h2 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+
+.grid { display: grid; gap: 16px; }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+
+.kpi { display: flex; flex-direction: column; gap: 4px; }
+.kpi .v { font-size: 24px; font-weight: 600; color: var(--text); }
+.kpi .d { font-size: 12px; }
+.delta-up { color: var(--good); }
+.delta-down { color: var(--bad); }
+
+/* Chips / badges */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px; border-radius: 999px;
+  background: var(--chip);
+  font-size: 11.5px; color: var(--muted);
+  font-weight: 500;
+}
+.chip.good { color: var(--good); background: rgba(22,163,74,.10); }
+.chip.warn { color: var(--warn); background: rgba(217,119,6,.10); }
+.chip.bad  { color: var(--bad);  background: rgba(220,38,38,.10); }
+.chip.info { color: var(--accent); background: var(--accent-soft); }
+
+.dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; display: inline-block; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 500; font-size: 12.5px; }
+tbody tr:hover { background: var(--bg-3); }
+tbody tr:last-child td { border-bottom: none; }
+
+/* Buttons */
+.btn {
+  background: #fff; color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 14px; font-size: 13px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.btn svg { flex-shrink: 0; }
+.tg-btn { display: inline-flex; align-items: center; gap: 5px; }
+.btn:hover { background: var(--bg-3); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+.btn-good { background: rgba(22,163,74,.10); border-color: rgba(22,163,74,.25); color: var(--good); }
+.btn-good:hover { background: rgba(22,163,74,.18); }
+.btn-bad { background: rgba(220,38,38,.10); border-color: rgba(220,38,38,.25); color: var(--bad); }
+.btn-bad:hover { background: rgba(220,38,38,.18); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* Inputs */
+.input, .select, .textarea {
+  width: 100%;
+  background: #fff; color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 9px 12px; font-size: 13px;
+  outline: none;
+}
+.input:focus, .select:focus, .textarea:focus { border-color: var(--accent); }
+.textarea { resize: vertical; min-height: 90px; font-family: inherit; }
+.field-label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+.field { margin-bottom: 14px; }
+.row { display: flex; gap: 10px; align-items: center; }
+
+/* Stub banner */
+.stub {
+  background: var(--accent-soft);
+  color: var(--accent-2);
+  padding: 12px 16px; border-radius: 10px;
+  font-size: 13px;
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.stub b { color: var(--accent-2); font-weight: 600; }
+
+/* Login */
+.login-wrap {
+  display: grid; place-items: center; height: 100vh;
+  background: var(--bg);
+}
+.login-card {
+  width: 380px; padding: 28px;
+  background: var(--bg-2); border-radius: 16px;
+}
+.login-card h2 { margin: 0 0 6px; font-size: 20px; }
+.login-card p { color: var(--muted); margin: 0 0 22px; font-size: 13px; }
+
+/* Telegram mock */
+.tg-frame {
+  background: var(--bg-2); border-radius: 14px;
+  width: 380px; max-width: 100%; overflow: hidden;
+}
+.tg-header {
+  background: #e8edf5; padding: 12px 16px; display: flex; align-items: center; gap: 10px;
+}
+.tg-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 600; font-size: 13px; }
+.tg-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; background: #f7f9fc; min-height: 380px; }
+.tg-msg {
+  align-self: flex-start;
+  background: #fff; border-radius: 12px; padding: 9px 13px;
+  max-width: 86%; font-size: 13px; line-height: 1.45;
+  white-space: pre-wrap;
+  color: var(--text);
+}
+.tg-msg .meta { font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+.tg-buttons { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.tg-btn {
+  background: var(--accent-soft); color: var(--accent); border: none; padding: 6px 10px; border-radius: 6px;
+  font-size: 12px; cursor: pointer; font-weight: 500;
+}
+.tg-btn:hover { background: #c8d8f5; }
+
+/* Misc */
+.spacer-12 { height: 12px; }
+.spacer-20 { height: 20px; }
+.muted { color: var(--muted); }
+.right { text-align: right; }
+.flex { display: flex; }
+.flex-between { display: flex; justify-content: space-between; align-items: center; }
+.gap-8 { gap: 8px; }
+.gap-12 { gap: 12px; }
+.gap-16 { gap: 16px; }
+
+.spark { display: block; }
+
+.tone-pos { color: var(--good); }
+.tone-neu { color: var(--accent); }
+.tone-neg { color: var(--bad); }
+
+/* Switch */
+.switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+.switch-track {
+  width: 36px; height: 20px; border-radius: 999px; background: #cbd2dc;
+  position: relative; transition: background .15s;
+}
+.switch-thumb {
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: #fff; transition: left .15s;
+  box-shadow: 0 1px 2px rgba(0,0,0,.15);
+}
+.switch.on .switch-track { background: var(--accent); }
+.switch.on .switch-thumb { left: 18px; }
+
+hr.sep { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+
+/* Modal */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(20,30,50,.45);
+  display: grid; place-items: center; z-index: 50;
+  backdrop-filter: blur(2px);
+}
+.modal {
+  width: 720px; max-width: calc(100vw - 32px); max-height: 86vh; overflow: auto;
+  background: #fff; border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 12px 40px rgba(20,30,50,.18);
+}
+.modal h2 { margin: 0 0 6px; font-size: 17px; }
+.modal .close { background: transparent; color: var(--muted); border: none; font-size: 18px; cursor: pointer; }
+
+.dropzone {
+  border: 2px dashed var(--border); border-radius: 12px;
+  padding: 30px; text-align: center; color: var(--muted);
+  cursor: pointer; transition: all .15s;
+  background: var(--bg-2);
+}
+.dropzone:hover { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+
+code {
+  background: var(--bg-3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+/* ============================================================
+   Мобильная навигация (бургер + drawer) и overlay.
+   На десктопе (>768px) элементы скрыты — поведение прежнее.
+   ============================================================ */
+.mobile-burger { display: none; }
+.mobile-nav-overlay { display: none; }
+
+/* ============================================================
+   АДАПТИВ — планшет/телефон ≤768px
+   ============================================================ */
+@media (max-width: 768px) {
+  /* Layout: одна колонка, сайдбар уходит в drawer (fixed поверх). */
+  .app,
+  .app.sidebar-collapsed {
+    display: block;
+    grid-template-columns: none;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  /* Сайдбар — выезжающий drawer слева. */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 270px;
+    max-width: 84vw;
+    height: 100vh;
+    z-index: 60;
+    /* padding-top отдельно — иначе сокращённая запись затрёт отступ под панель
+       Telegram, и меню откроется под кнопками «Закрыть» и «…». */
+    padding: 18px 12px;
+    padding-top: calc(18px + var(--av-tg-top, 0px));
+    overflow-y: auto;
+    box-shadow: 2px 0 24px rgba(20,30,50,.18);
+    transform: translateX(-100%);
+    transition: transform .28s ease;
+  }
+  /* В drawer всегда показываем полные подписи, даже если на десктопе
+     был режим .sidebar-collapsed. */
+  .app.sidebar-collapsed .sidebar { padding: 18px 12px; }
+  .app.sidebar-collapsed .nav-label,
+  .app.sidebar-collapsed .nav-caret,
+  .app.sidebar-collapsed .nav-section,
+  .app.sidebar-collapsed .sidebar-footer,
+  .app.sidebar-collapsed .brand span {
+    display: revert !important;
+  }
+  .app.sidebar-collapsed .nav-item,
+  .app.sidebar-collapsed .nav-item.nav-child {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 11px;
+  }
+  .app.sidebar-collapsed .nav-item.nav-child { display: flex; }
+  .app.sidebar-collapsed .nav-item svg:not(:first-child) { display: revert; }
+
+  .app.mobile-nav-open .sidebar { transform: translateX(0); }
+
+  /* Скрыть десктопную кнопку схлопывания в drawer. */
+  .sidebar-toggle { display: none; }
+
+  /* Затемняющий overlay при открытом drawer. */
+  .app.mobile-nav-open .mobile-nav-overlay {
+    display: block;
+    position: fixed; inset: 0;
+    background: rgba(20,30,50,.45);
+    z-index: 55;
+  }
+
+  /* Бургер в топбаре. */
+  .mobile-burger {
+    display: grid;
+    flex-shrink: 0;
+    margin-right: 4px;
+  }
+
+  /* Топбар компактнее, с переносом. */
+  .main { height: auto; }
+  .topbar {
+    /* padding-top отдельно: сокращённая запись затирала бы отступ под панель
+       Telegram (--av-tg-top), и шапка уезжала под кнопки «Закрыть» и «…». */
+    padding: 10px 14px;
+    padding-top: calc(10px + var(--av-tg-top, 0px));
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .topbar h1 { font-size: 16px; flex: 1; min-width: 0; }
+  .topbar-meta { gap: 6px; flex-wrap: wrap; }
+  .content { padding: 8px 14px 80px; }
+
+  /* Тач-таргеты ≥44px. */
+  .nav-item { min-height: 44px; padding: 11px 12px; }
+  .nav-item.nav-child { min-height: 44px; }
+  .btn { min-height: 44px; }
+  .btn-sm { min-height: 40px; }
+  .icon-btn { width: 44px; height: 44px; }
+
+  /* Сетки: 4-col KPI → 2 кол, 3-col → 1 кол. */
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid { gap: 12px; }
+
+  /* ВАЖНО: многие страницы задают grid-template-columns ИНЛАЙНОМ
+     (repeat(auto-fit, minmax(440px,1fr)) и т.п.) — это шире телефона и даёт
+     горизонтальный скролл. Перебиваем инлайн через !important: на телефоне
+     любой grid становится в одну колонку. minmax(0,1fr) — КРИТИЧНО: иначе
+     колонка не сжимается уже своего контента (длинное число/слово) и сетка
+     распирает экран. */
+  .content [style*="grid-template-columns"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  /* Базовые классы-сетки тоже на minmax(0,1fr). */
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-3, .grid-2 { grid-template-columns: minmax(0, 1fr); }
+  /* KPI-плитки (узкий minmax) — по 2 в ряд, но колонки сжимаемы. */
+  .content [style*="minmax(140px"],
+  .content [style*="minmax(150px"],
+  .content [style*="minmax(160px"],
+  .content [style*="minmax(170px"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  /* Любой ряд элементов (фильтры, период-свитчи, кнопки) — перенос + не вылазит. */
+  .content .row,
+  .content .flex-between,
+  .period-switch {
+    flex-wrap: wrap;
+  }
+  /* Жёсткая защита от горизонтального скролла на телефоне. */
+  html, body { overflow-x: hidden; max-width: 100vw; }
+  .main, .content { overflow-x: hidden; max-width: 100vw; }
+  /* Длинный текст в карточках/инсайтах не должен распирать блок. */
+  .content .card, .content p, .content li, .content div {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  /* Карточки и сетки не шире контейнера. */
+  .content .card { max-width: 100%; }
+  .content .grid { max-width: 100%; min-width: 0; }
+  /* Прямые дети flex/grid должны уметь сжиматься ниже своего контента. */
+  .content .grid > *,
+  .content .card > * { min-width: 0; }
+
+  /* Карточки и типографика компактнее. */
+  .card { padding: 14px; }
+  .card h2 { font-size: 15px; }
+  .kpi .v { font-size: 20px; }
+
+  /* Таблицы — горизонтальный скролл, не теряя колонок. */
+  .card table,
+  .main table,
+  main table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Модалки на всю ширину с отступами и вертикальным скроллом. */
+  .modal {
+    width: 100%;
+    max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 32px);
+    padding: 18px;
+  }
+
+  /* Фиксированные frame-блоки (telegram-мок, login) — по ширине экрана. */
+  .tg-frame { width: 100%; }
+  .login-card { width: 100%; max-width: calc(100vw - 32px); }
+}
+
+/* ============================================================
+   АДАПТИВ — узкий телефон ≤480px
+   ============================================================ */
+@media (max-width: 480px) {
+  .grid-4 { grid-template-columns: minmax(0, 1fr); }
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
+  /* На узком телефоне даже KPI-плитки — в одну колонку, чтобы цифры не резались. */
+  .content [style*="minmax(140px"],
+  .content [style*="minmax(150px"],
+  .content [style*="minmax(160px"],
+  .content [style*="minmax(170px"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .grid-4 { grid-template-columns: minmax(0, 1fr); }
+
+  .topbar { padding: 9px 12px; padding-top: calc(9px + var(--av-tg-top, 0px)); flex-wrap: nowrap; }
+  .topbar h1 { font-size: 15px; }
+  .content { padding: 6px 12px 80px; }
+  .card { padding: 12px; }
+  .kpi .v { font-size: 19px; }
+
+  /* Топбар в ОДНУ строку: прячем дату и кнопку «Помощь», ужимаем профиль. */
+  .topbar .topbar-meta > .chip:first-child { display: none; } /* дата-чип */
+  .topbar-meta { gap: 4px; flex-wrap: nowrap; }
+  .profile-pill { padding: 2px 3px; gap: 4px; }
+  .profile-pill .profile-avatar { width: 26px; height: 26px; font-size: 11px; }
+  .profile-pill .btn { min-height: 34px; padding: 4px 8px; font-size: 12px; }
+  .icon-btn { width: 38px; height: 38px; }
+
+  /* Таблицы на узком экране — мельче шрифт, плотнее. */
+  .content table { font-size: 12px; }
+  .content table th, .content table td { padding: 6px 8px; }
+}
+
+/* Скролл-контейнер таблиц: шапка липнет сверху, широкие таблицы скроллятся
+   внутри себя (и по горизонтали тоже — страница не расползается). */
+.tbl-scroll { overflow: auto; max-height: 74vh; }
+.tbl-scroll thead th {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--bg);
+  box-shadow: 0 1px 0 var(--border);
+}
+
+/* «Цены»: крупные ровные заголовки колонок (16.09.2026) */
+.tbl-scroll thead.mp-head th { font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: 0.01em; padding: 12px 12px; white-space: nowrap; vertical-align: middle; border-bottom: 2px solid var(--border); }
+.tbl-scroll thead.mp-head th.right { text-align: right; }
+
+/* Карточка с таблицей не должна раздвигать колонку страницы: min-content таблицы остаётся внутри .tbl-scroll (17.09.2026) */
+.card:has(> .tbl-scroll) { min-width: 0; }
+
+/* «Цены»: одинаковая сетка колонок на WB и Ozon — ширины заданы в thead, остаток уходит колонке «Артикул» (17.09.2026) */
+.tbl-scroll table.mp-table { width: 100%; table-layout: fixed; }
+.tbl-scroll table.mp-table td { overflow-wrap: anywhere; }

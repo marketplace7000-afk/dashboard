@@ -1,0 +1,22 @@
+node_modules
+dist
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+.vercel
+.av-cache/
+graphify-out/
+.probe*.ts
+.warm-*.ts
+.check-*.ts
+.dbg*.ts
+
+# Данные, введённые в интерфейсе (себестоимость и т.п.) — не в git и не в деплой
+av-data/
+*.tsbuildinfo
+
+# черновики проверок
+_t.ts
+check_showcase.cjs

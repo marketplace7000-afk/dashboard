@@ -1,0 +1,15 @@
+{
+  "rewrites": [
+    { "source": "/api/route",        "destination": "/api/route" },
+    { "source": "/api/:path*",       "destination": "/api/route?p=:path*" },
+    { "source": "/wb/:path*",        "destination": "/api/route?p=wb/:path*" },
+    { "source": "/ozon-perf/:path*", "destination": "/api/route?p=ozon-perf/:path*" },
+    { "source": "/ozon/:path*",      "destination": "/api/route?p=ozon/:path*" }
+  ],
+  "_комментарий_про_cron": "Cron на Vercel УБРАН намеренно. Платформа живёт на своём сервере (e-avtovibe.ru), прогрев делает server.ts каждые 2 часа. На Vercel тот же обработчик стоит денег: функция висит всё время ожидания WB/Ozon (ретраи, паузы под лимиты, опрос отчётов Ozon), а Vercel считает GB-часы по времени жизни, а не по числу вызовов. Плюс Vercel ходит в WB с зарубежного IP, за что WB банит. Возвращать только если платформа переедет обратно.",
+  "functions": {
+    "api/route.ts": {
+      "maxDuration": 300
+    }
+  }
+}

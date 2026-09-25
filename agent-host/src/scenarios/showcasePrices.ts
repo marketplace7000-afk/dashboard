@@ -65,13 +65,17 @@ function toRub(raw: unknown, anchorRub?: number): number {
   return n >= 5_000_000 ? Math.round(n / 100) : Math.round(n);
 }
 
-async function collectWb(page: Page, task: AgentTask, settings: AgentSettings): Promise<{ items: Items; missing: string[] }> {
+async function collectWb(page: Page, task: AgentTask, settings: AgentSettings): Promise<{ items: Items; missing: string[]; outOfStock: string[] }> {
   const skus = (task.params.skus ?? []).map(String).filter(Boolean);
   const anchors = task.params.anchors ?? {};
   const items: Items = {};
+  // Товары, которые card.wb.ru вернул, но без цены: totalQuantity = 0, stocks
+  // пустые — их НЕТ В НАЛИЧИИ, витринной цены не существует (25.09: 137 из 172).
+  // По прямым карточкам их гонять бессмысленно.
+  const outOfStock = new Set<string>();
   if (!skus.length) {
     await api.log(task.id, 'warn', 'сервер не передал список nmId (кэш цен WB пуст) — снимать нечего');
-    return { items, missing: [] };
+    return { items, missing: [], outOfStock: [] };
   }
   // Открываем сам wildberries.ru (проверка антибота + origin для fetch), а
   // card.wb.ru запрашиваем через fetch изнутри страницы — так делает фронт WB.
@@ -112,18 +116,19 @@ async function collectWb(page: Page, task: AgentTask, settings: AgentSettings): 
       const price = toRub(s.product ?? s.total ?? p?.salePriceU ?? 0, anchor);
       const old = toRub(s.basic ?? p?.priceU ?? 0, anchor);
       if (price > 0) items[nm] = { price, oldPrice: old > price ? old : undefined };
+      else outOfStock.add(nm);
     }
     doneCount = Math.min(i + CHUNK, total);
     checkCancelled(await api.progress(task.id, {
       stage: 'collect_prices', stage_index: 2, stages_total: STAGES.length,
       items_done: Object.keys(items).length, items_total: total,
       current_item: chunk[chunk.length - 1] ?? null,
-      message: `WB: снято ${Object.keys(items).length} из ${total} (батч ${Math.ceil(doneCount / CHUNK)} из ${Math.ceil(total / CHUNK)})`,
+      message: `WB: снято ${Object.keys(items).length} из ${total}, нет в наличии ${outOfStock.size} (батч ${Math.ceil(doneCount / CHUNK)} из ${Math.ceil(total / CHUNK)})`,
       eta_sec: Math.round(((total - doneCount) / CHUNK) * (settings.page_pause_ms[1] / 1000 + 2)),
     }));
   }
-  const missing = skus.filter(s => !items[s]);
-  return { items, missing };
+  const missing = skus.filter(s => !items[s] && !outOfStock.has(s));
+  return { items, missing, outOfStock: [...outOfStock] };
 }
 
 /** Недостающие WB — прямые карточки (детальная страница, DOM). */
@@ -186,7 +191,7 @@ async function scrapeOzonTiles(page: Page): Promise<Items> {
   });
 }
 
-async function collectOzon(page: Page, task: AgentTask, settings: AgentSettings): Promise<{ items: Items; missing: string[] }> {
+async function collectOzon(page: Page, task: AgentTask, settings: AgentSettings): Promise<{ items: Items; missing: string[]; outOfStock: string[] }> {
   const wanted = new Set((task.params.skus ?? []).map(String));
   const items: Items = {};
   const MAX_PAGES = 30;
@@ -213,7 +218,7 @@ async function collectOzon(page: Page, task: AgentTask, settings: AgentSettings)
     if (added === 0) break; // конец пагинации
   }
   const missing = wanted.size ? [...wanted].filter(s => !items[s]) : [];
-  return { items, missing };
+  return { items, missing, outOfStock: [] };
 }
 
 async function ozonDirectCards(page: Page, task: AgentTask, settings: AgentSettings, missing: string[], items: Items): Promise<number> {
@@ -255,7 +260,7 @@ export async function runShowcasePrices(task: AgentTask, settings: AgentSettings
       message: mp === 'wb' ? 'WB: подготовка (card.wb.ru батчами)' : 'Ozon: открываю витрину продавца',
     }, true));
 
-    const { items, missing } = mp === 'wb'
+    const { items, missing, outOfStock } = mp === 'wb'
       ? await collectWb(page, task, settings)
       : await collectOzon(page, task, settings);
     const foundOnShowcase = Object.keys(items).length;
@@ -263,7 +268,7 @@ export async function runShowcasePrices(task: AgentTask, settings: AgentSettings
     checkCancelled(await api.progress(task.id, {
       stage: 'direct_cards', stage_index: 3, stages_total: STAGES.length,
       items_done: 0, items_total: missing.length,
-      message: missing.length ? `Прямые карточки: ${missing.length} не найдено на витрине` : 'Все товары найдены, прямые карточки не нужны',
+      message: missing.length ? `Прямые карточки: ${missing.length} не найдено на витрине${outOfStock.length ? `, ещё ${outOfStock.length} нет в наличии` : ''}` : `Все товары в наличии найдены${outOfStock.length ? `, ${outOfStock.length} нет в наличии` : ''} — прямые карточки не нужны`,
     }, true));
     // Прямые карточки — дорого (5–12 с на товар): за прогон не больше MAX_DIRECT,
     // остальное попадёт в stats.missing и в следующий прогон.
@@ -292,10 +297,10 @@ export async function runShowcasePrices(task: AgentTask, settings: AgentSettings
     }
 
     const total = (task.params.skus?.length ?? 0) || foundOnShowcase;
-    const stillMissing = Math.max(0, total - foundOnShowcase - foundDirect);
+    const stillMissing = Math.max(0, total - foundOnShowcase - foundDirect - outOfStock.length);
     await api.complete(task.id,
-      `${mp.toUpperCase()}: снято ${foundOnShowcase + foundDirect} из ${total}`,
-      { found_on_showcase: foundOnShowcase, found_direct: foundDirect, missing: stillMissing, total });
+      `${mp.toUpperCase()}: снято ${foundOnShowcase + foundDirect} из ${total}${outOfStock.length ? `, нет в наличии ${outOfStock.length}` : ''}${stillMissing ? `, не найдено ${stillMissing}` : ''}`,
+      { found_on_showcase: foundOnShowcase, found_direct: foundDirect, out_of_stock: outOfStock.length, missing: stillMissing, total });
   } catch (e) {
     if (e instanceof Cancelled) {
       await api.fail(task.id, { error: 'отменено пользователем', retryable: false });

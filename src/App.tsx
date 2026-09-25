@@ -4,8 +4,9 @@ import {
   GearIcon, GraphIcon, SquaresFourIcon,
   TrendUpIcon, TruckIcon,
   CaretRightIcon, ListBulletsIcon, MegaphoneIcon, CurrencyRubIcon,
-  ListIcon, BookOpenIcon, ChartPieSliceIcon
+  ListIcon, BookOpenIcon, ChartPieSliceIcon, RobotIcon
 } from '@phosphor-icons/react';
+import { AgentHosts } from './pages/AgentHosts';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Prices } from './pages/Prices';
@@ -28,7 +29,7 @@ import { prefetchAll } from './api/prefetch';
 import { setUnauthorizedHandler } from './api/http';
 import { noteSwallowed } from './utils/log';
 
-type Page = 'dashboard' | 'bi' | 'costs' | 'roi' | 'prices' | 'procurement' | 'margins' | 'distribution' | 'reviews' | 'analytics' | 'modules' | 'ads' | 'knowledge' | 'agents' | 'settings';
+type Page = 'dashboard' | 'bi' | 'costs' | 'roi' | 'prices' | 'procurement' | 'margins' | 'distribution' | 'reviews' | 'analytics' | 'modules' | 'ads' | 'knowledge' | 'agents' | 'collectors' | 'settings';
 
 // Бывший выпадающий список «Закупки» развёрнут в плоские пункты (просьба клиента
 // 03.08: убрать раскрывающийся список). «Сезонность» убрана целиком.
@@ -55,6 +56,9 @@ const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   // { key: 'modules',     Icon: SquaresFourIcon,     label: 'Модули' },
 ];
 const NAV_CONFIG: { key: Page; Icon: any; label: string }[] = [
+  // «Сборщики» — сеть агентов на ПК (ТЗ «Сеть агентов»): очередь, живой ход
+  // выполнения, паузы площадок. Не путать с «ИИ-агенты» (серверные /api/ai/*).
+  { key: 'collectors',  Icon: RobotIcon,           label: 'Сборщики' },
   { key: 'agents',      Icon: GraphIcon,           label: 'ИИ-агенты' },
   { key: 'settings',    Icon: GearIcon,            label: 'Настройки' },
 ];
@@ -74,6 +78,7 @@ const TITLES: Record<Page, string> = {
   ads: 'Реклама',
   modules: 'Модули · акции, аудит карточек',
   agents: 'ИИ-агенты',
+  collectors: 'Сборщики · агенты на ПК',
   settings: 'Настройки',
 };
 
@@ -193,6 +198,7 @@ export function App() {
           {page === 'settings' && <Settings />}
           {page === 'modules' && <Modules />}
           {page === 'agents' && <Agents />}
+          {page === 'collectors' && <AgentHosts />}
         </div>
       </main>
 

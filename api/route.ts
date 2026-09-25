@@ -212,8 +212,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ─── /api/agent/* — хост сети агентов (ПК). Своя авторизация: Bearer
+  // AGENT_API_KEY (см. agentQueue.agentKeyOk), cookie-сессии у хоста нет —
+  // потому ДО requireAuth, по образцу релеев. ТЗ «Сеть агентов», раздел 6.1.
+  if (section === 'agent') {
+    const { handleAgentApi } = await import('./_lib/agentHandlers');
+    return handleAgentApi(req, res, rest);
+  }
+
+  // Ingest витрин принимает ключ агента наравне с сессией (ТЗ, принцип VIII):
+  // хост шлёт цены сюда же, куда их слал ручной сценарий.
+  const agentIngestOk = (section === 'wb-showcase-ingest' || section === 'ozon-showcase-ingest')
+    && (await import('./_lib/agentQueue')).agentKeyOk(req as any);
+
   // ─── Все остальные секции требуют auth ───────────────────────────────────
-  if (!requireAuth(req, res)) return;
+  if (!agentIngestOk && !requireAuth(req, res)) return;
+
+  // ─── /api/agents/* — панель сети агентов (экран «В работе»). Только после
+  // requireAuth: единственный пользователь кабинета = admin. ТЗ, раздел 6.2.
+  if (section === 'agents') {
+    const { handleAgentsPanel } = await import('./_lib/agentHandlers');
+    return handleAgentsPanel(req, res, rest);
+  }
 
   // ─── /api/wb/<scope>/* ───────────────────────────────────────────────────
   if (section === 'wb') {

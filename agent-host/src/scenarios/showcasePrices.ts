@@ -160,27 +160,28 @@ async function wbDirectCards(page: Page, task: AgentTask, settings: AgentSetting
 
 // ─── Ozon: витрина продавца + прямые карточки ───────────────────────────────
 
-/** Снять {sku → цена} с открытой страницы витрины/поиска Ozon. */
+/** Снять {sku → цена} с открытой страницы витрины/поиска Ozon.
+ *  Код передаётся СТРОКОЙ: tsx/esbuild вставляет во вложенные функции helper
+ *  __name, которого в странице нет (25.09: «__name is not defined»). */
 async function scrapeOzonTiles(page: Page): Promise<Items> {
-  return page.evaluate(() => {
-    const out: Record<string, { price: number; oldPrice?: number }> = {};
-    const parse = (t: string) => { const n = Number(t.replace(/[^\d]/g, '')); return Number.isFinite(n) && n > 0 && n < 10_000_000 ? n : 0; };
+  return page.evaluate(`(() => {
+    const out = {};
+    const parse = (t) => { const n = Number(String(t).replace(/[^\\d]/g, '')); return Number.isFinite(n) && n > 0 && n < 10000000 ? n : 0; };
     for (const a of Array.from(document.querySelectorAll('a[href*="/product/"]'))) {
-      const m = (a.getAttribute('href') ?? '').match(/\/product\/[^/]*?-?(\d{6,})\/?(\?|$)/);
+      const m = (a.getAttribute('href') || '').match(/\\/product\\/[^/]*?-?(\\d{6,})\\/?(\\?|$)/);
       if (!m) continue;
       const sku = m[1];
       if (out[sku]) continue;
       // Плитка: ближайший контейнер со знаком ₽. Первая цена — актуальная,
-      // вторая (зачёркнутая) — старая. Цену «с Ozon Картой» помечают отдельной
-      // подписью — берём цены без подписи «с Ozon Картой».
-      let node: Element | null = a;
+      // вторая (зачёркнутая) — старая. Цену «с Ozon Картой» пропускаем.
+      let node = a;
       for (let up = 0; up < 4 && node; up++) node = node.parentElement;
-      const scope = node ?? a;
-      const prices: number[] = [];
+      const scope = node || a;
+      const prices = [];
       for (const el of Array.from(scope.querySelectorAll('span'))) {
-        const txt = el.textContent ?? '';
+        const txt = el.textContent || '';
         if (!txt.includes('₽') || txt.length > 24) continue;
-        if (/картой/i.test((el.parentElement?.textContent ?? '').slice(0, 60))) continue;
+        if (/картой/i.test(((el.parentElement && el.parentElement.textContent) || '').slice(0, 60))) continue;
         const n = parse(txt);
         if (n) prices.push(n);
         if (prices.length >= 2) break;
@@ -188,7 +189,7 @@ async function scrapeOzonTiles(page: Page): Promise<Items> {
       if (prices.length) out[sku] = { price: prices[0], oldPrice: prices[1] > prices[0] ? prices[1] : undefined };
     }
     return out;
-  });
+  })()`) as Promise<Items>;
 }
 
 async function collectOzon(page: Page, task: AgentTask, settings: AgentSettings): Promise<{ items: Items; missing: string[]; outOfStock: string[] }> {
@@ -228,16 +229,16 @@ async function ozonDirectCards(page: Page, task: AgentTask, settings: AgentSetti
     await pacedGoto(page, `https://www.ozon.ru/product/${sku}/`, settings, task.id, settings.card_pause_ms);
     const body = await page.evaluate(() => document.body?.innerText ?? '');
     if (looksLikeChallenge(page.url(), body)) throw new Challenge('ozon', 'captcha');
-    const price = await page.evaluate(() => {
+    const price = await (page.evaluate(`(() => {
       // Веб-цена без Ozon Карты: в webPrice-стейте это price (cardPrice — с картой).
       for (const sc of Array.from(document.querySelectorAll('script[type="application/json"]'))) {
-        const t = sc.textContent ?? '';
+        const t = sc.textContent || '';
         if (!t.includes('cardPrice') && !t.includes('"price"')) continue;
-        const m = t.match(/"price"\s*:\s*"([\d\s ]+)\s*₽"/) ?? t.match(/"price"\s*:\s*(\d+)/);
-        if (m) { const n = Number(String(m[1]).replace(/[^\d]/g, '')); if (n > 0) return n; }
+        const m = t.match(/"price"\\s*:\\s*"([\\d\\s\\u00a0]+)\\s*₽"/) || t.match(/"price"\\s*:\\s*(\\d+)/);
+        if (m) { const n = Number(String(m[1]).replace(/[^\\d]/g, '')); if (n > 0) return n; }
       }
       return 0;
-    }).catch(() => 0);
+    })()`) as Promise<number>).catch(() => 0);
     if (price > 0) { items[sku] = { price }; got++; }
     else await api.log(task.id, 'warn', `Ozon ${sku}: цена на карточке не найдена`);
     checkCancelled(await api.progress(task.id, {

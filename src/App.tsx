@@ -2,9 +2,8 @@ import { useState, useEffect } from 'react';
 import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, ChartLineIcon, PaperPlaneTiltIcon,
   GearIcon, GraphIcon, SquaresFourIcon,
-  TrendUpIcon, TruckIcon,
-  CaretRightIcon, ListBulletsIcon, MegaphoneIcon, CurrencyRubIcon,
-  ListIcon, BookOpenIcon, ChartPieSliceIcon, RobotIcon
+  CaretRightIcon, MegaphoneIcon, CurrencyRubIcon,
+  ListIcon, RobotIcon
 } from '@phosphor-icons/react';
 import { AgentHosts } from './pages/AgentHosts';
 import { Login } from './pages/Login';
@@ -15,13 +14,7 @@ import { Analytics } from './pages/Analytics';
 import { Settings } from './pages/Settings';
 import { Agents } from './pages/Agents';
 import { Modules } from './pages/Modules';
-import { Knowledge } from './pages/Knowledge';
-import { Procurement } from './pages/Procurement';
-import { MarginAnalytics } from './pages/MarginAnalytics';
-import { Distribution } from './pages/Distribution';
 import { Ads } from './pages/Ads';
-import { Roi } from './pages/Roi';
-import { Bi } from './pages/Bi';
 import { Costs } from './pages/Costs';
 import { NotificationsBell } from './components/NotificationsBell';
 import { AiChatBubble } from './components/AiChat';
@@ -29,14 +22,13 @@ import { prefetchAll } from './api/prefetch';
 import { setUnauthorizedHandler } from './api/http';
 import { noteSwallowed } from './utils/log';
 
-type Page = 'dashboard' | 'bi' | 'costs' | 'roi' | 'prices' | 'procurement' | 'margins' | 'distribution' | 'reviews' | 'analytics' | 'modules' | 'ads' | 'knowledge' | 'agents' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'costs' | 'prices' | 'reviews' | 'analytics' | 'modules' | 'ads' | 'agents' | 'collectors' | 'settings';
 
-// Бывший выпадающий список «Закупки» развёрнут в плоские пункты (просьба клиента
-// 03.08: убрать раскрывающийся список). «Сезонность» убрана целиком.
+// 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
+// «ROI и алерты», «BI и финансы», «База знаний» удалены по просьбе клиента
+// (писали прежние разработчики, корректность не подтверждена). Код страниц
+// удалён из репозитория; серверные эндпоинты и сборщик не тронуты.
 const PROCUREMENT_CHILDREN: { key: Page; Icon: any; label: string }[] = [
-  { key: 'procurement', Icon: ListBulletsIcon,    label: 'Прогноз закупок' },
-  { key: 'margins',     Icon: TrendUpIcon,        label: 'Маржинальность' },
-  { key: 'distribution',Icon: TruckIcon,          label: 'Распределение' },
   { key: 'costs',       Icon: CurrencyRubIcon,     label: 'Себестоимость' },
 ];
 
@@ -44,13 +36,10 @@ const NAV_TOP: { key: Page; Icon: any; label: string }[] = [
   { key: 'dashboard',   Icon: GaugeIcon,           label: 'Дашборд' },
 ];
 const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
-  { key: 'roi',         Icon: CurrencyRubIcon,     label: 'ROI и алерты' },
   { key: 'prices',      Icon: TagIcon,             label: 'Цены' },
   { key: 'reviews',     Icon: ChatCircleTextIcon,  label: 'Отзывы' },
   { key: 'analytics',   Icon: ChartLineIcon,       label: 'Аналитика' },
-  { key: 'bi',          Icon: ChartPieSliceIcon,   label: 'BI и финансы' },
   { key: 'ads',         Icon: MegaphoneIcon,       label: 'Реклама' },
-  { key: 'knowledge',   Icon: BookOpenIcon,        label: 'База знаний' },
   // «Модули» скрыт из меню по просьбе клиента (28.07) — роут и страница живы,
   // вернуть = раскомментировать строку ниже.
   // { key: 'modules',     Icon: SquaresFourIcon,     label: 'Модули' },
@@ -65,15 +54,9 @@ const NAV_CONFIG: { key: Page; Icon: any; label: string }[] = [
 
 const TITLES: Record<Page, string> = {
   dashboard: 'Дашборд',
-  bi: 'BI · прибыль, движение денег, воронка',
   costs: 'Себестоимость товаров',
-  roi: 'ROI и алерты по товарам',
-  procurement: 'Закупки',
-  margins: 'Маржинальность',
-  distribution: 'Распределение',
   prices: 'Модуль «Цены»',
   reviews: 'Модуль «Отзывы»',
-  knowledge: 'База знаний по площадкам',
   analytics: 'Модуль «Аналитика»',
   ads: 'Реклама',
   modules: 'Модули · акции, аудит карточек',
@@ -184,16 +167,10 @@ export function App() {
         </div>
         <div className="content">
           {page === 'dashboard' && <Dashboard onNav={(k) => setPage(k as Page)} />}
-          {page === 'roi' && <Roi />}
-          {page === 'procurement' && <Procurement />}
-          {page === 'margins' && <MarginAnalytics />}
-          {page === 'distribution' && <Distribution />}
           {page === 'prices' && <Prices />}
           {page === 'reviews' && <Reviews />}
           {page === 'analytics' && <Analytics />}
-          {page === 'bi' && <Bi />}
           {page === 'costs' && <Costs />}
-          {page === 'knowledge' && <Knowledge />}
           {page === 'ads' && <Ads />}
           {page === 'settings' && <Settings />}
           {page === 'modules' && <Modules />}

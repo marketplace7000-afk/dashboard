@@ -207,28 +207,48 @@ async function collectOzon(page: Page, task: AgentTask, settings: AgentSettings)
     const body = await page.evaluate(() => document.body?.innerText ?? '');
     if (looksLikeChallenge(page.url(), body)) throw new Challenge('ozon', 'captcha');
     const found = await scrapeOzonTiles(page);
+    // Считаем только НАШИ товары: на страницах витрины Ozon подмешивает чужие
+    // рекомендации, и по ним пагинация «не кончается» (25.09: 30 страниц, 455 плиток).
+    const ours = (sku: string) => !wanted.size || wanted.has(sku);
     const before = Object.keys(items).length;
-    for (const [sku, v] of Object.entries(found)) if (!items[sku]) items[sku] = v;
+    let foreign = 0;
+    for (const [sku, v] of Object.entries(found)) {
+      if (!ours(sku)) { foreign++; continue; }
+      if (!items[sku]) items[sku] = v;
+    }
     const added = Object.keys(items).length - before;
+    const done = Object.keys(items).length;
+    await api.log(task.id, 'info', `Ozon: страница ${n} — наших новых ${added}, чужих плиток ${foreign}`);
     checkCancelled(await api.progress(task.id, {
       stage: 'collect_prices', stage_index: 2, stages_total: STAGES.length,
-      items_done: Object.keys(items).length, items_total: wanted.size || undefined,
+      items_done: done, items_total: wanted.size || undefined,
       current_item: `страница ${n}`,
-      message: `Ozon: витрина, страница ${n}, собрано ${Object.keys(items).length}${wanted.size ? ` из ${wanted.size}` : ''}`,
+      message: `Ozon: витрина, страница ${n}, наших ${done}${wanted.size ? ` из ${wanted.size}` : ''}`,
     }, n === 1));
-    if (added === 0) break; // конец пагинации
+    if (wanted.size && done >= wanted.size) break;   // всё нашли
+    if (added === 0 && n > 1) break;                  // страница не принесла наших — конец витрины
   }
   const missing = wanted.size ? [...wanted].filter(s => !items[s]) : [];
   return { items, missing, outOfStock: [] };
 }
 
-async function ozonDirectCards(page: Page, task: AgentTask, settings: AgentSettings, missing: string[], items: Items): Promise<number> {
+async function ozonDirectCards(page: Page, task: AgentTask, settings: AgentSettings, missing: string[], items: Items, oos: string[]): Promise<number> {
   let got = 0;
   for (let i = 0; i < missing.length; i++) {
     const sku = missing[i];
     await pacedGoto(page, `https://www.ozon.ru/product/${sku}/`, settings, task.id, settings.card_pause_ms);
     const body = await page.evaluate(() => document.body?.innerText ?? '');
     if (looksLikeChallenge(page.url(), body)) throw new Challenge('ozon', 'captcha');
+    // Товара нет в наличии/в архиве — Ozon уводит на поиск с product_id=.
+    if (/\/search\//.test(page.url()) || /нет в наличии|товар закончился|распродан/i.test(body.slice(0, 3000))) {
+      oos.push(sku);
+      checkCancelled(await api.progress(task.id, {
+        stage: 'direct_cards', stage_index: 3, stages_total: STAGES.length,
+        items_done: i + 1, items_total: missing.length, current_item: sku,
+        message: `Ozon, прямые карточки: ${i + 1} из ${missing.length} (нет в наличии: ${oos.length})`,
+      }, i === 0));
+      continue;
+    }
     const price = await (page.evaluate(`(() => {
       // Веб-цена без Ozon Карты: в webPrice-стейте это price (cardPrice — с картой).
       for (const sc of Array.from(document.querySelectorAll('script[type="application/json"]'))) {
@@ -276,9 +296,11 @@ export async function runShowcasePrices(task: AgentTask, settings: AgentSettings
     const MAX_DIRECT = 40;
     const direct = missing.slice(0, MAX_DIRECT);
     if (missing.length > MAX_DIRECT) await api.log(task.id, 'warn', `не найдено на витрине ${missing.length}, прямыми карточками пройду только ${MAX_DIRECT}`);
+    const oosDirect: string[] = [];
     const foundDirect = direct.length
-      ? (mp === 'wb' ? await wbDirectCards(page, task, settings, direct, items) : await ozonDirectCards(page, task, settings, direct, items))
+      ? (mp === 'wb' ? await wbDirectCards(page, task, settings, direct, items) : await ozonDirectCards(page, task, settings, direct, items, oosDirect))
       : 0;
+    outOfStock.push(...oosDirect);
 
     // Отправка батчами по 50.
     const entries = Object.entries(items);

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, ChartLineIcon, PaperPlaneTiltIcon,
   GearIcon, GraphIcon, SquaresFourIcon,
-  CaretRightIcon, MegaphoneIcon, CurrencyRubIcon,
+  CaretRightIcon, MegaphoneIcon,
   ListIcon, RobotIcon
 } from '@phosphor-icons/react';
 import { AgentHosts } from './pages/AgentHosts';
@@ -15,22 +15,21 @@ import { Settings } from './pages/Settings';
 import { Agents } from './pages/Agents';
 import { Modules } from './pages/Modules';
 import { Ads } from './pages/Ads';
-import { Costs } from './pages/Costs';
 import { NotificationsBell } from './components/NotificationsBell';
 import { AiChatBubble } from './components/AiChat';
 import { prefetchAll } from './api/prefetch';
 import { setUnauthorizedHandler } from './api/http';
 import { noteSwallowed } from './utils/log';
 
-type Page = 'dashboard' | 'costs' | 'prices' | 'reviews' | 'analytics' | 'modules' | 'ads' | 'agents' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'prices' | 'reviews' | 'analytics' | 'modules' | 'ads' | 'agents' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
-// «ROI и алерты», «BI и финансы», «База знаний» удалены по просьбе клиента
-// (писали прежние разработчики, корректность не подтверждена). Код страниц
-// удалён из репозитория; серверные эндпоинты и сборщик не тронуты.
-const PROCUREMENT_CHILDREN: { key: Page; Icon: any; label: string }[] = [
-  { key: 'costs',       Icon: CurrencyRubIcon,     label: 'Себестоимость' },
-];
+// «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
+// просьбе клиента (писали прежние разработчики). Код страниц удалён из
+// репозитория; серверные эндпоинты и сборщик не тронуты. Себестоимость
+// берётся из листа «Склад» таблицы клиента: сборщик раз в 2 часа
+// синхронизирует её в справочник (api/_lib/costs.ts, таблица главнее), и из
+// него её читают «Цены» и экономика товара.
 
 const NAV_TOP: { key: Page; Icon: any; label: string }[] = [
   { key: 'dashboard',   Icon: GaugeIcon,           label: 'Дашборд' },
@@ -54,7 +53,6 @@ const NAV_CONFIG: { key: Page; Icon: any; label: string }[] = [
 
 const TITLES: Record<Page, string> = {
   dashboard: 'Дашборд',
-  costs: 'Себестоимость товаров',
   prices: 'Модуль «Цены»',
   reviews: 'Модуль «Отзывы»',
   analytics: 'Модуль «Аналитика»',
@@ -113,8 +111,6 @@ export function App() {
         <div className="nav-section">Кабинет</div>
         {NAV_TOP.map(renderNavItem)}
 
-        {PROCUREMENT_CHILDREN.map(renderNavItem)}
-
         {NAV_AFTER_PROCUREMENT.map(renderNavItem)}
 
         <div className="nav-section">Конфигурация</div>
@@ -170,7 +166,6 @@ export function App() {
           {page === 'prices' && <Prices />}
           {page === 'reviews' && <Reviews />}
           {page === 'analytics' && <Analytics />}
-          {page === 'costs' && <Costs />}
           {page === 'ads' && <Ads />}
           {page === 'settings' && <Settings />}
           {page === 'modules' && <Modules />}

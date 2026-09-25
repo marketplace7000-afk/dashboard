@@ -73,23 +73,37 @@ async function collectWb(page: Page, task: AgentTask, settings: AgentSettings): 
     await api.log(task.id, 'warn', 'сервер не передал список nmId (кэш цен WB пуст) — снимать нечего');
     return { items, missing: [] };
   }
+  // Открываем сам wildberries.ru (проверка антибота + origin для fetch), а
+  // card.wb.ru запрашиваем через fetch изнутри страницы — так делает фронт WB.
+  // Открывать JSON как страницу нельзя: Chrome показывает его своим
+  // просмотрщиком и innerText теряет часть данных (25.09: 30 из 167).
+  await pacedGoto(page, 'https://www.wildberries.ru/', settings, task.id, settings.page_pause_ms);
+  {
+    const body = await page.evaluate(() => document.body?.innerText ?? '');
+    if (looksLikeChallenge(page.url(), body)) throw new Challenge('wb', 'captcha');
+  }
   const CHUNK = 100;
   const total = skus.length;
   let doneCount = 0;
   for (let i = 0; i < skus.length; i += CHUNK) {
     const chunk = skus.slice(i, i + CHUNK);
     const url = `https://card.wb.ru/cards/v4/detail?appType=1&curr=rub&dest=-1257786&nm=${chunk.join(';')}`;
-    await pacedGoto(page, url, settings, task.id, settings.page_pause_ms);
-    const body = await page.evaluate(() => document.body?.innerText ?? '');
-    if (looksLikeChallenge(page.url(), body)) throw new Challenge('wb', 'captcha');
+    await sleep(randBetween(settings.page_pause_ms));
+    pageLog.push(Date.now());
+    const res = await page.evaluate(async (u: string) => {
+      try {
+        const r = await fetch(u, { credentials: 'include' });
+        return { status: r.status, text: await r.text() };
+      } catch (e) { return { status: 0, text: String((e as Error)?.message ?? e) }; }
+    }, url);
+    if (res.status === 403 || res.status === 429 || looksLikeChallenge('', res.text)) throw new Challenge('wb', res.status === 429 ? 'blocked' : 'captcha');
     let parsed: any = null;
-    try { parsed = JSON.parse(body); } catch { /* не JSON */ }
+    try { parsed = JSON.parse(res.text); } catch { /* не JSON */ }
     const products: any[] = parsed?.data?.products ?? parsed?.products ?? [];
-    if (!products.length) {
-      // Пустой ответ на валидные nmId — похоже на блокировку без явной капчи.
-      if (!parsed) throw new Challenge('wb', 'blocked');
-      await api.log(task.id, 'warn', `card.wb.ru: пустой ответ на батч из ${chunk.length} nmId`);
-    }
+    await api.log(task.id, products.length ? 'info' : 'warn',
+      `card.wb.ru: батч ${Math.floor(i / CHUNK) + 1} — запрошено ${chunk.length}, получено ${products.length} (HTTP ${res.status})`,
+      products.length ? undefined : { sample: res.text.slice(0, 300) });
+    if (!products.length && !parsed) throw new Challenge('wb', 'blocked');
     for (const p of products) {
       const nm = String(p?.id ?? '');
       if (!nm) continue;
@@ -251,8 +265,13 @@ export async function runShowcasePrices(task: AgentTask, settings: AgentSettings
       items_done: 0, items_total: missing.length,
       message: missing.length ? `Прямые карточки: ${missing.length} не найдено на витрине` : 'Все товары найдены, прямые карточки не нужны',
     }, true));
-    const foundDirect = missing.length
-      ? (mp === 'wb' ? await wbDirectCards(page, task, settings, missing, items) : await ozonDirectCards(page, task, settings, missing, items))
+    // Прямые карточки — дорого (5–12 с на товар): за прогон не больше MAX_DIRECT,
+    // остальное попадёт в stats.missing и в следующий прогон.
+    const MAX_DIRECT = 40;
+    const direct = missing.slice(0, MAX_DIRECT);
+    if (missing.length > MAX_DIRECT) await api.log(task.id, 'warn', `не найдено на витрине ${missing.length}, прямыми карточками пройду только ${MAX_DIRECT}`);
+    const foundDirect = direct.length
+      ? (mp === 'wb' ? await wbDirectCards(page, task, settings, direct, items) : await ozonDirectCards(page, task, settings, direct, items))
       : 0;
 
     // Отправка батчами по 50.

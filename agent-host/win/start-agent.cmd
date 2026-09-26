@@ -8,9 +8,8 @@ set "HOST_DIR=%AGENT_ROOT%\dashboard\agent-host"
 rem 1. Chrome агента (отдельный профиль, не личный).
 start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir=%AGENT_ROOT%\chrome-profile --remote-debugging-port=9222 --no-first-run --no-default-browser-check
 
-rem 2. Консоль хоста — не больше одной (замок: заголовок окна AgentHost).
-tasklist /V /FI "IMAGENAME eq cmd.exe" 2>nul | find /I "AgentHost" >nul
-if %errorlevel%==0 (
+rem 2. Консоль хоста — не больше одной (файловый замок host.lock).
+2>nul ( 9>>"%AGENT_ROOT%\host.lock" rem ) || (
   echo Агент уже запущен — открыл только Chrome. Это окно закроется само.
   timeout /t 4 /nobreak >nul
   exit /b 0

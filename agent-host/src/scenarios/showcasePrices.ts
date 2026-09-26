@@ -289,13 +289,19 @@ export async function runShowcasePrices(task: AgentTask, settings: AgentSettings
     checkCancelled(await api.progress(task.id, {
       stage: 'direct_cards', stage_index: 3, stages_total: STAGES.length,
       items_done: 0, items_total: missing.length,
-      message: missing.length ? `Прямые карточки: ${missing.length} не найдено на витрине${outOfStock.length ? `, ещё ${outOfStock.length} нет в наличии` : ''}` : `Все товары в наличии найдены${outOfStock.length ? `, ${outOfStock.length} нет в наличии` : ''} — прямые карточки не нужны`,
+      message: `В наличии ${Object.keys(items).length}${outOfStock.length + missing.length ? `, нет в продаже ${outOfStock.length + missing.length}` : ''} — прямые карточки ${task.params.direct_cards === true && missing.length ? 'по недостающим' : 'не нужны'}`,
     }, true));
-    // Прямые карточки — дорого (5–12 с на товар): за прогон не больше MAX_DIRECT,
-    // остальное попадёт в stats.missing и в следующий прогон.
+    // Товар, которого нет ни в ответе card.wb.ru, ни на витрине Ozon, сейчас
+    // НЕ ПРОДАЁТСЯ (нет в наличии или в архиве) — цены покупателя у него не
+    // существует, открывать его карточку бессмысленно (замечание клиента
+    // 26.09). Прямые карточки — только по явному запросу в params.
     const MAX_DIRECT = 40;
-    const direct = missing.slice(0, MAX_DIRECT);
-    if (missing.length > MAX_DIRECT) await api.log(task.id, 'warn', `не найдено на витрине ${missing.length}, прямыми карточками пройду только ${MAX_DIRECT}`);
+    const direct = task.params.direct_cards === true ? missing.slice(0, MAX_DIRECT) : [];
+    if (missing.length && !direct.length) {
+      await api.log(task.id, 'info', `${missing.length} товаров не найдено на витрине — считаю «не продаются», карточки не открываю; цену покупателя для них сервер посчитает по среднему СПП`);
+      outOfStock.push(...missing);
+      missing.length = 0;
+    }
     const oosDirect: string[] = [];
     const foundDirect = direct.length
       ? (mp === 'wb' ? await wbDirectCards(page, task, settings, direct, items) : await ozonDirectCards(page, task, settings, direct, items, oosDirect))

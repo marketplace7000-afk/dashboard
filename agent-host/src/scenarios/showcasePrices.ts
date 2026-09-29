@@ -65,6 +65,73 @@ function toRub(raw: unknown, anchorRub?: number): number {
   return n >= 5_000_000 ? Math.round(n / 100) : Math.round(n);
 }
 
+/**
+ * WB, запасной путь: цены прямо с витрины продавца (DOM).
+ * 29.09.2026 card.wb.ru стал отвечать 403 всем (фронт WB сам больше им не
+ * пользуется) — читаем то, что видит покупатель на странице магазина.
+ * Вёрстка осень-2026: article[data-nm-id]; цена «с WB Кошельком» — красная
+ * (mo-typography_colors_danger) и подписана словом «Кошел», цена БЕЗ кошелька —
+ * обычная, зачёркнутая (del) — старая. Эталон ТЗ: цена без кошелька.
+ */
+async function collectWbShowcaseDom(page: Page, task: AgentTask, settings: AgentSettings, wanted: Set<string>): Promise<Items> {
+  await pacedGoto(page, 'https://www.wildberries.ru/seller/535347', settings, task.id, settings.page_pause_ms);
+  {
+    const body = await page.evaluate(() => document.body?.innerText ?? '');
+    if (looksLikeChallenge(page.url(), body)) throw new Challenge('wb', 'captcha');
+  }
+  let prev = -1;
+  for (let i = 0; i < 25; i++) {
+    await page.mouse.wheel(0, 1400).catch(() => {});
+    await sleep(700 + Math.random() * 600);
+    const n = await page.evaluate(`document.querySelectorAll('article[data-nm-id]').length`) as number;
+    checkCancelled(await api.progress(task.id, {
+      stage: 'collect_prices', stage_index: 2, stages_total: STAGES.length,
+      items_done: n, items_total: wanted.size || undefined,
+      current_item: `скролл ${i + 1}`,
+      message: `WB: витрина магазина, карточек ${n}${wanted.size ? ` (наших в базе ${wanted.size})` : ''}`,
+    }, i === 0));
+    if (n === prev && i >= 3) break;
+    prev = n;
+  }
+  const rows = await page.evaluate(`(function(){
+    const out = [];
+    for (const a of document.querySelectorAll('article[data-nm-id]')) {
+      const nm = a.getAttribute('data-nm-id');
+      if (!nm) continue;
+      const parse = (t) => { const n = Number(String(t).replace(/[^\\d]/g, '')); return Number.isFinite(n) && n > 0 && n < 10000000 ? n : 0; };
+      let wallet = 0, base = 0, old = 0;
+      for (const el of a.querySelectorAll('del')) { const v = parse(el.textContent); if (v) old = Math.max(old, v); }
+      for (const el of a.querySelectorAll('span,ins,p,div')) {
+        const t = (el.textContent || '').trim();
+        if (!t.includes('\\u20bd') || t.length > 20 || el.querySelector('del,span,ins,p,div')) continue;
+        if (el.closest('del')) continue;
+        const v = parse(t); if (!v) continue;
+        const cls = String(el.className || '') + ' ' + String(el.parentElement ? el.parentElement.className : '');
+        const near = el.parentElement ? (el.parentElement.textContent || '') : '';
+        if (/danger/.test(cls) || /кошел/i.test(near.slice(0, 80))) { if (!wallet) wallet = v; }
+        else if (!base) base = v;
+      }
+      // Если нашлась только «красная» цена и упоминания кошелька в карточке нет —
+      // это и есть обычная цена (у товара без кошельковой скидки).
+      const cardText = a.textContent || '';
+      if (!base && wallet && !/кошел/i.test(cardText)) { base = wallet; wallet = 0; }
+      out.push({ nm, base, wallet, old });
+    }
+    return JSON.stringify(out);
+  })()`) as string;
+  const items: Items = {};
+  let walletCnt = 0;
+  for (const r of JSON.parse(rows) as Array<{ nm: string; base: number; wallet: number; old: number }>) {
+    if (wanted.size && !wanted.has(r.nm)) continue;   // чужие карточки из рекомендаций
+    const price = r.base || r.wallet;                  // без кошелька; крайний случай — что есть
+    if (!price) continue;
+    if (r.wallet && r.base) walletCnt++;
+    items[r.nm] = { price, oldPrice: r.old > price ? r.old : undefined };
+  }
+  await api.log(task.id, 'info', `WB витрина (DOM): наших с ценой ${Object.keys(items).length}, у ${walletCnt} видна и цена с Кошельком (в расчёт не идёт)`);
+  return items;
+}
+
 async function collectWb(page: Page, task: AgentTask, settings: AgentSettings): Promise<{ items: Items; missing: string[]; outOfStock: string[] }> {
   const skus = (task.params.skus ?? []).map(String).filter(Boolean);
   const anchors = task.params.anchors ?? {};
@@ -100,7 +167,16 @@ async function collectWb(page: Page, task: AgentTask, settings: AgentSettings): 
         return { status: r.status, text: await r.text() };
       } catch (e) { return { status: 0, text: String((e as Error)?.message ?? e) }; }
     }, url);
-    if (res.status === 403 || res.status === 429 || looksLikeChallenge('', res.text)) throw new Challenge('wb', res.status === 429 ? 'blocked' : 'captcha');
+    if (res.status === 403 || res.status === 0) {
+      // 29.09.2026: card.wb.ru отдаёт 403 всем — это не бан агента, а закрытие
+      // API. Переходим на чтение витрины магазина из DOM.
+      await api.log(task.id, 'warn', `card.wb.ru недоступен (HTTP ${res.status}) — читаю цены с витрины магазина`);
+      const domItems = await collectWbShowcaseDom(page, task, settings, new Set(skus));
+      for (const [nm, v] of Object.entries(domItems)) items[nm] = v;
+      const missingDom = skus.filter(x => !items[x]);
+      return { items, missing: missingDom, outOfStock: [] };
+    }
+    if (res.status === 429 || looksLikeChallenge('', res.text)) throw new Challenge('wb', res.status === 429 ? 'blocked' : 'captcha');
     let parsed: any = null;
     try { parsed = JSON.parse(res.text); } catch { /* не JSON */ }
     const products: any[] = parsed?.data?.products ?? parsed?.products ?? [];

@@ -202,11 +202,22 @@ export function LiveOzonPricing() {
   // остатку Ozon из закупок; если данных об остатках нет — показываем всё.
   // 09.07: фильтр стал переключаемым (кнопка «В продаже»), по умолчанию включён.
   const haveStockData = useMemo(() => [...procurementBySku.values()].some((p) => (p.stockOzon || 0) > 0), [procurementBySku]);
-  // Активен на Ozon: остаток, продажи (7/30) ИЛИ % выкупа Ozon (заполнен только при продажах).
+  // «В продаже» = товар можно купить прямо сейчас. Правка 29.09 (жалоба клиента:
+  // товары без наличия проходили фильтр): ГЛАВНЫЙ сигнал — свежий обход витрины
+  // агентом: он листает ВСЕ страницы витрины магазина, а Ozon не показывает там
+  // товары без остатка. Если обход свежий, а товара на витрине нет и остатка в
+  // таблице нет — товар не в продаже, даже если продавался неделю назад.
+  // Продажи 7/30 дней и % выкупа — только аварийный фолбэк без свежего обхода.
+  const sweepFresh = !!showcaseLastAt && Date.now() - showcaseLastAt <= SHOWCASE_FRESH_MS;
   const inStock = (r: Row) => {
-    if (!haveStockData) return true;
-    const p = procurementBySku.get(r.offer_id.toUpperCase());
-    return (p?.stockOzon || 0) > 0 || (p?.sales7Ozon || 0) > 0 || (p?.sales30Ozon || 0) > 0 || (p?.buyoutOzon || 0) > 0;
+    const oid = r.offer_id.toUpperCase();
+    const sc = ozShowcase[oid];
+    if (sc && sc.price > 0 && Date.now() - sc.at <= SHOWCASE_FRESH_MS) return true; // есть на витрине сейчас
+    const p = procurementBySku.get(oid);
+    if ((p?.stockOzon || 0) > 0) return true; // остаток по данным снабжения (FBO/FBS)
+    if (sweepFresh) return false; // свежий обход витрины товара не увидел, остатка нет
+    if (!haveStockData) return true; // данных нет вовсе — ничего не прячем (старое поведение)
+    return (p?.sales7Ozon || 0) > 0 || (p?.sales30Ozon || 0) > 0 || (p?.buyoutOzon || 0) > 0;
   };
   const inStockCount = rows.filter(r => !archivedSet.has(r.offer_id.toUpperCase()) && inStock(r)).length;
   const visibleRows = rows.filter(r => (!searchQ || r.offer_id.toLowerCase().includes(searchQ) || String(r.product_id).includes(searchQ)) && (showArchive

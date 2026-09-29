@@ -389,6 +389,24 @@ export function LiveWbPricing() {
     return (kb[sortBy] as number) - (ka[sortBy] as number);
   });
 
+  // Снимок маржи для «Управления рекламой» (17.09.2026): те же цифры, что в таблице,
+  // уходят в общую память UI (prices-wb:margins); сервер берёт их для «маржи после рекламы».
+  // ВАЖНО: хук стоит ДО ранних return ниже. 29.09 он стоял после них — пока данные
+  // приходили из кэша мгновенно, ранний return не выполнялся и всё работало, а при
+  // холодном кэше первый рендер уходил в «Загрузка…», после загрузки хуков становилось
+  // больше — React #310, белая страница у клиента.
+  useEffectM(() => {
+    if (!allRows.length || Date.now() - marginsPushedAt < 60_000) return;
+    const items: Record<string, { marginPct: number | null; marginRub: number | null }> = {};
+    for (const r of allRows) {
+      const m = computeWbRow(r, {});
+      const k = String(r.vendorCode ?? '').trim().toUpperCase();
+      if (k) items[k] = { marginPct: m.marginPct ?? null, marginRub: m.marginRub ?? null };
+    }
+    marginsPushedAt = Date.now();
+    safeSetItem('prices-wb:margins', JSON.stringify({ at: marginsPushedAt, items }));
+  });
+
   if (bundle.loading) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: 40 }}>
@@ -439,19 +457,6 @@ export function LiveWbPricing() {
   const totalSizes = rows.reduce((s, r) => s + (r.sizes?.length ?? 0), 0);
   const editableCount = rows.filter((r) => r.editableSizePrice).length;
 
-  // Снимок маржи для «Управления рекламой» (17.09.2026): те же цифры, что в таблице,
-  // уходят в общую память UI (prices-wb:margins); сервер берёт их для «маржи после рекламы».
-  useEffectM(() => {
-    if (!allRows.length || Date.now() - marginsPushedAt < 60_000) return;
-    const items: Record<string, { marginPct: number | null; marginRub: number | null }> = {};
-    for (const r of allRows) {
-      const m = computeWbRow(r, {});
-      const k = String(r.vendorCode ?? '').trim().toUpperCase();
-      if (k) items[k] = { marginPct: m.marginPct ?? null, marginRub: m.marginRub ?? null };
-    }
-    marginsPushedAt = Date.now();
-    safeSetItem('prices-wb:margins', JSON.stringify({ at: marginsPushedAt, items }));
-  });
   const adviceContext = {
     показано_SKU: rows.length,
     Ø_скидка_пр: avgDiscount,

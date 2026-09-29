@@ -1,0 +1,10 @@
+# Переводы строк: везде LF (сервер Linux, bash-скрипты), только Windows-скрипты — CRLF.
+# 29.09.2026: коммит с ПК протащил CRLF в 230 файлов и сломал deploy-agents.sh ($'\r').
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary

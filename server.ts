@@ -90,6 +90,11 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`[autovibe] listening on :${PORT}  (dist: ${DIST})`);
   watchEventLoopLag();
   scheduleCacheWarm();
+  // Себестоимость из таблицы «Склад» — своим таймером раз в 5 мин (01.10.2026):
+  // в общей цепочке прогрева она не обновлялась с 25.09.
+  import('./api/_lib/costs')
+    .then(m => m.scheduleCostsSync())
+    .catch(e => console.warn('[costs] таймер сверки не запущен:', (e as Error).message));
   startTelegramBotSafe();
 });
 

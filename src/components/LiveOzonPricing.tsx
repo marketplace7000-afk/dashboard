@@ -18,7 +18,8 @@ import { PricingGlobalParams, type GParamField } from './PricingGlobalParams';
 import { ozonBuyerPricesRes, ozonSkuAdsRes, ozonShowcaseRes } from '../api/pricingResources';
 import { fmtClock, fmtDateClock } from '../api/sideResource';
 import { noteSwallowed } from '../utils/log';
-import { productEconRes } from '../api/pricingResources';
+import { productEconRes, ozonStockRes, LIVE_POLL_MS } from '../api/pricingResources';
+import { lastSweep, decideInSale, type SweepRow } from '../utils/inSale';
 import { mskDate } from '../utils/mskDate';
 import { useEffect as useEffectM } from 'react';
 let marginsPushedAt = 0;
@@ -77,7 +78,9 @@ export function LiveOzonPricing() {
   // Экономика по артикулу: себестоимость, ДРР, комиссия и логистика по выбранной
   // схеме работы. Собрана по артикулу и не зависит от того, попал ли товар в
   // таблицу клиента (см. api/_lib/productEcon.ts).
-  const pEconRes = productEconRes.use();
+  const pEconRes = productEconRes.use(LIVE_POLL_MS);
+  // Живые остатки Ozon FBO+FBS (01.10.2026) — главный судья фильтра «В продаже».
+  const ozStockRes = ozonStockRes.use(LIVE_POLL_MS);
   const pEcon = pEconRes.data?.ozon ?? {};
   // Схема работы подписывается рядом с комиссией — иначе по цифре не понять,
   // FBO это или FBS (вопрос клиента 03.09).
@@ -209,8 +212,17 @@ export function LiveOzonPricing() {
   // таблице нет — товар не в продаже, даже если продавался неделю назад.
   // Продажи 7/30 дней и % выкупа — только аварийный фолбэк без свежего обхода.
   const sweepFresh = !!showcaseLastAt && Date.now() - showcaseLastAt <= SHOWCASE_FRESH_MS;
+  // «В продаже» — см. src/utils/inSale.ts (01.10.2026): решает последний обход
+  // витрины агентом, живые остатки Ozon (present − reserved) отсекают распроданное.
+  const ozStockComplete = !!ozStockRes.data && !ozStockRes.error && ozStockRes.data.complete;
+  const ozSweep = useMemo(() => {
+    const pos = ozStockRes.data ? Object.values(ozStockRes.data.byOffer).filter(v => v > 0).length : 0;
+    return lastSweep(ozShowcase as Record<string, SweepRow>, pos);
+  }, [ozShowcase, ozStockRes.data]);
   const inStock = (r: Row) => {
     const oid = r.offer_id.toUpperCase();
+    const d = decideInSale(oid, ozStockComplete ? (ozStockRes.data!.byOffer[oid] || 0) : null, ozSweep);
+    if (d !== null) return d;
     const sc = ozShowcase[oid];
     if (sc && sc.price > 0 && Date.now() - sc.at <= SHOWCASE_FRESH_MS) return true; // есть на витрине сейчас
     const p = procurementBySku.get(oid);
@@ -519,6 +531,7 @@ export function LiveOzonPricing() {
               <th>Артикул</th>
               <th className="right" title="Наша цена в личном кабинете Ozon (до соинвеста)" style={{ width: 130 }}>Цена продавца</th>
               <th className="right" title="Реальная цена для покупателя с учётом СПП/соинвеста — из последней продажи или с витрины" style={{ width: 172 }}>Цена покупателя</th>
+              <th className="right" title="Себестоимость единицы из таблицы «Склад» (колонка «Закуп»), обновляется раз в 5 минут" style={{ width: 95 }}>Себест.</th>
               <th className="right" title="Живой расчёт: прибыль на единицу, ₽ и % от цены. Раскройте строку, чтобы увидеть полный расчёт" style={{ width: 85 }}>Маржа</th>
               <th className="right" title="ROI = прибыль / себестоимость, %" style={{ width: 80 }}>ROI</th>
               <th className="right" title="Подсказка по рекламе: ДРР за 7/30 дн и маржа после рекламы" style={{ width: 170 }}>Реклама</th>
@@ -575,6 +588,11 @@ export function LiveOzonPricing() {
                               : <div className="muted" style={{ fontSize: 12 }} title="Ozon не отдаёт реальную скидку площадки/соинвест в API, и запомненного СПП по товару ещё нет — показываем цену ЛК. Задай «СПП по умолч.» в панели или впиши цену в таблицу">= ЛК · нет скидки в API</div>}
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
+                      {oi.cost > 0
+                        ? <span title={econRow?.cost?.value != null ? `Себестоимость ${econRow.cost.note ?? ''}`.trim() : 'Себестоимость из таблицы закупок'}>{Math.round(oi.cost).toLocaleString('ru-RU')} ₽</span>
+                        : <span className="muted" title={econRow?.cost?.note ?? 'Нет себестоимости в таблице «Склад» — проверьте артикул'}>нет</span>}
+                    </td>
+                    <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       {marginRub !== null ? (
                         <>
                           <b style={{ fontSize: 17, color: marginPct! >= 30 ? 'var(--good)' : marginPct! >= 15 ? 'var(--warn)' : 'var(--bad)' }}>
@@ -614,7 +632,7 @@ export function LiveOzonPricing() {
                   </tr>
                   {isOpen && (
                     <tr style={{ background: 'var(--bg-3)' }}>
-                      <td colSpan={8} style={{ padding: '12px 16px' }}>
+                      <td colSpan={9} style={{ padding: '12px 16px' }}>
                         {(() => {
                           // Всё уже посчитано на уровне строки (oi/oc/apiComm/apiLog/…) — переиспользуем.
                           const editedOz = Object.keys(kk).length > 0;

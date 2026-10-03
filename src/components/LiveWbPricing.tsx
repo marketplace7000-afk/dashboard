@@ -27,12 +27,13 @@ import {
 import { useLiveWbBundle, wbCardIndex } from '../api/useLiveWbCache';
 import type { WbPriceRow, WbCard } from '../api/marketplaces';
 import { useProcurement } from '../api/useProcurement';
+import { lastSweep, decideInSale, type SweepRow } from '../utils/inSale';
 import { calcROI, roiStatus, ROI_STATUS_COLOR } from '../utils/roiLogic';
 import { archiveSKU, unarchiveSKU, getArchivedSKUs } from '../utils/procurementLogic';
 import { calcWbProfit, WB_DEFAULTS, type WbCalcInput } from '../utils/wbProfit';
 import { AiAdvice } from './AiAdvice';
 import { PricingGlobalParams, type GParamField } from './PricingGlobalParams';
-import { wbBuyerPricesRes, wbCardEconRes, wbBoxTariffsRes, adsBySkuRes, productEconRes, wbShowcaseRes, wbStockRes } from '../api/pricingResources';
+import { wbBuyerPricesRes, wbCardEconRes, wbBoxTariffsRes, adsBySkuRes, productEconRes, wbShowcaseRes, wbStockRes, LIVE_POLL_MS } from '../api/pricingResources';
 import { fmtClock, fmtDateClock } from '../api/sideResource';
 import { wbImageUrl } from '../utils/wbBasket';
 import { mskDate } from '../utils/mskDate';
@@ -78,7 +79,7 @@ export function LiveWbPricing() {
   // Module-scope ресурс с форс-обновлением: кнопка «Обновить» теперь реально
   // перезапрашивает цену покупателя, а не отдаёт кэш (жалоба клиента 05.08).
   const buyerRes = wbBuyerPricesRes.use();
-  const stockRes = wbStockRes.use();
+  const stockRes = wbStockRes.use(LIVE_POLL_MS);
   const buyerPrices: Record<string, BuyerPrice> = buyerRes.data?.items ?? {};
   // Экономика карточек WB по nmId (комиссия категории + объём в литрах). Сервер
   // проходит ВСЕ карточки, поэтому матч по nmId работает даже когда карточка не
@@ -113,7 +114,7 @@ export function LiveWbPricing() {
   // Экономика товара по артикулу: себестоимость, ДРР, комиссия и логистика по
   // выбранной схеме. Главный источник — он собран по артикулу и не зависит от
   // того, попал ли товар в лист «Ozon_wb» (см. api/_lib/productEcon.ts).
-  const pEconRes = productEconRes.use();
+  const pEconRes = productEconRes.use(LIVE_POLL_MS);
   const pEcon = pEconRes.data?.wb ?? {};
   // Схема работы подписывается везде, где видна комиссия: клиент 03.09 «не увидел
   // комиссий по FBS» — цифры были по FBS, но ни одна подпись этого не говорила.
@@ -349,23 +350,20 @@ export function LiveWbPricing() {
   // таблица снабжения остаются ТОЛЬКО аварийным фолбэком, когда живые остатки
   // недоступны (иначе товары честно лежащие на складе пропадали бы из вида —
   // жалоба 15.09, POLFAR/POL-3M).
+  // «В продаже» — см. src/utils/inSale.ts (01.10.2026): решает последний обход
+  // витрины агентом, остатки (FBO+FBS, раз в 5 мин) отсекают распроданное.
+  const stockComplete = !!stockRes.data && !stockRes.error && !stockRes.data.fbsError;
+  const sweep = useMemo(() => {
+    const pos = stockRes.data ? Object.values(stockRes.data.byNm).filter(v => v > 0).length : 0;
+    return lastSweep(wbShowcase as Record<string, SweepRow>, pos);
+  }, [wbShowcase, stockRes.data]);
   const isInStock = (r: Row) => {
     const nm = String(r.nmId);
-    // Свежий снимок витрины (реальная публичная страница, снята агентом) — самое
-    // сильное доказательство «в продаже прямо сейчас», сильнее отчёта об остатках.
-    const showcase = wbShowcase[nm];
-    if (showcase && showcase.price > 0 && Date.now() - showcase.at <= SHOWCASE_FRESH_MS) return true;
-    if (stockRes.data && !stockRes.error) {
-      const val = stockRes.data.byNm[nm];
-      if ((val || 0) > 0) return true; // есть остаток FBO и/или FBS
-      // byNm = FBO + FBS (17.09.2026). Отчёт полный (FBS-часть получена) →
-      // отсутствие строки или явный 0 = остатка нет ни на складах WB, ни у
-      // продавца. Это «не в продаже» — фолбэки ниже НЕ спрашиваем.
-      if (!stockRes.data.fbsError) return false;
-      // FBS-часть не получена: 0/нет строки в FBO-отчёте — ещё не приговор
-      // (товар может лежать на складе продавца) → пробуем фолбэки.
-    }
-    // ФОЛБЭК (остатки не загрузились или неполные): история продаж и таблица.
+    const stock = stockComplete ? (stockRes.data!.byNm[nm] || 0) : null;
+    const d = decideInSale(nm, stock, sweep);
+    if (d !== null) return d;
+    // ФОЛБЭК (нет ни обхода, ни полных остатков): частичные остатки, продажи, таблица.
+    if ((stockRes.data?.byNm[nm] || 0) > 0) return true;
     if (buyerPrices[nm]) return true; // была продажа на WB (из API)
     const proc = procurementBySku.get(archivedKey(r));
     if (!proc) return false;
@@ -571,6 +569,7 @@ export function LiveWbPricing() {
               <th>Артикул</th>
               <th className="right" title="Цена продавца в ЛК после скидки продавца (до СПП)" style={{ width: 130 }}>Цена продавца</th>
               <th className="right" title="Реальная цена для покупателя с учётом СПП/соинвеста — из последней продажи или с витрины" style={{ width: 172 }}>Цена покупателя</th>
+              <th className="right" title="Себестоимость единицы из таблицы «Склад» (колонка «Закуп»), обновляется раз в 5 минут" style={{ width: 95 }}>Себест.</th>
               <th className="right" title="Живой расчёт: прибыль на единицу, ₽ и % от цены. Раскройте строку, чтобы увидеть полный расчёт" style={{ width: 85 }}>Маржа</th>
               <th className="right" title="ROI = прибыль / себестоимость, %" style={{ width: 80 }}>ROI</th>
               <th className="right" title="Подсказка по рекламе: ДРР за 7/30 дн и маржа после рекламы" style={{ width: 170 }}>Реклама</th>
@@ -653,6 +652,11 @@ export function LiveWbPricing() {
                       )}
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
+                      {inp.cost > 0
+                        ? <span title={econRow?.cost?.value != null ? `Себестоимость ${econRow.cost.note ?? ''}`.trim() : 'Себестоимость из таблицы закупок'}>{Math.round(inp.cost).toLocaleString('ru-RU')} ₽</span>
+                        : <span className="muted" title={econRow?.cost?.note ?? 'Нет себестоимости в таблице «Склад» — проверьте артикул'}>нет</span>}
+                    </td>
+                    <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       {marginRub !== null ? (
                         <>
                           <b style={{ fontSize: 17, color: marginPct! >= 30 ? 'var(--good)' : marginPct! >= 15 ? 'var(--warn)' : 'var(--bad)' }}>
@@ -695,7 +699,7 @@ export function LiveWbPricing() {
 
                   {isOpen && (
                     <tr key={`${r.nmId}-details`}>
-                      <td colSpan={8} style={{ padding: 0 }}>
+                      <td colSpan={9} style={{ padding: 0 }}>
                         <div
                           style={{
                             background: 'var(--bg-subtle, #fafafa)',

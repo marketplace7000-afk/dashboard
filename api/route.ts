@@ -379,6 +379,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
       const { buildProductEcon } = await import('./_lib/productEcon');
+      // Кнопка «Обновить» (x-av-no-cache) — сперва сверяемся с таблицей «Склад»,
+      // чтобы новая себестоимость была видна сразу, а не через фоновые 5 минут.
+      if (req.headers['x-av-no-cache'] === '1') {
+        const { syncFromSkladThrottled } = await import('./_lib/costs');
+        await syncFromSkladThrottled(60_000);
+      }
       return res.status(200).json({ ok: true, ...(await buildProductEcon(days)) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
@@ -762,6 +768,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true, ...data });
     } catch (e: any) {
       return res.status(502).json({ ok: false, error: 'logistics_fact_failed', detail: String(e?.message ?? e).slice(0, 200) });
+    }
+  }
+
+  // ─── /api/ozon-stock — живые остатки Ozon FBO/FBS по offer_id (01.10.2026) ───
+  if (section === 'ozon-stock') {
+    try {
+      const noCache = req.headers['x-av-no-cache'] === '1';
+      const { getOzonStock } = await import('./_lib/ozonStock');
+      const data = await getOzonStock(noCache);
+      res.setHeader('x-av-cache-age', String(Math.round((Date.now() - data.fetchedAt) / 1000)));
+      return res.status(200).json(data);
+    } catch (e: any) {
+      return res.status(502).json({ error: 'ozon_stock_failed', detail: String(e?.message ?? e) });
     }
   }
 

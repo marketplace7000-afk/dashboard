@@ -27,7 +27,13 @@ export type CostEntry = {
   note?: string;
 };
 
-export type CostsFile = { items: Record<string, CostEntry>; updatedAt: string };
+export type CostsFile = {
+  items: Record<string, CostEntry>;
+  /** Когда менялась хотя бы одна цифра. */
+  updatedAt: string;
+  /** Когда последний раз УСПЕШНО сверялись с таблицей «Склад» (даже если ничего не поменялось). */
+  syncedAt?: string;
+};
 
 // ВАЖНО: отдельно от кэша. Кэш можно чистить и терять без последствий, а это
 // введённые руками данные — их потеря означает переносить себестоимость заново.
@@ -46,7 +52,7 @@ function load(): CostsFile {
     if (existsSync(FILE)) {
       const raw = JSON.parse(readFileSync(FILE, 'utf8'));
       if (raw && typeof raw === 'object' && raw.items) {
-        memory = { items: raw.items, updatedAt: raw.updatedAt ?? '' };
+        memory = { items: raw.items, updatedAt: raw.updatedAt ?? '', syncedAt: raw.syncedAt };
         return memory;
       }
     }
@@ -75,10 +81,71 @@ export function getCosts(): CostsFile {
   return load();
 }
 
+/**
+ * СОПОСТАВЛЕНИЕ АРТИКУЛА КАРТОЧКИ С АРТИКУЛОМ ТАБЛИЦЫ «Склад» (01.10.2026).
+ *
+ * Жалоба клиента: на листе цен у многих товаров пусто в «Себестоимости», хотя в
+ * таблице цифра есть. Причина — артикулы карточек и таблицы пишутся по-разному:
+ *   • одежда в таблице ведётся по размерам (W-ПАЛАЦБЛЕСК-ЧЕРН-S/-M/-L), а карточка
+ *     WB/Ozon — родительская (W-ПАЛАЦБЛЕСК-ЧЕРН);
+ *   • в таблице к артикулу дописан номер партии (POL-3M-1Л-СИН-ФИНИШ-5996);
+ *   • FBS-дубли карточек Ozon: «CP-CARLINKIT-MINI - FBS», «DJI-MINI-4-PRO- FBS»,
+ *     «CARBITLINK-FBS3» — это тот же товар, что и без хвоста.
+ * Порядок: точное совпадение → то же без пробелов и FBS-хвоста → единственный
+ * «вариант» (артикул таблицы = наш + размер или номер партии через дефис). Если вариантов
+ * несколько и цены у них расходятся больше чем на 15% — не угадываем, честно
+ * оставляем пусто (лучше «нет себестоимости», чем чужая цифра в марже).
+ */
+export type ResolvedCost = { cost: number; entry: CostEntry; key: string; via: 'exact' | 'normalized' | 'variant' };
+
+const squash = (s: string) => s.replace(/\s+/g, '');
+/** Хвост-вариант: буквенный размер (S…5XL), числовой размер (48 или «42-44») или номер партии. */
+const VARIANT_TAIL = /^(?:X{0,3}S|M|X{0,3}L|\d?XL|\d{2,6}|\d{2}-\d{2})$/;
+const stripFbs = (s: string) => s.replace(/-?FBS\d*$/, '').replace(/-+$/, '');
+
+export function resolveCost(sku: string, data: CostsFile = load()): ResolvedCost | null {
+  const items = data.items;
+  const k = normSku(sku);
+  if (!k) return null;
+  const hit = (key: string, via: ResolvedCost['via']): ResolvedCost | null => {
+    const e = items[key];
+    return e && e.cost > 0 ? { cost: e.cost, entry: e, key, via } : null;
+  };
+  const exact = hit(k, 'exact');
+  if (exact) return exact;
+
+  // Индекс «артикул без пробелов» → ключ справочника (в таблице тоже бывают пробелы).
+  const squashed = new Map<string, string>();
+  for (const key of Object.keys(items)) squashed.set(squash(key), key);
+  const base = stripFbs(squash(k));
+  for (const cand of [squash(k), base]) {
+    const key = squashed.get(cand);
+    if (key) { const r = hit(key, 'normalized'); if (r) return r; }
+  }
+
+  // Варианты: ключ таблицы = base + «-» + один сегмент (размер, номер партии).
+  const prefix = base + '-';
+  const variants: { key: string; e: CostEntry }[] = [];
+  for (const [sq, key] of squashed) {
+    if (!sq.startsWith(prefix)) continue;
+    const tail = sq.slice(prefix.length);
+    // Только размер или номер партии: «-PRO», «-DUBL», цвет — это ДРУГОЙ товар.
+    if (!VARIANT_TAIL.test(tail)) continue;
+    const e = items[key];
+    if (e && e.cost > 0) variants.push({ key, e });
+  }
+  if (!variants.length) return null;
+  const costs = variants.map(v => v.e.cost);
+  const min = Math.min(...costs), max = Math.max(...costs);
+  if (max > min * 1.15) return null;
+  // Берём наибольшую: маржа скорее занижена, чем завышена.
+  const top = variants.find(v => v.e.cost === max)!;
+  return { cost: max, entry: top.e, key: top.key, via: 'variant' };
+}
+
 /** Себестоимость одного артикула или null, если её не задавали. */
 export function getCost(sku: string): number | null {
-  const e = load().items[normSku(sku)];
-  return e && e.cost > 0 ? e.cost : null;
+  return resolveCost(sku)?.cost ?? null;
 }
 
 /**
@@ -163,7 +230,7 @@ export function parseCostsCsv(text: string): { items: Record<string, number>; no
  * Если артикул есть в таблице — она главнее, иначе учёт разъедется.
  */
 export async function syncFromSklad(): Promise<{
-  updated: number; kept: number; total: number; error?: string;
+  updated: number; kept: number; total: number; error?: string; syncedAt?: string;
 }> {
   const { fetchSkladCosts } = await import('./sheets');
   const { items, error } = await fetchSkladCosts();
@@ -183,11 +250,17 @@ export async function syncFromSklad(): Promise<{
   for (const { sku, cost } of items) {
     const key = normSku(sku);
     const prev = data.items[key];
-    if (prev && prev.source !== 'sheet' && prev.cost === cost) continue;
-    data.items[key] = { cost: Math.round(cost * 100) / 100, source: 'sheet', updatedAt: now };
+    const rounded = Math.round(cost * 100) / 100;
+    // Цифра не изменилась — запись не трогаем (дата обновления остаётся честной).
+    if (prev && prev.cost === rounded) {
+      if (prev.source !== 'sheet') { data.items[key] = { ...prev, source: 'sheet' }; }
+      continue;
+    }
+    data.items[key] = { cost: rounded, source: 'sheet', updatedAt: now };
     updated++;
   }
-  data.updatedAt = now;
+  if (updated) data.updatedAt = now;
+  data.syncedAt = now;
   save(data);
 
   // Артикулы справочника, которых в этот раз в таблице НЕ оказалось, остаются со
@@ -201,7 +274,7 @@ export async function syncFromSklad(): Promise<{
   }
 
   const total = Object.keys(data.items).length;
-  return { updated, kept: total - updated, total };
+  return { updated, kept: total - updated, total, syncedAt: now };
 }
 
 export function coverage(skus: string[]): { known: string[]; missing: string[] } {
@@ -210,7 +283,32 @@ export function coverage(skus: string[]): { known: string[]; missing: string[] }
   for (const s of skus) {
     const k = normSku(s);
     if (!k) continue;
-    (data.items[k]?.cost > 0 ? known : missing).push(k);
+    (resolveCost(k, data) ? known : missing).push(k);
   }
   return { known, missing };
+}
+
+/**
+ * Фоновая сверка с таблицей «Склад» — отдельным таймером, не в общей цепочке
+ * прогрева (01.10.2026). Раньше сверка стояла первой в цепочке warm-extras, а та
+ * могла не завершаться (ждёт рекламу WB, конкурентов и т.д.) — и себестоимость
+ * жила на значениях от 25.09: за неделю в таблице поменялось 57 цифр.
+ * Чтение — два лёгких запроса к Sheets API, раз в 5 минут это копейки.
+ */
+let syncInFlight: Promise<unknown> | null = null;
+export function syncFromSkladThrottled(maxAgeMs = 0): Promise<unknown> {
+  const last = Date.parse(load().syncedAt ?? '') || 0;
+  if (maxAgeMs > 0 && Date.now() - last < maxAgeMs) return Promise.resolve(null);
+  if (!syncInFlight) {
+    syncInFlight = syncFromSklad()
+      .then(r => { if (r.error || r.updated) console.warn(`[costs] сверка с «Складом»: ${r.error ? `ошибка — ${r.error}` : `изменилось ${r.updated}, всего ${r.total}`}`); return r; })
+      .catch(e => console.warn('[costs] сверка с «Складом» упала:', (e as Error).message))
+      .finally(() => { syncInFlight = null; });
+  }
+  return syncInFlight;
+}
+
+export function scheduleCostsSync(intervalMs = 5 * 60_000): void {
+  setTimeout(() => { void syncFromSkladThrottled(); }, 30_000).unref?.();
+  setInterval(() => { void syncFromSkladThrottled(); }, intervalMs).unref?.();
 }

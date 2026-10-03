@@ -15,6 +15,7 @@ export type OzonShowcase = {
   items: Record<string, OzonShowcaseRow>;
   count: number;
   requested: number;
+  rejected?: number;
   fetchedAt: number;
   error?: string;
 };
@@ -123,6 +124,28 @@ export async function getOzonShowcase(): Promise<OzonShowcase | null> {
  * «Возможно, вам понравится» — чужие товары от других продавцов), молча
  * пропускаются: их sku просто не находится в карте соответствия.
  */
+/** Цены, которые на этом проходе «слиплись»: одна и та же цена покупателя у
+ *  трёх и более товаров с РАЗНОЙ ценой ЛК. Одинаковый СПП до рубля при разных
+ *  ЛК невозможен, значит парсер взял цену не из своей плитки (03.10.2026 так
+ *  вышло у 39 из 42 товаров). Такие цифры не записываем: вчерашние данные
+ *  честнее подменённых. Три и более — чтобы не ловить пару вариантов одного
+ *  товара с общей ценой. Экспортируется для scripts/check-ozon-showcase.ts. */
+export function findStickyPrices(cand: { price: number; greyPrice?: number }[]): Set<number> {
+  const byPrice = new Map<number, { price: number; greyPrice?: number }[]>();
+  for (const c of cand) {
+    const a = byPrice.get(c.price) ?? [];
+    a.push(c);
+    byPrice.set(c.price, a);
+  }
+  const sticky = new Set<number>();
+  for (const [price, group] of byPrice) {
+    if (group.length < 3) continue;
+    const greys = new Set(group.map((g) => g.greyPrice || 0).filter(Boolean));
+    if (greys.size >= 3) sticky.add(price);
+  }
+  return sticky;
+}
+
 export async function ingestOzonShowcase(
   entries: Record<string, { price: number; oldPrice?: number }>
 ): Promise<OzonShowcase> {
@@ -133,7 +156,9 @@ export async function ingestOzonShowcase(
   // этот момент и пересчитывать цену покупателя, если ЛК-цена поменяется до
   // следующего снятия (см. LiveOzonPricing.tsx — тот же приём, что и для WB).
   const { bySku, lkPrice } = await ownGoodsOzon();
-  let updated = 0;
+
+  type Cand = { offerId: string; price: number; oldPrice?: number; greyPrice?: number };
+  const cand: Cand[] = [];
   for (const [sku, v] of Object.entries(entries || {})) {
     const price = Number(v?.price) || 0;
     if (!sku || price <= 0) continue;
@@ -141,13 +166,38 @@ export async function ingestOzonShowcase(
     if (!offerId) continue; // не наш товар — рекомендательная карусель Ozon
     const oldPrice = v?.oldPrice ? Number(v.oldPrice) : rows[offerId]?.oldPrice;
     const greyPrice = lkPrice.get(offerId) || rows[offerId]?.greyPrice;
-    rows[offerId] = { price, oldPrice, greyPrice, at: now };
+    cand.push({ offerId, price, oldPrice, greyPrice });
+  }
+
+  // Защита от «слипшихся» цен (03.10.2026). Если вёрстка витрины меняется и
+  // парсер берёт цену не из своей плитки, одна цифра достаётся сразу многим
+  // товарам — именно так 39 из 42 товаров на листе Ozon получили 7 одинаковых
+  // цен. Признак, по которому это видно без похода на сайт: одна и та же цена
+  // покупателя у трёх и более товаров с РАЗНОЙ ценой ЛК. Одинаковый СПП до
+  // рубля при разных ЛК невозможен, поэтому такие цифры не записываем —
+  // лучше оставить вчерашние данные, чем подменить их чужими.
+  const sticky = findStickyPrices(cand);
+
+  let updated = 0;
+  let rejected = 0;
+  for (const c of cand) {
+    if (sticky.has(c.price)) { rejected++; continue; }
+    rows[c.offerId] = { price: c.price, oldPrice: c.oldPrice, greyPrice: c.greyPrice, at: now };
     updated++;
   }
+  if (rejected > 0) {
+    noteSwallowed(
+      'ozon-showcase',
+      `отброшено ${rejected} «слипшихся» цен: одна цифра у товаров с разной ценой ЛК — похоже, изменилась вёрстка витрины Ozon`,
+      new Error('sticky-prices'),
+    );
+  }
+
   const result: OzonShowcase = {
     items: rows,
     count: Object.keys(rows).length,
     requested: updated,
+    rejected,
     fetchedAt: now,
   };
   await cacheSet(CACHE_KEY, result, TTL_MS);

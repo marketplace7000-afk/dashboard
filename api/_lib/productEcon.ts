@@ -26,7 +26,7 @@
  *     ноль, второе это отсутствие данных. Смешивать их нельзя: в первом случае
  *     прибыль выше, во втором мы просто не знаем.
  */
-import { getCosts, normSku } from './costs';
+import { getCosts, normSku, resolveCost } from './costs';
 import { getWbCardEcon } from './wbCardEcon';
 import { getWbBoxTariffs } from './wbBoxTariffs';
 import { collectAdsBySku } from './agents/adsAdvisor';
@@ -269,10 +269,11 @@ export async function buildProductEcon(days = 7): Promise<EconReport> {
   for (const d of (fact?.diagnostics ?? [])) diagnostics.push('Факт логистики: ' + d);
 
   const costOf = (sku: string): Val => {
-    const c = costs.items[normSku(sku)];
-    return c && c.cost > 0
-      ? val(c.cost, 'reference', c.source === 'sheet' ? 'из таблицы «Склад»' : 'из справочника')
-      : none('себестоимость не заведена — заполните её в разделе «Себестоимость»');
+    // Не только точное совпадение: размеры, номер партии и FBS-дубли (см. resolveCost).
+    const c = resolveCost(sku, costs);
+    if (!c) return none('себестоимости нет в таблице «Склад» — проверьте артикул в листе');
+    const from = c.entry.source === 'sheet' ? 'из таблицы «Склад»' : 'из справочника';
+    return val(c.cost, 'reference', c.via === 'exact' ? from : `${from}, по артикулу ${c.key}`);
   };
 
   const period = `${days} дн.`;

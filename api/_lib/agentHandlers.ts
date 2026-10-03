@@ -46,6 +46,16 @@ async function fillShowcaseParams(marketplace: Marketplace): Promise<Record<stri
       const map = await getSkuMap().catch(() => ({} as Record<string, string>));
       const skus = Object.keys(map);
       if (skus.length) params.skus = skus;
+      // Какие товары в наличии и их sku — агент откроет карточки тех из них,
+      // кого Ozon не вывел на страницы магазина (03.10.2026: S2000-PRO и ещё
+      // два товара с остатком числились «не продаются»). Только при полных
+      // остатках: неполный ответ не повод открывать или хоронить карточки.
+      try {
+        const { getOzonStock } = await import('./ozonStock');
+        const { inStockOffers } = await import('../../shared/ozonInStock');
+        const st = await getOzonStock();
+        if (st.complete && skus.length) params.in_stock_offers = inStockOffers(map, st.byOffer);
+      } catch { /* без остатков — старое поведение: только витрина магазина */ }
     }
   } catch { /* пустые skus = агент снимет всё, что найдёт на витрине */ }
   return params;

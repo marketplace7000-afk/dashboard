@@ -622,9 +622,10 @@ export async function handleCron(req: VercelRequest, res: VercelResponse) {
         // и без обновления она тихо разъезжается со счётом Anthropic.
         await refreshUsdRate();
         // Себестоимость из таблицы клиента: она источник истины, мы её кэшируем.
-        const { syncFromSklad } = await import('./costs');
-        const sync = await syncFromSklad().catch(() => null);
-        console.warn(`[warm-extras] себестоимость из таблицы: ${sync?.error ? `не вышло — ${sync.error}` : `обновлено ${sync?.updated ?? 0}, всего ${sync?.total ?? 0}`}`);
+        // Основная сверка идёт своим таймером раз в 5 мин (costs.scheduleCostsSync);
+        // здесь — только если она почему-то давно не проходила.
+        const { syncFromSkladThrottled } = await import('./costs');
+        await syncFromSkladThrottled(10 * 60_000);
 
         const [{ getBiSummary }, { getPenalties }] = await Promise.all([
           import('./bi'), import('./penalties'),

@@ -144,6 +144,7 @@ export function detectSkladLayout(rows: any[][]): SkladLayout {
   return { skuCol: 1, costCol: 8, headerRow: 0, byHeader: false };
 }
 
+let lastSkladSig = '';
 function parseSkladRows(rows: any[][]): SkladCost[] {
   const items: SkladCost[] = [];
   const lay = detectSkladLayout(rows);
@@ -156,8 +157,13 @@ function parseSkladRows(rows: any[][]): SkladCost[] {
     if (/^sku/i.test(sku)) continue;                       // повторный заголовок
     items.push({ sku, cost });
   }
-  console.log(`[sheets] «Склад»: артикул в колонке ${lay.skuCol + 1}, закуп в ${lay.costCol + 1}` +
-    `${lay.byHeader ? ' (по заголовкам)' : ' (по номеру!)'} · строк с ценой ${items.length}`);
+  // Сверка идёт раз в 5 минут — пишем в журнал только когда раскладка или число строк поменялись.
+  const sig = `${lay.skuCol}/${lay.costCol}/${lay.byHeader}/${items.length}`;
+  if (sig !== lastSkladSig) {
+    lastSkladSig = sig;
+    console.log(`[sheets] «Склад»: артикул в колонке ${lay.skuCol + 1}, закуп в ${lay.costCol + 1}` +
+      `${lay.byHeader ? ' (по заголовкам)' : ' (по номеру!)'} · строк с ценой ${items.length}`);
+  }
   return items;
 }
 

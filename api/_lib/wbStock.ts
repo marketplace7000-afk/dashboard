@@ -13,7 +13,21 @@ import { cacheGet, cacheSet, isFresh } from './cache';
 import { fetchAllWbCards } from './wbCards';
 
 const CACHE_KEY = 'wb-stock:v2'; // v2: + FBS (склады продавца, marketplace-api v3)
-const TTL_MS = 30 * 60_000; // остатки меняются в течение дня чаще, чем цены
+// 01.10.2026: 30 → 5 мин — фильтр «В продаже» должен замечать распродажу за ≤ 5 мин.
+// Отчёт warehouse_remains WB разрешает 1 запрос в минуту — 5 минут с запасом.
+const TTL_MS = 5 * 60_000;
+// Пока кэш моложе этого — отдаём его сразу, а свежий отчёт строим в фоне
+// (отчёт WB асинхронный, до 90 с; держать на нём страницу цен нельзя).
+const SERVE_STALE_MS = 2 * 60 * 60_000;
+let refreshing: Promise<WbStock> | null = null;
+function refreshInBackground(): Promise<WbStock> {
+  if (!refreshing) {
+    refreshing = compute()
+      .then(async fresh => { await cacheSet(CACHE_KEY, fresh, TTL_MS); return fresh; })
+      .finally(() => { refreshing = null; });
+  }
+  return refreshing;
+}
 
 export type WbStock = {
   byNm: Record<string, number>; // nmId (строкой) → остаток FBO (склады WB) + FBS (склады продавца)
@@ -82,7 +96,9 @@ async function compute(): Promise<WbStock> {
   }
   const rows: any[] = await downloadRes.json();
   const byNm: Record<string, number> = {};
-  const TRANSIT_NAMES = new Set(['В пути до получателей', 'В пути возврата на склад WB']);
+  // 01.10.2026: WB пишет «В пути возвраты на склад WB» (не «возврата») — из-за
+  // расхождения в одну букву возврат в пути считался остатком (CP-KVDRT-PLUS).
+  const TRANSIT_NAMES = new Set(['В пути до получателей', 'В пути возврата на склад WB', 'В пути возвраты на склад WB']);
   const TOTAL_NAME = 'Всего находится на складах';
   for (const r of Array.isArray(rows) ? rows : []) {
     const nm = String(r?.nmId ?? '');
@@ -144,10 +160,12 @@ async function computeFbs(): Promise<Record<string, number>> {
 export async function getWbStock(noCache = false): Promise<WbStock> {
   const cached = await cacheGet<WbStock>(CACHE_KEY);
   if (!noCache && isFresh(cached)) return cached!.data;
+  if (!noCache && cached?.data && Date.now() - cached.data.fetchedAt < SERVE_STALE_MS) {
+    refreshInBackground().catch(e => console.warn('[wb-stock] фоновое обновление не удалось:', (e as Error).message));
+    return cached.data;
+  }
   try {
-    const fresh = await compute();
-    await cacheSet(CACHE_KEY, fresh, TTL_MS);
-    return fresh;
+    return await refreshInBackground();
   } catch (e) {
     if (cached?.data) return cached.data;
     throw e;

@@ -1,5 +1,5 @@
 import { fetchWithRetry } from './fetchRetry';
-import { cacheGet, cacheSet, makeUpstreamCacheKey } from './cache';
+import { cacheGet, cacheSet, isFresh, makeUpstreamCacheKey } from './cache';
 import { noteSwallowed } from './log';
 
 // Кэш «витрины» Ozon — цены, которые видит покупатель на публичной странице
@@ -76,15 +76,25 @@ async function buildSkuMap(): Promise<Record<string, string>> {
 
 export async function getSkuMap(): Promise<Record<string, string>> {
   const cached = await cacheGet<Record<string, string>>(SKU_MAP_CACHE_KEY);
-  if (cached?.data && Object.keys(cached.data).length) return cached.data;
+  const have = !!cached?.data && Object.keys(cached.data).length > 0;
+  // 03.10.2026: раньше здесь возвращалась ЛЮБАЯ запись кэша — cacheGet не
+  // проверяет срок, а кэш живёт на диске, поэтому карта, построенная один раз,
+  // не обновлялась никогда. Товары, заведённые позже (ALLPOWERS S2000-PRO,
+  // R2500-V2, SUNPANEL), в карте отсутствовали: агент считал их плитки на
+  // витрине чужими, ingest выбрасывал их цены, на листе Ozon висела цена
+  // «факт» из отчёта (S2000-PRO 65 465 ₽ при 76 000 на витрине). Теперь карта
+  // пересобирается по сроку (6 ч), а при ошибке API берём прошлую.
+  if (have && isFresh(cached)) return cached!.data;
   try {
     const map = await buildSkuMap();
-    if (Object.keys(map).length) await cacheSet(SKU_MAP_CACHE_KEY, map, SKU_MAP_TTL_MS);
-    return map;
+    if (Object.keys(map).length) {
+      await cacheSet(SKU_MAP_CACHE_KEY, map, SKU_MAP_TTL_MS);
+      return map;
+    }
   } catch (e) {
     noteSwallowed('ozon-showcase', 'карта sku→offer_id не построена', e);
-    return {};
   }
+  return have ? cached!.data : {};
 }
 
 // Текущая цена ЛК (для запоминания СПП%) — из уже прогретого кэша

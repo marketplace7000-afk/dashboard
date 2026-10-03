@@ -53,6 +53,12 @@ export const wbCardEconRes = createSideResource<{
 export type WbStock = { byNm: Record<string, number>; fboByNm?: Record<string, number>; fbsByNm?: Record<string, number>; fbsError?: string; fetchedAt: number };
 export const wbStockRes = createSideResource<WbStock>('/api/wb-stock');
 
+export type OzonStock = { byOffer: Record<string, number>; fboByOffer?: Record<string, number>; fbsByOffer?: Record<string, number>; complete: boolean; total: number; fetchedAt: number };
+export const ozonStockRes = createSideResource<OzonStock>('/api/ozon-stock');
+
+/** Как часто лист цен перечитывает остатки и себестоимость, пока открыт (01.10.2026). */
+export const LIVE_POLL_MS = 5 * 60_000;
+
 export const wbBoxTariffsRes = createSideResource<{
   deliveryBase: number; deliveryLiter: number; deliveryCoef: number;
   storageBase: number; storageLiter: number;

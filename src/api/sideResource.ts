@@ -62,16 +62,28 @@ export function createSideResource<T>(url: string) {
   return {
     refresh: (force = false) => load(force),
 
-    /** Хук: подписка + автозагрузка, если данных нет или они протухли. */
-    use(): SideResource<T> {
+    /**
+     * Хук: подписка + автозагрузка, если данных нет или они протухли.
+     * pollMs — перечитывать с сервера, пока страница открыта и вкладка видна
+     * (остатки и себестоимость: клиент ждёт изменений за ≤ 5 минут, 01.10.2026).
+     */
+    use(pollMs?: number): SideResource<T> {
       const [, force] = useState(0);
       useEffect(() => {
         const cb = () => force(x => x + 1);
         subs.add(cb);
-        const stale = !state.fetchedAt || Date.now() - state.fetchedAt > STALE_MS;
+        const staleMs = pollMs ? Math.min(pollMs, STALE_MS) : STALE_MS;
+        const stale = !state.fetchedAt || Date.now() - state.fetchedAt > staleMs;
         if (stale && !state.loading) void load(false);
-        return () => { subs.delete(cb); };
-      }, []);
+        const t = pollMs
+          ? setInterval(() => {
+              if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+              if (state.fetchedAt && Date.now() - state.fetchedAt < pollMs - 1000) return;
+              if (!state.loading) void load(false);
+            }, Math.max(15_000, Math.round(pollMs / 5)))
+          : null;
+        return () => { subs.delete(cb); if (t) clearInterval(t); };
+      }, [pollMs]);
       return { ...state, refresh: (f = false) => load(f) };
     },
   };

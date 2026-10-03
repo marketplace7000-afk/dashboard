@@ -23,6 +23,7 @@ import {
   SCENARIO_STAGES, type AgentSettings, type AgentTask, type Marketplace,
 } from '../../../shared/agents';
 import * as api from '../api';
+import { pickDirectCards, pickCardPrices } from '../../../shared/ozonInStock';
 import { newPage, sleep, randBetween, looksLikeChallenge } from '../chrome';
 
 const STAGES = SCENARIO_STAGES.showcase_prices;
@@ -242,19 +243,31 @@ async function wbDirectCards(page: Page, task: AgentTask, settings: AgentSetting
 async function scrapeOzonTiles(page: Page): Promise<Items> {
   return page.evaluate(`(() => {
     const out = {};
+    const SKU = (h) => { const m = String(h || '').match(/\\/product\\/[^/]*?-?(\\d{6,})\\/?(\\?|$)/); return m ? m[1] : ''; };
     const parse = (t) => { const n = Number(String(t).replace(/[^\\d]/g, '')); return Number.isFinite(n) && n > 0 && n < 10000000 ? n : 0; };
     for (const a of Array.from(document.querySelectorAll('a[href*="/product/"]'))) {
-      const m = (a.getAttribute('href') || '').match(/\\/product\\/[^/]*?-?(\\d{6,})\\/?(\\?|$)/);
-      if (!m) continue;
-      const sku = m[1];
-      if (out[sku]) continue;
-      // Плитка: ближайший контейнер со знаком ₽. Первая цена — актуальная,
-      // вторая (зачёркнутая) — старая. Цену «с Ozon Картой» пропускаем.
-      let node = a;
-      for (let up = 0; up < 4 && node; up++) node = node.parentElement;
-      const scope = node || a;
+      const sku = SKU(a.getAttribute('href'));
+      if (!sku || out[sku]) continue;
+      // Плитка — самый верхний предок, в котором ВСЕ ссылки на товар ведут на
+      // этот же SKU: как только у предка появляется ссылка на другой товар,
+      // граница плитки пройдена. В плитке ссылок обычно несколько (картинка,
+      // заголовок), поэтому считаем именно разные SKU, а не число ссылок.
+      // 03.10.2026: здесь был подъём ровно на 4 родителя. Вёрстка Ozon
+      // изменилась — scope охватывал 112 карточек разом, и цена первой плитки
+      // блока доставалась всем товарам блока (у 39 из 42 товаров на листе
+      // стояли 7 одинаковых цифр). См. claude/статус-разработки.md.
+      let node = a, tile = null;
+      for (let up = 0; up < 12 && node.parentElement; up++) {
+        const p = node.parentElement;
+        const skus = new Set(Array.from(p.querySelectorAll('a[href*="/product/"]')).map((x) => SKU(x.getAttribute('href'))).filter(Boolean));
+        if (skus.size > 1) break;
+        node = p; tile = p;
+      }
+      if (!tile) continue;
+      // Первая цена — актуальная, вторая (зачёркнутая) — старая.
+      // Цену «с Ozon Картой» пропускаем.
       const prices = [];
-      for (const el of Array.from(scope.querySelectorAll('span'))) {
+      for (const el of Array.from(tile.querySelectorAll('span'))) {
         const txt = el.textContent || '';
         if (!txt.includes('₽') || txt.length > 24) continue;
         if (/картой/i.test(((el.parentElement && el.parentElement.textContent) || '').slice(0, 60))) continue;
@@ -308,39 +321,47 @@ async function collectOzon(page: Page, task: AgentTask, settings: AgentSettings)
   return { items, missing, outOfStock: [] };
 }
 
-async function ozonDirectCards(page: Page, task: AgentTask, settings: AgentSettings, missing: string[], items: Items, oos: string[]): Promise<number> {
+async function ozonDirectCards(page: Page, task: AgentTask, settings: AgentSettings, groups: { offer: string; skus: string[] }[], items: Items, oos: string[]): Promise<number> {
   let got = 0;
-  for (let i = 0; i < missing.length; i++) {
-    const sku = missing[i];
-    await pacedGoto(page, `https://www.ozon.ru/product/${sku}/`, settings, task.id, settings.card_pause_ms);
-    const body = await page.evaluate(() => document.body?.innerText ?? '');
-    if (looksLikeChallenge(page.url(), body)) throw new Challenge('ozon', 'captcha');
-    // Товара нет в наличии/в архиве — Ozon уводит на поиск с product_id=.
-    if (/\/search\//.test(page.url()) || /нет в наличии|товар закончился|распродан/i.test(body.slice(0, 3000))) {
-      oos.push(sku);
-      checkCancelled(await api.progress(task.id, {
-        stage: 'direct_cards', stage_index: 3, stages_total: STAGES.length,
-        items_done: i + 1, items_total: missing.length, current_item: sku,
-        message: `Ozon, прямые карточки: ${i + 1} из ${missing.length} (нет в наличии: ${oos.length})`,
-      }, i === 0));
-      continue;
-    }
-    const price = await (page.evaluate(`(() => {
-      // Веб-цена без Ozon Карты: в webPrice-стейте это price (cardPrice — с картой).
-      for (const sc of Array.from(document.querySelectorAll('script[type="application/json"]'))) {
-        const t = sc.textContent || '';
-        if (!t.includes('cardPrice') && !t.includes('"price"')) continue;
-        const m = t.match(/"price"\\s*:\\s*"([\\d\\s\\u00a0]+)\\s*₽"/) || t.match(/"price"\\s*:\\s*(\\d+)/);
-        if (m) { const n = Number(String(m[1]).replace(/[^\\d]/g, '')); if (n > 0) return n; }
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    let done = false;
+    for (const sku of g.skus) {
+      await pacedGoto(page, `https://www.ozon.ru/product/${sku}/`, settings, task.id, settings.card_pause_ms);
+      const body = await page.evaluate(() => document.body?.innerText ?? '');
+      if (looksLikeChallenge(page.url(), body)) throw new Challenge('ozon', 'captcha');
+      // Товара нет в наличии/в архиве — Ozon уводит на поиск с product_id=.
+      if (/\/search\//.test(page.url()) || /нет в наличии|товар закончился|распродан/i.test(body.slice(0, 3000))) continue;
+      // 03.10.2026: цена в JSON-скриптах страницы больше не лежит — снимаем
+      // числа с виджета webPrice («76 000 ₽ С банками · 84 136 ₽ · 139 287 ₽»).
+      // Код СТРОКОЙ — см. scrapeOzonTiles (__name).
+      const nums = await (page.evaluate(`(() => {
+        const parse = (t) => { const n = Number(String(t).replace(/[^\\d]/g, '')); return Number.isFinite(n) && n > 0 && n < 10000000 ? n : 0; };
+        const w = document.querySelector('[data-widget="webPrice"]');
+        const out = [];
+        if (w) for (const el of Array.from(w.querySelectorAll('span'))) {
+          const t = el.textContent || '';
+          if (!t.includes('₽') || t.length > 24) continue;
+          const n = parse(t);
+          if (n && !out.includes(n)) out.push(n);
+        }
+        return out;
+      })()`) as Promise<number[]>).catch(() => [] as number[]);
+      const p = pickCardPrices(nums);
+      if (p) {
+        items[sku] = { price: p.price, oldPrice: p.oldPrice };
+        got++;
+        done = true;
+        await api.log(task.id, 'info', `Ozon ${g.offer} (${sku}): с карточки ${p.price} ₽${p.noCard ? `, без Ozon Карты ${p.noCard} ₽` : ''}`);
+        break;
       }
-      return 0;
-    })()`) as Promise<number>).catch(() => 0);
-    if (price > 0) { items[sku] = { price }; got++; }
-    else await api.log(task.id, 'warn', `Ozon ${sku}: цена на карточке не найдена`);
+      await api.log(task.id, 'warn', `Ozon ${g.offer} (${sku}): цена на карточке не найдена`);
+    }
+    if (!done) oos.push(g.offer);
     checkCancelled(await api.progress(task.id, {
       stage: 'direct_cards', stage_index: 3, stages_total: STAGES.length,
-      items_done: i + 1, items_total: missing.length, current_item: sku,
-      message: `Ozon, прямые карточки: ${i + 1} из ${missing.length}`,
+      items_done: i + 1, items_total: groups.length, current_item: g.offer,
+      message: `Ozon, прямые карточки: ${i + 1} из ${groups.length}${oos.length ? ` (нет в наличии: ${oos.length})` : ''}`,
     }, i === 0));
   }
   return got;
@@ -372,15 +393,27 @@ export async function runShowcasePrices(task: AgentTask, settings: AgentSettings
     // существует, открывать его карточку бессмысленно (замечание клиента
     // 26.09). Прямые карточки — только по явному запросу в params.
     const MAX_DIRECT = 40;
-    const direct = task.params.direct_cards === true ? missing.slice(0, MAX_DIRECT) : [];
-    if (missing.length && !direct.length) {
-      await api.log(task.id, 'info', `${missing.length} товаров не найдено на витрине — считаю «не продаются», карточки не открываю; цену покупателя для них сервер посчитает по среднему СПП`);
-      outOfStock.push(...missing);
-      missing.length = 0;
+    // Исключение (03.10.2026): Ozon выводит на страницах магазина не все
+    // товары — S2000-PRO с остатком 46 шт. там не было, и он числился «не
+    // продаётся». Если сервер прислал, какие товары в наличии, открываем
+    // карточки ровно тех из них, кого обход магазина не нашёл.
+    const offers = task.params.in_stock_offers as Record<string, string[]> | undefined;
+    const groups: { offer: string; skus: string[] }[] = task.params.direct_cards === true
+      ? missing.slice(0, MAX_DIRECT).map((s) => ({ offer: s, skus: [s] }))
+      : (mp === 'ozon' && offers ? pickDirectCards(new Set(Object.keys(items)), offers, MAX_DIRECT) : []);
+    const direct = groups.flatMap((g) => g.skus);
+    const skipped = missing.filter((s) => !direct.includes(s));
+    if (skipped.length) {
+      await api.log(task.id, 'info', `${skipped.length} товаров не найдено на витрине и без остатка — считаю «не продаются», карточки не открываю; цену покупателя для них сервер посчитает по среднему СПП`);
+      outOfStock.push(...skipped);
     }
+    if (groups.length) {
+      await api.log(task.id, 'info', `В наличии, но нет на страницах магазина: ${groups.map((g) => g.offer).join(', ')} — открываю карточки`);
+    }
+    missing.length = 0;
     const oosDirect: string[] = [];
-    const foundDirect = direct.length
-      ? (mp === 'wb' ? await wbDirectCards(page, task, settings, direct, items) : await ozonDirectCards(page, task, settings, direct, items, oosDirect))
+    const foundDirect = groups.length
+      ? (mp === 'wb' ? await wbDirectCards(page, task, settings, direct, items) : await ozonDirectCards(page, task, settings, groups, items, oosDirect))
       : 0;
     outOfStock.push(...oosDirect);
 

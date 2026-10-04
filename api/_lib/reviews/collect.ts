@@ -157,6 +157,7 @@ async function collectOzonQuestions(withHistory: boolean): Promise<{ total: numb
     lastId = r.last_id;
   }
   if (complete) markAnsweredExcept('ozon', 'question', ids);
+  await resolveOzonSkus().catch(e => rlog('warn', 'Ozon: товары по sku не определены', { error: String((e as Error).message).slice(0, 200) }));
 
   await collectOzonQuestionHistory(skuMap, withHistory);
   return { total: ids.size, added };
@@ -214,6 +215,36 @@ async function collectOzonQuestionHistory(skuMap: Record<string, string>, recent
       break;
     }
   }
+}
+
+/**
+ * Вопросы бывают и по архивным товарам (их нет в карте sku→артикул, она строится по
+ * активным) — дотягиваем артикул и название через v3/product/info/list по sku.
+ * Неопознанные sku запоминаем, чтобы не спрашивать каждый проход.
+ */
+async function resolveOzonSkus(): Promise<void> {
+  const d = getDb();
+  const tried = kvGet<Record<string, number>>('ozsku_tried', {});
+  const skus = (d.prepare(`SELECT DISTINCT sku FROM items WHERE marketplace = 'ozon' AND sku IS NOT NULL
+    AND (offer_id IS NULL OR product_name IS NULL) LIMIT 2000`).all() as any[])
+    .map(r => String(r.sku)).filter(s => !tried[s] || Date.now() - tried[s] > 7 * 86400_000);
+  for (let i = 0; i < skus.length; i += 100) {
+    const part = skus.slice(i, i + 100);
+    const r = await ozonPost('/v3/product/info/list', { sku: part.map(Number) });
+    const bySku = new Map<string, any>();
+    for (const it of r?.items || []) {
+      if (it?.sku) bySku.set(String(it.sku), it);
+      for (const s of it?.sources || []) if (s?.sku) bySku.set(String(s.sku), it);
+    }
+    for (const sku of part) {
+      const it = bySku.get(sku);
+      tried[sku] = Date.now();
+      if (!it) continue;
+      d.prepare(`UPDATE items SET offer_id = COALESCE(offer_id, ?), product_name = COALESCE(product_name, ?)
+        WHERE marketplace = 'ozon' AND sku = ?`).run(it.offer_id ? String(it.offer_id) : null, it.name || null, sku);
+    }
+  }
+  kvSet('ozsku_tried', tried);
 }
 
 // ─── Общий проход ──────────────────────────────────────────────────────────

@@ -78,13 +78,16 @@ async function ozonPost(path: string, body: unknown): Promise<any> {
 
 async function refreshOzonCards(): Promise<number> {
   const items: { product_id: number; offer_id: string }[] = [];
-  let lastId = '';
-  for (let page = 0; page < 10; page++) {
-    const pl = await ozonPost('/v3/product/list', { filter: { visibility: 'ALL' }, last_id: lastId, limit: 1000 });
-    const arr: any[] = pl?.result?.items ?? [];
-    for (const it of arr) if (it.product_id && it.offer_id) items.push({ product_id: it.product_id, offer_id: String(it.offer_id) });
-    lastId = pl?.result?.last_id ?? '';
-    if (!lastId || arr.length < 1000) break;
+  // Архивные тоже: по ним приходят вопросы, а карточка остаётся на площадке.
+  for (const visibility of ['ALL', 'ARCHIVED']) {
+    let lastId = '';
+    for (let page = 0; page < 10; page++) {
+      const pl = await ozonPost('/v3/product/list', { filter: { visibility }, last_id: lastId, limit: 1000 });
+      const arr: any[] = pl?.result?.items ?? [];
+      for (const it of arr) if (it.product_id && it.offer_id) items.push({ product_id: it.product_id, offer_id: String(it.offer_id) });
+      lastId = pl?.result?.last_id ?? '';
+      if (!lastId || arr.length < 1000) break;
+    }
   }
   let n = 0;
   for (const it of items) {

@@ -240,7 +240,8 @@ export async function pdfKnowledge(url: string, name: string, model: string): Pr
     if (letters(text) >= Math.min(800, 60 * pages)) return { text: text.slice(0, 80_000), via: 'pdftotext' };
 
     // Скан: первые 12 страниц в JPEG 80 dpi.
-    await run('pdftoppm', ['-jpeg', '-r', '80', '-l', '12', file, join(dir, 'p')], { timeout: 180_000 });
+    // -scale-to: длинная сторона не больше 1600 px (у Claude предел 8000 px; развёртки коробок бывают огромными).
+    await run('pdftoppm', ['-jpeg', '-r', '80', '-scale-to', '1600', '-l', '12', file, join(dir, 'p')], { timeout: 180_000 });
     const imgs = (await readdir(dir)).filter(f => /^p-\d+\.jpg$/.test(f)).sort();
     const parts: string[] = [];
     let batch: { data: Buffer; mime: string }[] = [];
@@ -262,14 +263,22 @@ export async function pdfKnowledge(url: string, name: string, model: string): Pr
   }
 }
 
+/** Тип картинки по содержимому: «.jpg» на Диске нередко на деле PNG или WebP. */
+export function imageMime(buf: Buffer, name: string): string {
+  if (buf[0] === 0x89 && buf[1] === 0x50) return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
+  if (buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') return 'image/webp';
+  if (buf.slice(0, 3).toString() === 'GIF') return 'image/gif';
+  return /\.png$/i.test(name) ? 'image/png' : 'image/jpeg';
+}
+
 async function imageKnowledge(url: string, name: string, model: string): Promise<string> {
   const buf = await download(url, 40_000_000);
   if (buf.length > MAX_INLINE_BYTES) {
     // Большое фото — уменьшаем через poppler нельзя; пропускаем с понятной причиной.
     throw new SkipFile(`картинка ${(buf.length / 1e6).toFixed(1)} МБ — больше 3 МБ`);
   }
-  const ext = name.toLowerCase().split('.').pop();
-  return claudeOnImages([{ data: buf, mime: ext === 'png' ? 'image/png' : 'image/jpeg' }], IMG_PROMPT, model, 'index-image', 500);
+  return claudeOnImages([{ data: buf, mime: imageMime(buf, name) }], IMG_PROMPT, model, 'index-image', 500);
 }
 
 /** Файл осознанно пропущен (слишком большой и т.п.) — не ошибка, повторять не нужно. */

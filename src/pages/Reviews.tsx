@@ -1,4 +1,4 @@
-// Раздел «Отзывы и вопросы» — агент 4 (ТЗ-агент-отзывы v0.5, раздел 14).
+// Раздел «Отзывы и вопросы» — агент 2 (ТЗ-агент-отзывы v0.5, раздел 14).
 // Сбор, черновики и публикация — на сервере (/api/reviews/*); здесь только экран.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -475,7 +475,7 @@ function TelegramBlock({ stats, reload }: { stats: { pairs: number; dialogs: num
         <summary>Как выгрузить</summary>
         Telegram Desktop под аккаунтом, куда пишут покупатели → Настройки → Продвинутые → «Экспорт данных из Telegram» → только «Личные чаты» →
         формат «Машиночитаемый JSON», медиа не включать → «Экспортировать». Файл result.json лежит в Загрузки\Telegram Desktop\ChatExport_ДАТА.
-        Копию удобно хранить в «C:\Все для CLAUDE\Агент 4 — Отзывы и вопросы\02 Telegram-архивы».
+        Копию удобно хранить в «Рабочий стол\Agents\Agent ответов на отзывы и вопросы\02 Telegram-архивы».
       </details>
       <div className="row gap-8" style={{ marginTop: 8 }}>
         <input ref={input} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={e => e.target.files?.[0] && onFile(e.target.files[0])} />

@@ -437,9 +437,9 @@ function DiskBlock({ kb, reload }: { kb: Kb; reload: () => void }) {
           Последняя проверка {fmtDate(kb.diskSync.at)}: новых папок {kb.diskSync.added.length}, изменённых {kb.diskSync.changed.length}, удалённых {kb.diskSync.removed.length}.
         </div>
       )}
-      {kb.folders.some(f => !f.confirmed) && (
+      {kb.folders.some(f => !f.confirmed && !f.shared) && (
         <div className="chip" style={{ marginTop: 6 }}>
-          Новые папки без подтверждения: {kb.folders.filter(f => !f.confirmed).length}. ИИ уже использует подобранные артикулы — проверьте и нажмите «Подтвердить».
+          Новые папки без подтверждения: {kb.folders.filter(f => !f.confirmed && !f.shared).length}. ИИ уже использует подобранные артикулы — проверьте и нажмите «Подтвердить».
         </div>
       )}
       {ix.error && <div className="chip bad" style={{ marginTop: 6 }}>{ix.error}</div>}
@@ -470,15 +470,16 @@ function FolderRow({ fd, onPreview, open, preview, reload }: { fd: KbFolder; onP
   };
   return (
     <>
-      <tr style={{ borderTop: '1px solid var(--border)', background: fd.confirmed ? undefined : 'var(--bg-3)' }}>
-        <td style={{ padding: '6px 4px' }}>{fd.path}{!fd.confirmed && <span className="chip" style={{ marginLeft: 6 }}>новая</span>}</td>
+      <tr style={{ borderTop: '1px solid var(--border)', background: fd.confirmed || fd.shared ? undefined : 'var(--bg-3)' }}>
+        <td style={{ padding: '6px 4px' }}>{fd.path}{!fd.confirmed && !fd.shared && <span className="chip" style={{ marginLeft: 6 }}>новая</span>}</td>
         <td style={{ padding: '6px 4px' }}>
+          {fd.shared && !fd.confirmed ? <span className="muted" title="Артикул не нужен: материалы этой папки ИИ берёт для вложенных папок товаров или для набора, в который она входит">общая папка — без артикула</span> : (
           <div className="row gap-8">
             <input className="input" style={{ width: 220, padding: '4px 8px' }} value={v} onChange={e => setV(e.target.value)} placeholder="артикулы через запятую" />
             {fd.confirmed && v === fd.offerIds.join(', ')
               ? <span className="chip good">подтверждено</span>
               : <button className="btn btn-sm" onClick={confirmIt}>Подтвердить</button>}
-          </div>
+          </div>)}
         </td>
         <td style={{ padding: '6px 4px' }} className="muted">
           прочитано {done} из {fd.files.length}{errs.length ? <span style={{ color: 'var(--bad)' }} title={errs.map(e => `${e.name}: ${e.note}`).join('\n')}> · ошибок {errs.length}</span> : null}

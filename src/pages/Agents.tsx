@@ -9,7 +9,7 @@ const fmtNum = (n: number) => n.toLocaleString('ru-RU');
 const AGENTS: { key: string; name: string; role: string; where: string }[] = [
   { key: 'insights',            name: 'Аналитик · дневной инсайт',   role: 'Сводка и инсайты по продажам за период, действия на неделю', where: 'Дашборд' },
   { key: 'card-audit',          name: 'Аудит карточек (Vision)',     role: 'Анализ фото и контента карточки, оценка 0–100, рекомендации', where: 'Модули · Конкуренты' },
-  { key: 'review-reply',        name: 'Ответы на отзывы',            role: 'Черновики вежливых ответов на отзывы WB', where: 'Отзывы' },
+  { key: 'review-reply',        name: 'Ответы на отзывы',            role: 'Черновики вежливых ответов на отзывы WB', where: 'Отзывы и вопросы' },
   { key: 'price-reason',        name: 'Обоснование цены',            role: 'Объяснение рекомендации по цене относительно рынка', where: 'Цены' },
   { key: 'competitors-summary', name: 'Конкурентная разведка',       role: 'Сравнение нашей карточки с топом выдачи', where: 'Конкуренты' },
   { key: 'chat',                name: 'AI-копилот (чат)',            role: 'Чат-ассистент по данным платформы (кнопка ✨)', where: 'Везде' },

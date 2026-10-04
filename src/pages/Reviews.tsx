@@ -1,650 +1,550 @@
-import { useEffect, useState } from 'react';
+// Раздел «Отзывы и вопросы» — агент 4 (ТЗ-агент-отзывы v0.5, раздел 14).
+// Сбор, черновики и публикация — на сервере (/api/reviews/*); здесь только экран.
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  StarIcon, ChatCircleTextIcon, ArrowsClockwiseIcon, CheckCircleIcon, WarningIcon, InfoIcon, ArchiveIcon, CalendarBlankIcon, SparkleIcon, SpinnerIcon, CopyIcon, PaperPlaneRightIcon,
+  StarIcon, ArrowsClockwiseIcon, WarningIcon, SpinnerIcon, PaperPlaneRightIcon, SparkleIcon, ArrowSquareOutIcon,
 } from '@phosphor-icons/react';
-import { wbFeedbacks, wbAnswerFeedback, WbFeedback, wbQuestions, WbQuestion, wbAnswerQuestion } from '../api/marketplaces';
-import { aiReviewReply } from '../api/ai';
+import { reviewsApi, parseTelegramExport } from '../api/reviews';
+import {
+  DIRECTIONS, type ReviewItem, type ReviewView, type ReviewsOverview, type ReviewDirection, type KbFolder, type KbTextKey,
+} from '../../shared/reviews';
 
-type View = 'unanswered' | 'archive';
+const MP_COLOR = { wb: '#cb11ab', ozon: '#005bff' } as const;
+const MP_NAME = { wb: 'WB', ozon: 'Ozon' } as const;
 
-function fmtDate(iso: string): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' });
+function fmtDate(ms: number | null): string {
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
+function ago(ms: number | null): string {
+  if (!ms) return 'ещё не было';
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 1) return 'только что';
+  if (m < 60) return `${m} мин назад`;
+  return `${Math.round(m / 60)} ч назад`;
+}
+function usd(n: number): string { return `$${n.toFixed(2)}`; }
 
 function Stars({ n }: { n: number }) {
   return (
-    <div className="row" style={{ gap: 1 }}>
+    <span className="row" style={{ gap: 1, display: 'inline-flex' }}>
       {[1, 2, 3, 4, 5].map(i => (
-        <StarIcon
-          key={i}
-          size={14}
-          weight={i <= n ? 'fill' : 'regular'}
-          style={{ color: i <= n ? '#f59e0b' : 'var(--border)' }}
-        />
+        <StarIcon key={i} size={13} weight={i <= n ? 'fill' : 'regular'} style={{ color: i <= n ? '#f59e0b' : 'var(--border)' }} />
       ))}
-    </div>
+    </span>
   );
 }
 
-type AiState = { reply?: string; loading: boolean; error?: string };
-
-/** Детерминированный хеш строки — чтобы у одного отзыва всегда был один шаблон. */
-function hashCode(str: string): number {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
-  return h;
-}
-
-function WbReviewsPanel() {
-  const [view, setView] = useState<View>('unanswered');
-  const [feedbacks, setFeedbacks] = useState<WbFeedback[]>([]);
-  const [counts, setCounts] = useState<{ unanswered: number; archive: number }>({ unanswered: 0, archive: 0 });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [starFilter, setStarFilter] = useState<number | 'all'>('all');
-  const [aiByFb, setAiByFb] = useState<Record<string, AiState>>({});
-  const [sendByFb, setSendByFb] = useState<Record<string, { sending?: boolean; sent?: boolean; error?: string }>>({});
-  const [bulk, setBulk] = useState<{ running: boolean; done: number; total: number; failed: number } | null>(null);
-
-  // Отзыв без текста — только оценка. Гонять Claude ради «спасибо» на 449 таких
-  // отзывов значит платить за каждую «пятёрку»; благодарность и так одинаковая.
-  // Claude — только там, где есть что читать.
-  const THANKS = [
-    'Спасибо за оценку! Рады, что товар вам подошёл. Если появятся вопросы — мы на связи.',
-    'Благодарим за пятёрку! Приятно, что покупка оправдала ожидания.',
-    'Спасибо, что нашли время оценить товар! Будем рады видеть вас снова.',
-  ];
-  const draftFor = async (f: WbFeedback): Promise<string> => {
-    if (!(f.text || '').trim()) return THANKS[Math.abs(hashCode(f.id)) % THANKS.length];
-    const r = await aiReviewReply({ text: f.text || '', rating: f.productValuation, productName: f.productDetails?.productName });
-    return r.reply;
-  };
-
-  const submitReply = async (f: WbFeedback, text: string) => {
-    if (!text.trim()) return;
-    setSendByFb(prev => ({ ...prev, [f.id]: { sending: true } }));
-    const r = await wbAnswerFeedback(f.id, text.trim());
-    if (r.ok) {
-      setSendByFb(prev => ({ ...prev, [f.id]: { sent: true } }));
-      setFeedbacks(prev => prev.filter(x => x.id !== f.id));   // ушёл в архив
-      setCounts(c => ({ unanswered: Math.max(0, c.unanswered - 1), archive: c.archive + 1 }));
-    } else {
-      setSendByFb(prev => ({ ...prev, [f.id]: { error: r.error || 'Ошибка отправки' } }));
-    }
-    return r.ok;
-  };
-
-  // «Ответить на все»: последовательно, чтобы не упереться в лимиты WB и не
-  // выстрелить сотней запросов к Claude разом. Прогресс виден, ошибки не
-  // останавливают остальных.
-  const answerAll = async () => {
-    const list = feedbacks.filter(f => !f.answer);
-    if (!list.length || !confirm(`Ответить на ${list.length} отзывов и опубликовать в WB?`)) return;
-    setBulk({ running: true, done: 0, total: list.length, failed: 0 });
-    let failed = 0;
-    for (const [i, f] of list.entries()) {
-      try {
-        const text = aiByFb[f.id]?.reply || await draftFor(f);
-        const ok = await submitReply(f, text);
-        if (!ok) failed++;
-      } catch { failed++; }
-      setBulk({ running: true, done: i + 1, total: list.length, failed });
-      await new Promise(r => setTimeout(r, 400));
-    }
-    setBulk({ running: false, done: list.length, total: list.length, failed });
-  };
-
-  const genReply = async (f: WbFeedback) => {
-    setAiByFb(prev => ({ ...prev, [f.id]: { loading: true } }));
-    try {
-      const r = await aiReviewReply({
-        text: f.text || '',
-        rating: f.productValuation,
-        productName: f.productDetails?.productName,
-      });
-      setAiByFb(prev => ({ ...prev, [f.id]: { loading: false, reply: r.reply } }));
-    } catch (e: any) {
-      setAiByFb(prev => ({ ...prev, [f.id]: { loading: false, error: e?.message || 'Ошибка' } }));
-    }
-  };
-
-  // force — по кнопке «Обновить»: сходить в WB, а не перечитать кэш. Без этого
-  // ответы, опубликованные на площадке, появлялись в кабинете через 2 часа.
-  const load = async (force = false) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await wbFeedbacks({ isAnswered: view === 'archive', take: 50, force });
-      setFeedbacks(r.feedbacks || []);
-      setCounts({ unanswered: r.countUnanswered, archive: r.countArchive });
-    } catch (e: any) {
-      setError(e?.message || 'Ошибка');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [view]);
-
-  // Распределение по звёздам
-  const starDist = [5, 4, 3, 2, 1].map(s => ({
-    stars: s,
-    count: feedbacks.filter(f => f.productValuation === s).length,
-  }));
-  const avgRating = feedbacks.length
-    ? feedbacks.reduce((s, f) => s + (f.productValuation || 0), 0) / feedbacks.length
-    : 0;
-
-  const filtered = starFilter === 'all'
-    ? feedbacks
-    : feedbacks.filter(f => f.productValuation === starFilter);
-
-  return (
-    <div className="grid" style={{ gap: 16 }}>
-      {/* Шапка статуса */}
-      <div className="card" style={{ background: 'var(--bg-3)' }}>
-        <div className="flex-between" style={{ flexWrap: 'wrap', gap: 12 }}>
-          <div className="row gap-12" style={{ flexWrap: 'wrap' }}>
-            <div className="row gap-8">
-              <span className="mp-tab-dot" style={{ background: '#cb11ab', width: 10, height: 10 }} />
-              <strong style={{ fontSize: 14 }}>Wildberries Feedbacks</strong>
-            </div>
-            {error
-              ? <span className="chip bad"><WarningIcon size={11} weight="bold" /> ошибка</span>
-              : loading
-                ? <span className="chip"><SpinnerIcon size={11} weight="bold" className="spin" /> загрузка</span>
-                : <span className="chip good"><CheckCircleIcon size={11} weight="bold" /> подключено</span>}
-            <span className="muted" style={{ fontSize: 12 }}>
-              неотвеченных: <b style={{ color: 'var(--bad)' }}>{counts.unanswered}</b> · в архиве: <b style={{ color: 'var(--text)' }}>{counts.archive}</b>
-            </span>
-          </div>
-          <div className="row gap-8">
-            {view === 'unanswered' && (
-              <button className="btn" onClick={() => void answerAll()} disabled={loading || !!bulk?.running}
-                title="Сгенерировать ответы и опубликовать в WB по всем неотвеченным, по одному">
-                {bulk?.running ? <SpinnerIcon size={14} className="spin" /> : <PaperPlaneRightIcon size={14} weight="bold" />}
-                {bulk?.running ? `Отвечаю ${bulk.done}/${bulk.total}` : 'Ответить на все'}
-              </button>
-            )}
-            <button className="btn btn-primary" onClick={() => load(true)} disabled={loading}>
-              <ArrowsClockwiseIcon size={14} weight="bold" className={loading ? 'spin' : ''} />
-              {loading ? 'Загрузка…' : 'Обновить'}
-            </button>
-          </div>
-        </div>
-        {bulk && !bulk.running && (
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
-            Опубликовано {bulk.done - bulk.failed} из {bulk.total}{bulk.failed ? `, не удалось ${bulk.failed} — они остались в списке` : ''}.
-          </div>
-        )}
-      </div>
-
-      {error && (
-        <div className="card" style={{ background: 'rgba(220,38,38,.08)', color: 'var(--bad)', display: 'flex', gap: 10 }}>
-          <WarningIcon size={18} weight="bold" />
-          <span style={{ fontSize: 13 }}>{error}</span>
-        </div>
-      )}
-
-      {/* KPI */}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-        <div className="card kpi">
-          <span className="d muted"><ChatCircleTextIcon size={11} weight="bold" /> Неотвеченных</span>
-          <span className="v" style={{ color: counts.unanswered > 0 ? 'var(--bad)' : 'var(--good)' }}>{counts.unanswered}</span>
-        </div>
-        <div className="card kpi">
-          <span className="d muted"><ArchiveIcon size={11} weight="bold" /> В архиве</span>
-          <span className="v">{counts.archive.toLocaleString('ru-RU')}</span>
-        </div>
-        <div className="card kpi">
-          <span className="d muted">Средняя оценка (показано)</span>
-          <span className="v" style={{ color: avgRating >= 4.5 ? 'var(--good)' : avgRating >= 4 ? 'var(--warn)' : 'var(--bad)' }}>
-            {feedbacks.length ? avgRating.toFixed(2) : '—'}
-          </span>
-          {feedbacks.length > 0 && <Stars n={Math.round(avgRating)} />}
-        </div>
-        <div className="card kpi">
-          <span className="d muted">★ 1–3 в подборке</span>
-          <span className="v" style={{ color: 'var(--bad)' }}>
-            {feedbacks.filter(f => f.productValuation <= 3).length}
-          </span>
-        </div>
-        <div className="card kpi">
-          <span className="d muted">★ 5 в подборке</span>
-          <span className="v" style={{ color: 'var(--good)' }}>
-            {feedbacks.filter(f => f.productValuation === 5).length}
-          </span>
-        </div>
-      </div>
-
-      {/* Фильтры */}
-      <div className="row gap-12" style={{ flexWrap: 'wrap' }}>
-        <div className="period-switch">
-          <button className={`period-btn ${view === 'unanswered' ? 'active' : ''}`} onClick={() => setView('unanswered')}>
-            Неотвеченные ({counts.unanswered})
-          </button>
-          <button className={`period-btn ${view === 'archive' ? 'active' : ''}`} onClick={() => setView('archive')}>
-            Архив
-          </button>
-        </div>
-        <div className="period-switch">
-          <button className={`period-btn ${starFilter === 'all' ? 'active' : ''}`} onClick={() => setStarFilter('all')}>Все ★</button>
-          {[5, 4, 3, 2, 1].map(s => (
-            <button key={s} className={`period-btn ${starFilter === s ? 'active' : ''}`} onClick={() => setStarFilter(s)}>
-              {s}★ ({starDist.find(d => d.stars === s)?.count || 0})
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Список */}
-      {filtered.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>
-          {loading ? 'Загружаем…' : view === 'unanswered' ? '🎉 Нет неотвеченных отзывов!' : 'В архиве пусто'}
-        </div>
-      ) : (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(440px, 1fr))', gap: 12 }}>
-          {filtered.map(f => {
-            const rating = f.productValuation || 0;
-            const isNeg = rating <= 3;
-            return (
-              <div key={f.id} className="card" style={{
-                padding: 16,
-                background: isNeg ? 'rgba(220,38,38,.06)' : rating === 4 ? 'rgba(217,119,6,.06)' : 'var(--bg-2)',
-              }}>
-                <div className="flex-between" style={{ marginBottom: 8, alignItems: 'flex-start' }}>
-                  <div>
-                    <div className="row gap-8" style={{ marginBottom: 4 }}>
-                      <Stars n={rating} />
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>{rating}/5</span>
-                    </div>
-                    <div className="muted" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <CalendarBlankIcon size={11} weight="bold" /> {fmtDate(f.createdDate)}
-                      {f.userName && <> · {f.userName}</>}
-                    </div>
-                  </div>
-                  {f.answer && (
-                    <span className="chip good"><CheckCircleIcon size={10} weight="bold" /> отвечено</span>
-                  )}
-                </div>
-
-                {f.productDetails && (
-                  <div style={{ fontSize: 12, marginBottom: 8, color: 'var(--accent)', fontWeight: 500 }}>
-                    {f.productDetails.productName} · nmId {f.productDetails.nmId}
-                  </div>
-                )}
-
-                <div style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 8, whiteSpace: 'pre-wrap' }}>
-                  {f.text || <span className="muted" style={{ fontStyle: 'italic' }}>— только оценка, без текста —</span>}
-                </div>
-
-                {f.answer && (
-                  <div style={{
-                    background: 'var(--bg-3)',
-                    borderRadius: 8,
-                    padding: '8px 10px',
-                    fontSize: 12,
-                    lineHeight: 1.45,
-                    color: 'var(--muted)',
-                    borderLeft: '2px solid var(--accent)',
-                  }}>
-                    <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 2, color: 'var(--accent)' }}>Ваш ответ:</div>
-                    {f.answer.text}
-                  </div>
-                )}
-
-                {!f.answer && (() => {
-                  const a = aiByFb[f.id];
-                  return (
-                    <div style={{ marginTop: 8 }}>
-                      {!a?.reply && (
-                        <button
-                          className="btn btn-sm"
-                          onClick={() => genReply(f)}
-                          disabled={a?.loading}
-                          style={{ background: 'var(--accent-soft)', color: 'var(--accent-2)' }}
-                        >
-                          {a?.loading ? <SpinnerIcon size={12} className="spin" /> : <SparkleIcon size={12} weight="fill" />}
-                          {a?.loading ? 'Генерирую…' : 'Сгенерировать ответ через Claude'}
-                        </button>
-                      )}
-                      {a?.error && (
-                        <div style={{ color: 'var(--bad)', fontSize: 12, marginTop: 6 }}>
-                          <WarningIcon size={12} weight="bold" /> {a.error}
-                        </div>
-                      )}
-                      {a?.reply && (
-                        <div style={{
-                          background: 'var(--accent-soft)', borderRadius: 8, padding: '10px 12px', fontSize: 12.5,
-                          lineHeight: 1.5, color: 'var(--accent-2)', borderLeft: '2px solid var(--accent)',
-                        }}>
-                          <div className="flex-between" style={{ marginBottom: 4 }}>
-                            <div style={{ fontWeight: 600, fontSize: 11 }}>
-                              <SparkleIcon size={11} weight="fill" /> Черновик ответа от Claude:
-                            </div>
-                            <div className="row gap-8">
-                              <button className="btn btn-sm btn-primary" title="Опубликовать ответ в WB"
-                                disabled={sendByFb[f.id]?.sending || sendByFb[f.id]?.sent}
-                                onClick={() => void submitReply(f, a.reply || '')}>
-                                {sendByFb[f.id]?.sending ? <SpinnerIcon size={11} className="spin" /> : <PaperPlaneRightIcon size={11} weight="bold" />}
-                                {sendByFb[f.id]?.sent ? 'Отправлено ✓' : 'Отправить в WB'}
-                              </button>
-                              <button
-                                className="btn btn-sm"
-                                title="Скопировать"
-                                onClick={() => navigator.clipboard?.writeText(a.reply || '')}
-                              >
-                                <CopyIcon size={11} weight="bold" /> Копировать
-                              </button>
-                              <button
-                                className="btn btn-sm"
-                                title="Сгенерировать заново"
-                                onClick={() => genReply(f)}
-                              >
-                                <ArrowsClockwiseIcon size={11} weight="bold" />
-                              </button>
-                            </div>
-                          </div>
-                          <div style={{ whiteSpace: 'pre-wrap' }}>{a.reply}</div>
-                          {sendByFb[f.id]?.error && (
-                            <div style={{ color: 'var(--bad)', fontSize: 12, marginTop: 6 }}>
-                              <WarningIcon size={12} weight="bold" /> {sendByFb[f.id]?.error}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="muted" style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
-        <InfoIcon size={12} weight="bold" />
-        Источник — WB Feedbacks API <code>/api/v1/feedbacks</code>. Лимит 50 отзывов за запрос.
-        Автогенерация ответов через Claude — после привязки модуля «Отзывы → черновики».
-      </div>
-    </div>
-  );
-}
-
-function WbQuestionsPanel() {
-  const [view, setView] = useState<View>('unanswered');
-  const [questions, setQuestions] = useState<WbQuestion[]>([]);
-  const [counts, setCounts] = useState<{ unanswered: number; archive: number }>({ unanswered: 0, archive: 0 });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [aiByQ, setAiByQ] = useState<Record<string, AiState>>({});
-  const [sendByQ, setSendByQ] = useState<Record<string, { sending?: boolean; sent?: boolean; error?: string }>>({});
-
-  const submitAnswer = async (q: WbQuestion, text: string) => {
-    if (!text.trim()) return;
-    setSendByQ(prev => ({ ...prev, [q.id]: { sending: true } }));
-    const r = await wbAnswerQuestion(q.id, text.trim());
-    if (r.ok) {
-      setSendByQ(prev => ({ ...prev, [q.id]: { sent: true } }));
-      setQuestions(prev => prev.filter(x => x.id !== q.id)); // ушёл в отвеченные
-      setCounts(c => ({ ...c, unanswered: Math.max(0, c.unanswered - 1) }));
-    } else {
-      setSendByQ(prev => ({ ...prev, [q.id]: { error: r.error || 'Ошибка отправки' } }));
-    }
-  };
-
-  const [bulk, setBulk] = useState<{ running: boolean; done: number; total: number; failed: number } | null>(null);
-
-  // «Ответить на все» для вопросов: черновик от Claude → публикация, по одному,
-  // чтобы не упереться в лимиты WB. Уже сгенерированный черновик переиспользуем.
-  const answerAll = async () => {
-    const list = questions.filter(q => !q.answer);
-    if (!list.length || !confirm(`Ответить на ${list.length} вопросов и опубликовать в WB?`)) return;
-    setBulk({ running: true, done: 0, total: list.length, failed: 0 });
-    let failed = 0;
-    for (const [i, q] of list.entries()) {
-      try {
-        let text = aiByQ[q.id]?.reply;
-        if (!text) {
-          const r = await aiReviewReply({
-            text: q.text || '', productName: q.productDetails?.productName,
-            tone: 'Это ВОПРОС покупателя о товаре. Дай конкретный, полезный, вежливый ответ на вопрос (без «спасибо за отзыв»).',
-          });
-          text = r.reply;
-        }
-        const r = await wbAnswerQuestion(q.id, (text || '').trim());
-        if (r.ok) {
-          setQuestions(prev => prev.filter(x => x.id !== q.id));
-          setCounts(c => ({ ...c, unanswered: Math.max(0, c.unanswered - 1) }));
-        } else failed++;
-      } catch { failed++; }
-      setBulk({ running: true, done: i + 1, total: list.length, failed });
-      await new Promise(r => setTimeout(r, 400));
-    }
-    setBulk({ running: false, done: list.length, total: list.length, failed });
-  };
-
-  const genAnswer = async (q: WbQuestion) => {
-    setAiByQ(prev => ({ ...prev, [q.id]: { loading: true } }));
-    try {
-      // Переиспользуем движок ответов: tone указывает, что это ВОПРОС о товаре —
-      // Claude даёт конкретный полезный ответ, а не отзыв-реплай.
-      const r = await aiReviewReply({
-        text: q.text || '',
-        productName: q.productDetails?.productName,
-        tone: 'Это ВОПРОС покупателя о товаре. Дай конкретный, полезный, вежливый ответ на вопрос (без «спасибо за отзыв»).',
-      });
-      setAiByQ(prev => ({ ...prev, [q.id]: { loading: false, reply: r.reply } }));
-    } catch (e: any) {
-      setAiByQ(prev => ({ ...prev, [q.id]: { loading: false, error: e?.message || 'Ошибка' } }));
-    }
-  };
-
-  const load = async (force = false) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await wbQuestions({ isAnswered: view === 'archive', take: 50, force });
-      setQuestions(r.questions || []);
-      setCounts({ unanswered: r.countUnanswered, archive: r.countArchive });
-    } catch (e: any) {
-      setError(e?.message || 'Ошибка');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [view]);
-
-  return (
-    <div className="grid" style={{ gap: 16 }}>
-      <div className="card" style={{ background: 'var(--bg-3)' }}>
-        <div className="flex-between" style={{ flexWrap: 'wrap', gap: 12 }}>
-          <div className="row gap-12" style={{ flexWrap: 'wrap' }}>
-            <div className="row gap-8">
-              <span className="mp-tab-dot" style={{ background: '#cb11ab', width: 10, height: 10 }} />
-              <strong style={{ fontSize: 14 }}>Wildberries · вопросы о товаре</strong>
-            </div>
-            {error
-              ? <span className="chip bad"><WarningIcon size={11} weight="bold" /> ошибка</span>
-              : loading
-                ? <span className="chip"><SpinnerIcon size={11} weight="bold" className="spin" /> загрузка</span>
-                : <span className="chip good"><CheckCircleIcon size={11} weight="bold" /> подключено</span>}
-            <span className="muted" style={{ fontSize: 12 }}>
-              без ответа: <b style={{ color: 'var(--bad)' }}>{counts.unanswered}</b> · в архиве: <b>{counts.archive}</b>
-            </span>
-          </div>
-          <div className="row gap-8">
-            {view === 'unanswered' && (
-              <button className="btn" onClick={() => void answerAll()} disabled={loading || !!bulk?.running}
-                title="Сгенерировать ответы и опубликовать в WB по всем неотвеченным, по одному">
-                {bulk?.running ? <SpinnerIcon size={14} className="spin" /> : <PaperPlaneRightIcon size={14} weight="bold" />}
-                {bulk?.running ? `Отвечаю ${bulk.done}/${bulk.total}` : 'Ответить на все'}
-              </button>
-            )}
-            <button className="btn btn-primary" onClick={() => load(true)} disabled={loading}>
-              <ArrowsClockwiseIcon size={14} weight="bold" className={loading ? 'spin' : ''} />
-              {loading ? 'Загрузка…' : 'Обновить'}
-            </button>
-          </div>
-        </div>
-        {bulk && !bulk.running && (
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
-            Опубликовано {bulk.done - bulk.failed} из {bulk.total}{bulk.failed ? `, не удалось ${bulk.failed} — они остались в списке` : ''}.
-          </div>
-        )}
-      </div>
-
-      {error && (
-        <div className="card" style={{ background: 'rgba(220,38,38,.08)', color: 'var(--bad)', display: 'flex', gap: 10 }}>
-          <WarningIcon size={18} weight="bold" />
-          <span style={{ fontSize: 13 }}>{error}</span>
-        </div>
-      )}
-
-      <div className="row gap-12" style={{ flexWrap: 'wrap' }}>
-        <div className="period-switch">
-          <button className={`period-btn ${view === 'unanswered' ? 'active' : ''}`} onClick={() => setView('unanswered')}>
-            Без ответа ({counts.unanswered})
-          </button>
-          <button className={`period-btn ${view === 'archive' ? 'active' : ''}`} onClick={() => setView('archive')}>
-            Архив
-          </button>
-        </div>
-      </div>
-
-      {questions.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>
-          {loading ? 'Загружаем…' : view === 'unanswered' ? '🎉 Нет вопросов без ответа!' : 'В архиве пусто'}
-        </div>
-      ) : (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(440px, 1fr))', gap: 12 }}>
-          {questions.map(q => (
-            <div key={q.id} className="card" style={{ padding: 16, background: q.answer ? 'var(--bg-2)' : 'rgba(217,119,6,.06)' }}>
-              <div className="flex-between" style={{ marginBottom: 8, alignItems: 'flex-start' }}>
-                <div className="muted" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <CalendarBlankIcon size={11} weight="bold" /> {fmtDate(q.createdDate)}
-                  {q.userName && <> · {q.userName}</>}
-                </div>
-                {q.answer
-                  ? <span className="chip good"><CheckCircleIcon size={10} weight="bold" /> отвечено</span>
-                  : <span className="chip warn"><WarningIcon size={10} weight="bold" /> без ответа</span>}
-              </div>
-              {q.productDetails && (
-                <div style={{ fontSize: 12, marginBottom: 8, color: 'var(--accent)', fontWeight: 500 }}>
-                  {q.productDetails.productName} · nmId {q.productDetails.nmId}
-                </div>
-              )}
-              <div style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 8, whiteSpace: 'pre-wrap' }}>{q.text}</div>
-              {q.answer && (
-                <div style={{ background: 'var(--bg-3)', borderRadius: 8, padding: '8px 10px', fontSize: 12, lineHeight: 1.45, color: 'var(--muted)', borderLeft: '2px solid var(--accent)' }}>
-                  <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 2, color: 'var(--accent)' }}>Ваш ответ:</div>
-                  {q.answer.text}
-                </div>
-              )}
-              {!q.answer && (() => {
-                const a = aiByQ[q.id];
-                return (
-                  <div style={{ marginTop: 8 }}>
-                    {!a?.reply && (
-                      <button className="btn btn-sm" onClick={() => genAnswer(q)} disabled={a?.loading}
-                        style={{ background: 'var(--accent-soft)', color: 'var(--accent-2)' }}>
-                        {a?.loading ? <SpinnerIcon size={12} className="spin" /> : <SparkleIcon size={12} weight="fill" />}
-                        {a?.loading ? 'Генерирую…' : 'Сгенерировать ответ через Claude'}
-                      </button>
-                    )}
-                    {a?.error && (
-                      <div style={{ color: 'var(--bad)', fontSize: 12, marginTop: 6 }}>
-                        <WarningIcon size={12} weight="bold" /> {a.error}
-                      </div>
-                    )}
-                    {a?.reply && (
-                      <div style={{ background: 'var(--accent-soft)', borderRadius: 8, padding: '10px 12px', fontSize: 12.5, lineHeight: 1.5, color: 'var(--accent-2)', borderLeft: '2px solid var(--accent)' }}>
-                        <div className="flex-between" style={{ marginBottom: 4 }}>
-                          <div style={{ fontWeight: 600, fontSize: 11 }}>
-                            <SparkleIcon size={11} weight="fill" /> Черновик ответа от Claude:
-                          </div>
-                          <div className="row gap-8">
-                            <button className="btn btn-sm btn-primary" title="Опубликовать ответ в WB"
-                              disabled={sendByQ[q.id]?.sending || sendByQ[q.id]?.sent}
-                              onClick={() => submitAnswer(q, a.reply || '')}>
-                              {sendByQ[q.id]?.sending ? <SpinnerIcon size={11} className="spin" /> : <PaperPlaneRightIcon size={11} weight="bold" />}
-                              {sendByQ[q.id]?.sent ? 'Отправлено ✓' : 'Отправить в WB'}
-                            </button>
-                            <button className="btn btn-sm" title="Скопировать" onClick={() => navigator.clipboard?.writeText(a.reply || '')}>
-                              <CopyIcon size={11} weight="bold" /> Копировать
-                            </button>
-                            <button className="btn btn-sm" title="Сгенерировать заново" onClick={() => genAnswer(q)}>
-                              <ArrowsClockwiseIcon size={11} weight="bold" />
-                            </button>
-                          </div>
-                        </div>
-                        <div style={{ whiteSpace: 'pre-wrap' }}>{a.reply}</div>
-                        {sendByQ[q.id]?.error && (
-                          <div style={{ color: 'var(--bad)', fontSize: 11, marginTop: 4 }}>
-                            <WarningIcon size={11} weight="bold" /> {sendByQ[q.id]?.error}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="muted" style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
-        <InfoIcon size={12} weight="bold" />
-        Источник — WB Feedbacks API <code>/api/v1/questions</code>. Прогревается фоновым сборщиком.
-      </div>
-    </div>
-  );
-}
-
-function OzonReviewsPanel() {
-  return (
-    <div className="card" style={{ background: 'var(--accent-soft)' }}>
-      <div className="row gap-8" style={{ alignItems: 'flex-start' }}>
-        <InfoIcon size={18} weight="bold" style={{ color: 'var(--accent-2)', flexShrink: 0, marginTop: 2 }} />
-        <div>
-          <div style={{ fontWeight: 600, color: 'var(--accent-2)' }}>Ozon Reviews API требует Premium-подписку</div>
-          <div style={{ fontSize: 13, color: 'var(--accent-2)', marginTop: 6, lineHeight: 1.5 }}>
-            <code>/v1/review/list</code> отвечает <i>«not available with existing subscription»</i>.
-            Чтобы тянуть отзывы Ozon — нужно подключить тариф «Premium» в кабинете продавца.
-            После подключения добавлю аналогичный блок с фильтрами/звёздами/ответами как для WB.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+type Tab = 'inbox' | 'kb' | 'log' | 'settings';
 
 export function Reviews() {
-  const [mp, setMp] = useState<'wb' | 'wb-q' | 'ozon'>('wb');
+  const [tab, setTab] = useState<Tab>('inbox');
+  const [ov, setOv] = useState<ReviewsOverview | null>(null);
+  const [ovErr, setOvErr] = useState<string | null>(null);
+  const [collecting, setCollecting] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const loadOv = async () => {
+    try { setOv(await reviewsApi.overview()); setOvErr(null); }
+    catch (e: any) { setOvErr(e?.message || 'Ошибка'); }
+  };
+  useEffect(() => { loadOv(); const t = setInterval(loadOv, 60_000); return () => clearInterval(t); }, []);
+
+  const collectNow = async () => {
+    setCollecting(true);
+    try { await reviewsApi.collect(); } catch (e: any) { alert(`Сбор не удался: ${e?.message}`); }
+    setCollecting(false);
+    await loadOv();
+    setReloadKey(k => k + 1);
+  };
+
+  const toggleAuto = async (d: ReviewDirection, on: boolean) => {
+    if (on && !confirm('Включить автоматическую публикацию? Ответы без эскалации будут уходить покупателям без вашей проверки.')) return;
+    if (!ov) return;
+    const r = await reviewsApi.saveSettings({ autoPublish: { ...ov.settings.autoPublish, [d]: on } });
+    setOv({ ...ov, settings: r.settings });
+  };
+
+  const totalUn = ov ? Object.values(ov.counters).reduce((s, c) => s + c.unanswered, 0) : 0;
+  const totalPend = ov ? Object.values(ov.counters).reduce((s, c) => s + c.pending, 0) : 0;
+
   return (
-    <div className="grid" style={{ gap: 20 }}>
-      <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
-        <button className={`mp-tab ${mp === 'wb' ? 'active' : ''}`} onClick={() => setMp('wb')}>
-          <span className="mp-tab-dot" style={{ background: '#cb11ab' }} />
-          WB · Отзывы
-          <span className="muted" style={{ marginLeft: 6 }}>live</span>
-        </button>
-        <button className={`mp-tab ${mp === 'wb-q' ? 'active' : ''}`} onClick={() => setMp('wb-q')}>
-          <span className="mp-tab-dot" style={{ background: '#cb11ab' }} />
-          WB · Вопросы
-          <span className="muted" style={{ marginLeft: 6 }}>о товаре</span>
-        </button>
-        <button className={`mp-tab ${mp === 'ozon' ? 'active' : ''}`} onClick={() => setMp('ozon')}>
-          <span className="mp-tab-dot" style={{ background: '#005bff' }} />
-          Ozon
-          <span className="muted" style={{ marginLeft: 6 }}>требует Premium</span>
+    <div className="grid" style={{ gap: 16 }}>
+      {/* Шапка: счётчики, тумблеры, сбор, расход */}
+      <div className="card" style={{ background: 'var(--bg-3)' }}>
+        <div className="flex-between" style={{ flexWrap: 'wrap', gap: 12 }}>
+          <div className="row gap-12" style={{ flexWrap: 'wrap' }}>
+            <span><b>{totalUn}</b> <span className="muted">неотвеченных</span></span>
+            <span><b>{totalPend}</b> <span className="muted">ждут решения</span></span>
+            {ov && <span className="muted">Claude за месяц: {usd(ov.spendMonthUsd)} из {usd(ov.settings.monthlyBudgetUsd)} (ключ — до {usd(ov.settings.keyBudgetUsd)})</span>}
+            {ov && ov.settings.monthlyBudgetUsd > 0 && ov.spendMonthUsd >= ov.settings.monthlyBudgetUsd * 0.8 && (
+              <span className="chip warn"><WarningIcon size={12} /> {ov.spendMonthUsd >= ov.settings.monthlyBudgetUsd ? 'подлимит исчерпан — черновики остановлены' : 'экономный режим (80% подлимита)'}</span>
+            )}
+          </div>
+          <button className="btn btn-sm" onClick={collectNow} disabled={collecting}>
+            {collecting ? <SpinnerIcon size={14} className="spin" /> : <ArrowsClockwiseIcon size={14} />} Собрать сейчас
+          </button>
+        </div>
+        {ovErr && <div className="chip bad" style={{ marginTop: 8 }}>{ovErr}</div>}
+        {ov && (
+          <div className="row gap-8" style={{ flexWrap: 'wrap', marginTop: 10 }}>
+            {DIRECTIONS.map(d => {
+              const c = ov.counters[d.key];
+              const st = ov.collect.find(x => x.direction === d.key);
+              const auto = ov.settings.autoPublish[d.key];
+              const disabled = d.key === 'ozon_reviews';
+              return (
+                <div key={d.key} className="card" style={{ padding: '8px 10px', minWidth: 210, flex: '1 1 210px' }}>
+                  <div className="flex-between">
+                    <span className="row gap-8"><span className="mp-tab-dot" style={{ background: MP_COLOR[d.mp], width: 8, height: 8 }} /><b>{d.title}</b></span>
+                    <label className="row" style={{ gap: 4, fontSize: 12, opacity: disabled ? 0.5 : 1 }} title="Автопубликация ответов без эскалации">
+                      <input type="checkbox" checked={auto} disabled={disabled} onChange={e => toggleAuto(d.key, e.target.checked)} /> авто
+                    </label>
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                    {disabled
+                      ? (st?.note || 'Нет доступа по API')
+                      : <>без ответа {c.unanswered} · ждут {c.pending} · сбор {ago(st?.at ?? null)}{st && !st.ok && st.error ? <span style={{ color: 'var(--bad)' }}> · ошибка</span> : null}</>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="period-switch" style={{ alignSelf: 'start' }}>
+        {([['inbox', 'Отзывы и вопросы'], ['kb', 'База знаний'], ['log', 'Журнал'], ['settings', 'Настройки']] as [Tab, string][]).map(([k, t]) => (
+          <button key={k} className={`period-btn ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{t}</button>
+        ))}
+      </div>
+
+      {tab === 'inbox' && <Inbox key={reloadKey} counts={{ un: totalUn, pend: totalPend }} onChanged={loadOv} />}
+      {tab === 'kb' && <KnowledgeBase />}
+      {tab === 'log' && <LogTab />}
+      {tab === 'settings' && ov && <SettingsTab ov={ov} onSaved={s => setOv({ ...ov, settings: s })} />}
+    </div>
+  );
+}
+
+// ─── Список ────────────────────────────────────────────────────────────────
+type Filters = { mp: string; kind: string; rating: string; q: string; days: string };
+const FILTERS_KEY = 'av-reviews-filters';
+function loadFilters(): Filters {
+  try { return { mp: '', kind: '', rating: '', q: '', days: '', ...JSON.parse(localStorage.getItem(FILTERS_KEY) || '{}') }; }
+  catch { return { mp: '', kind: '', rating: '', q: '', days: '' }; }
+}
+
+function Inbox({ counts, onChanged }: { counts: { un: number; pend: number }; onChanged: () => void }) {
+  const [view, setView] = useState<ReviewView>('unanswered');
+  const [f, setF] = useState<Filters>(loadFilters);
+  const [items, setItems] = useState<ReviewItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const [bulk, setBulk] = useState<string | null>(null);
+  const [limit, setLimit] = useState(50);
+
+  useEffect(() => { try { localStorage.setItem(FILTERS_KEY, JSON.stringify(f)); } catch { /* приватный режим */ } }, [f]);
+
+  const load = async () => {
+    setLoading(true); setErr(null);
+    try {
+      const r = await reviewsApi.items({
+        view, mp: f.mp, kind: f.kind, rating: f.rating, q: f.q.trim(),
+        from: f.days ? Date.now() - Number(f.days) * 86400_000 : undefined, limit,
+      });
+      setItems(r.items); setTotal(r.total); setSel(new Set());
+    } catch (e: any) { setErr(e?.message || 'Ошибка'); }
+    setLoading(false);
+  };
+  useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [view, f, limit]);
+
+  const replace = (it: ReviewItem) => { setItems(prev => prev.map(x => (x.id === it.id ? it : x))); onChanged(); };
+  const drop = (id: number) => { setItems(prev => prev.filter(x => x.id !== id)); setTotal(t => t - 1); onChanged(); };
+
+  const publishable = items.filter(i => sel.has(i.id) && i.status === 'drafted' && i.draftAnswer);
+  const bulkPublish = async () => {
+    if (!publishable.length || !confirm(`Опубликовать ${publishable.length} ответов покупателям?`)) return;
+    setBulk(`Публикую 0 из ${publishable.length}…`);
+    const r = await reviewsApi.publishBulk(publishable.map(i => i.id)).catch((e: any) => ({ results: [{ id: 0, ok: false, error: e.message }] }));
+    const bad = r.results.filter(x => !x.ok);
+    setBulk(bad.length ? `Опубликовано ${r.results.length - bad.length}, ошибок ${bad.length}: ${bad[0]?.error || ''}` : `Опубликовано ${r.results.length}`);
+    await load(); onChanged();
+  };
+
+  const setFilter = (patch: Partial<Filters>) => setF(prev => ({ ...prev, ...patch }));
+  const ratingSet = new Set(f.rating.split(',').filter(Boolean));
+  const toggleRating = (n: number) => {
+    const s = new Set(ratingSet);
+    s.has(String(n)) ? s.delete(String(n)) : s.add(String(n));
+    setFilter({ rating: [...s].sort().join(',') });
+  };
+
+  return (
+    <div className="grid" style={{ gap: 12 }}>
+      <div className="flex-between" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <div className="period-switch">
+          {([['unanswered', `Неотвеченные (${counts.un})`], ['pending', `Ждут решения (${counts.pend})`], ['answered', 'Отвеченные'], ['all', 'Все']] as [ReviewView, string][]).map(([k, t]) => (
+            <button key={k} className={`period-btn ${view === k ? 'active' : ''}`} onClick={() => setView(k)}>{t}</button>
+          ))}
+        </div>
+        <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
+          <select className="select" value={f.mp} onChange={e => setFilter({ mp: e.target.value })} style={{ width: 'auto' }}>
+            <option value="">WB и Ozon</option><option value="wb">WB</option><option value="ozon">Ozon</option>
+          </select>
+          <select className="select" value={f.kind} onChange={e => setFilter({ kind: e.target.value })} style={{ width: 'auto' }}>
+            <option value="">Отзывы и вопросы</option><option value="review">Отзывы</option><option value="question">Вопросы</option>
+          </select>
+          <div className="period-switch">
+            {[1, 2, 3, 4, 5].map(n => (
+              <button key={n} className={`period-btn ${ratingSet.has(String(n)) ? 'active' : ''}`} onClick={() => toggleRating(n)}>{n}★</button>
+            ))}
+          </div>
+          <select className="select" value={f.days} onChange={e => setFilter({ days: e.target.value })} style={{ width: 'auto' }}>
+            <option value="">За всё время</option><option value="1">Сутки</option><option value="7">7 дней</option><option value="30">30 дней</option>
+          </select>
+          <input className="input" placeholder="Артикул, товар, текст" value={f.q} onChange={e => setFilter({ q: e.target.value })} style={{ width: 200 }} />
+        </div>
+      </div>
+
+      {(sel.size > 0 || bulk) && (
+        <div className="row gap-8">
+          {sel.size > 0 && <button className="btn btn-sm btn-primary" onClick={bulkPublish} disabled={!publishable.length}>
+            <PaperPlaneRightIcon size={14} /> Опубликовать выбранные ({publishable.length})
+          </button>}
+          {sel.size > 0 && publishable.length < sel.size && <span className="muted" style={{ fontSize: 12 }}>публикуются только готовые черновики без эскалации</span>}
+          {bulk && <span className="muted">{bulk}</span>}
+        </div>
+      )}
+
+      {err && <div className="chip bad">{err}</div>}
+      {loading && !items.length && <div className="muted"><SpinnerIcon size={14} className="spin" /> Загружаю…</div>}
+      {!loading && !items.length && !err && <div className="card muted">Здесь пусто. {view === 'unanswered' ? 'Все отзывы и вопросы отвечены.' : ''}</div>}
+
+      {items.map(it => (
+        <ItemCard key={it.id} it={it} selected={sel.has(it.id)}
+          onSelect={v => setSel(prev => { const s = new Set(prev); v ? s.add(it.id) : s.delete(it.id); return s; })}
+          onReplace={replace} onDrop={view === 'unanswered' || view === 'pending' ? drop : () => { load(); onChanged(); }} />
+      ))}
+      {items.length < total && <button className="btn btn-sm" onClick={() => setLimit(l => l + 50)}>Показать ещё ({total - items.length})</button>}
+    </div>
+  );
+}
+
+function ItemCard({ it, selected, onSelect, onReplace, onDrop }: {
+  it: ReviewItem; selected: boolean; onSelect: (v: boolean) => void;
+  onReplace: (it: ReviewItem) => void; onDrop: (id: number) => void;
+}) {
+  const [text, setText] = useState(it.draftAnswer || '');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(it.publishError);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setText(it.draftAnswer || ''); }, [it.draftAnswer]);
+
+  const answered = it.answeredOnMarketplace || it.status === 'published';
+  const ozonReview = it.marketplace === 'ozon' && it.kind === 'review';
+  const long = (it.text || '').length > 280;
+
+  const act = async (name: string, fn: () => Promise<any>) => {
+    setBusy(name); setError(null);
+    try { await fn(); } catch (e: any) { setError(e?.message || 'Ошибка'); }
+    setBusy(null);
+  };
+  const saveIfChanged = () => { if (text !== (it.draftAnswer || '')) act('save', async () => onReplace((await reviewsApi.save(it.id, text)).item)); };
+  const publish = () => act('publish', async () => {
+    if (!text.trim()) throw new Error('Пустой ответ');
+    if (it.status === 'escalated' && !confirm(`Агент пометил: ${it.escalationReason}. Всё равно опубликовать этот ответ?`)) return;
+    const r = await reviewsApi.publish(it.id, text.trim());
+    if (!r.ok) throw new Error(r.error || 'Не опубликовано');
+    onDrop(it.id);
+  });
+
+  const badge = answered ? <span className="chip good">отвечено{it.publishedBy === 'auto' ? ' · авто' : ''}</span>
+    : it.status === 'escalated' ? <span className="chip bad">на проверку</span>
+    : it.status === 'drafted' ? <span className="chip info">черновик</span>
+    : it.status === 'skipped' ? <span className="chip">пропущено</span>
+    : <span className="chip">новый</span>;
+
+  return (
+    <div className="card" style={{ padding: 14, borderLeft: `3px solid ${MP_COLOR[it.marketplace]}` }}>
+      <div className="flex-between" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
+          {!answered && <input type="checkbox" checked={selected} onChange={e => onSelect(e.target.checked)} />}
+          <b style={{ color: MP_COLOR[it.marketplace] }}>{MP_NAME[it.marketplace]}</b>
+          <span className="muted">{it.kind === 'review' ? 'отзыв' : 'вопрос'}</span>
+          {it.rating != null && <Stars n={it.rating} />}
+          <span>{it.productName || it.offerId || `SKU ${it.sku || '—'}`}</span>
+          {it.offerId && it.productName && <span className="muted" style={{ fontSize: 12 }}>{it.offerId}</span>}
+          {it.productUrl && <a href={it.productUrl} target="_blank" rel="noreferrer" title="Открыть на площадке"><ArrowSquareOutIcon size={13} /></a>}
+        </div>
+        <div className="row gap-8"><span className="muted" style={{ fontSize: 12 }}>{fmtDate(it.createdAt)}</span>{badge}</div>
+      </div>
+
+      <div style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+        {it.text ? (long && !open ? <>{it.text.slice(0, 280)}… <a onClick={() => setOpen(true)} style={{ cursor: 'pointer' }}>ещё</a></> : it.text)
+          : <span className="muted">(без текста)</span>}
+      </div>
+      {(it.pros || it.cons) && (
+        <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+          {it.pros && <div>+ {it.pros}</div>}{it.cons && <div>− {it.cons}</div>}
+        </div>
+      )}
+
+      {answered ? (
+        it.marketplaceAnswer ? <div style={{ marginTop: 8, padding: 8, background: 'var(--bg-3)', borderRadius: 8, whiteSpace: 'pre-wrap', fontSize: 13 }}>
+          <span className="muted">Ответ магазина: </span>{it.marketplaceAnswer}</div> : null
+      ) : (
+        <>
+          {it.escalationReason && <div style={{ color: 'var(--bad)', fontSize: 13, marginTop: 8 }}><WarningIcon size={13} /> {it.escalationReason}</div>}
+          <textarea className="textarea" rows={3} style={{ marginTop: 8, width: '100%' }}
+            placeholder={it.status === 'new' ? 'Черновик готовится — или напишите ответ сами' : 'Ответ покупателю'}
+            value={text} onChange={e => setText(e.target.value)} onBlur={saveIfChanged} disabled={it.status === 'skipped'} />
+          <div className="flex-between" style={{ marginTop: 6, flexWrap: 'wrap', gap: 8 }}>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {it.sourcesUsed.length ? `Опора: ${it.sourcesUsed.map(s => s.split(':')[0]).filter((v, i, a) => a.indexOf(v) === i).map(s => ({ faq: 'FAQ', product: 'материалы товара', history: 'прошлые ответы', telegram: 'Telegram', script: 'скрипты', template: 'шаблон' } as any)[s] || s).join(' · ')}` : ''}
+              {it.draftModel && it.draftModel !== 'template' ? ` · ${it.draftModel}${it.draftCostUsd ? ` · ${usd(it.draftCostUsd)}` : ''}` : ''}
+            </span>
+            <div className="row gap-8">
+              {it.status === 'skipped'
+                ? <button className="btn btn-sm" disabled={!!busy} onClick={() => act('unskip', async () => onReplace((await reviewsApi.unskip(it.id)).item))}>Вернуть</button>
+                : <>
+                  <button className="btn btn-sm" disabled={!!busy} onClick={() => act('skip', async () => { await reviewsApi.skip(it.id); onDrop(it.id); })}>Пропустить</button>
+                  <button className="btn btn-sm" disabled={!!busy} onClick={() => act('draft', async () => onReplace((await reviewsApi.draft(it.id)).item))}>
+                    {busy === 'draft' ? <SpinnerIcon size={14} className="spin" /> : <SparkleIcon size={14} />} {it.draftAnswer ? 'Переписать' : 'Черновик'}
+                  </button>
+                  <button className="btn btn-sm btn-primary" disabled={!!busy || ozonReview || !text.trim()} onClick={publish}
+                    title={ozonReview ? 'Ответы на отзывы Ozon — через агента на ПК (в разработке)' : ''}>
+                    {busy === 'publish' ? <SpinnerIcon size={14} className="spin" /> : <PaperPlaneRightIcon size={14} />} Опубликовать
+                  </button>
+                </>}
+            </div>
+          </div>
+        </>
+      )}
+      {error && <div className="chip bad" style={{ marginTop: 6 }}>{error}</div>}
+    </div>
+  );
+}
+
+// ─── База знаний ───────────────────────────────────────────────────────────
+function KnowledgeBase() {
+  const [kb, setKb] = useState<Awaited<ReturnType<typeof reviewsApi.kb>> | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = async () => { try { setKb(await reviewsApi.kb()); } catch (e: any) { setErr(e?.message); } };
+  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (!kb?.index.running) return;
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+  }, [kb?.index.running]);
+
+  if (err) return <div className="chip bad">{err}</div>;
+  if (!kb) return <div className="muted"><SpinnerIcon size={14} className="spin" /> Загружаю…</div>;
+
+  return (
+    <div className="grid" style={{ gap: 16 }}>
+      <div className="card">
+        <div className="card-title">Тексты для ответов</div>
+        <div className="grid grid-2" style={{ gap: 12 }}>
+          {(Object.keys(kb.titles) as KbTextKey[]).map(k => <KbTextEditor key={k} k={k} title={kb.titles[k]} initial={kb.texts[k] || ''} />)}
+        </div>
+      </div>
+      <DiskBlock kb={kb} reload={load} />
+      <TelegramBlock stats={kb.telegram} reload={load} />
+    </div>
+  );
+}
+
+function KbTextEditor({ k, title, initial }: { k: KbTextKey; title: string; initial: string }) {
+  const [v, setV] = useState(initial);
+  const [state, setState] = useState<string | null>(null);
+  const save = async () => {
+    setState('сохраняю…');
+    try { await reviewsApi.saveText(k, v); setState('сохранено'); } catch (e: any) { setState(e?.message || 'ошибка'); }
+  };
+  return (
+    <div className="field" style={{ margin: 0 }}>
+      <label className="field-label">{title}</label>
+      <textarea className="textarea" rows={6} style={{ width: '100%' }} value={v} onChange={e => { setV(e.target.value); setState(null); }} />
+      <div className="row gap-8" style={{ marginTop: 4 }}>
+        <button className="btn btn-sm" onClick={save} disabled={v === initial && state !== null}>Сохранить</button>
+        {state && <span className="muted" style={{ fontSize: 12 }}>{state}</span>}
+      </div>
+    </div>
+  );
+}
+
+function DiskBlock({ kb, reload }: { kb: NonNullable<Awaited<ReturnType<typeof reviewsApi.kb>>>; reload: () => void }) {
+  const [openPath, setOpenPath] = useState<string | null>(null);
+  const [preview, setPreview] = useState('');
+  const start = async () => { await reviewsApi.indexDisk().catch((e: any) => alert(e.message)); setTimeout(reload, 1500); };
+  const show = async (p: string) => {
+    if (openPath === p) { setOpenPath(null); return; }
+    setOpenPath(p); setPreview('…');
+    setPreview((await reviewsApi.folderText(p)).text || '(текста нет)');
+  };
+  const ix = kb.index;
+  return (
+    <div className="card">
+      <div className="flex-between" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <div className="card-title" style={{ margin: 0 }}>Материалы по товарам (Яндекс.Диск)</div>
+        <button className="btn btn-sm" onClick={start} disabled={ix.running}>
+          {ix.running ? <><SpinnerIcon size={14} className="spin" /> {ix.done} из {ix.total || '…'}</> : <><ArrowsClockwiseIcon size={14} /> Обновить материалы</>}
         </button>
       </div>
-      {mp === 'wb' ? <WbReviewsPanel /> : mp === 'wb-q' ? <WbQuestionsPanel /> : <OzonReviewsPanel />}
+      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+        Ссылка на папку задаётся в «Настройках». Word читается бесплатно, PDF и фото комплектации — через Claude один раз; потом — только изменённые файлы.
+        {ix.current && <> Сейчас: {ix.current}</>}
+      </div>
+      {ix.error && <div className="chip bad" style={{ marginTop: 6 }}>{ix.error}</div>}
+      {kb.folders.length > 0 && (
+        <table style={{ width: '100%', marginTop: 10, fontSize: 13, borderCollapse: 'collapse' }}>
+          <thead><tr className="muted" style={{ textAlign: 'left' }}><th>Папка</th><th>Артикулы</th><th>Файлы</th><th /></tr></thead>
+          <tbody>
+            {kb.folders.map(fd => <FolderRow key={fd.path} fd={fd} onPreview={() => show(fd.path)} open={openPath === fd.path} preview={preview} reload={reload} />)}
+          </tbody>
+        </table>
+      )}
+      {kb.withoutMaterials.length > 0 && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+          Нет материалов ({kb.withoutMaterials.length}): {kb.withoutMaterials.slice(0, 40).join(', ')}{kb.withoutMaterials.length > 40 ? '…' : ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FolderRow({ fd, onPreview, open, preview, reload }: { fd: KbFolder; onPreview: () => void; open: boolean; preview: string; reload: () => void }) {
+  const [v, setV] = useState(fd.offerIds.join(', '));
+  const done = fd.files.filter(f => f.status === 'done').length;
+  const errs = fd.files.filter(f => f.status === 'error');
+  const confirmIt = async () => {
+    await reviewsApi.confirmFolder(fd.path, v.split(/[,\s]+/).filter(Boolean));
+    reload();
+  };
+  return (
+    <>
+      <tr style={{ borderTop: '1px solid var(--border)' }}>
+        <td style={{ padding: '6px 4px' }}>{fd.path}</td>
+        <td style={{ padding: '6px 4px' }}>
+          <div className="row gap-8">
+            <input className="input" style={{ width: 220, padding: '4px 8px' }} value={v} onChange={e => setV(e.target.value)} placeholder="артикулы через запятую" />
+            {fd.confirmed && v === fd.offerIds.join(', ')
+              ? <span className="chip good">подтверждено</span>
+              : <button className="btn btn-sm" onClick={confirmIt}>Подтвердить</button>}
+          </div>
+        </td>
+        <td style={{ padding: '6px 4px' }} className="muted">
+          прочитано {done} из {fd.files.length}{errs.length ? <span style={{ color: 'var(--bad)' }} title={errs.map(e => `${e.name}: ${e.note}`).join('\n')}> · ошибок {errs.length}</span> : null}
+        </td>
+        <td style={{ padding: '6px 4px' }}><button className="btn btn-sm" onClick={onPreview}>{open ? 'Скрыть' : 'Текст'}</button></td>
+      </tr>
+      {open && <tr><td colSpan={4}><pre style={{ whiteSpace: 'pre-wrap', maxHeight: 320, overflow: 'auto', fontSize: 12, background: 'var(--bg-3)', padding: 8, borderRadius: 8 }}>{preview}</pre></td></tr>}
+    </>
+  );
+}
+
+function TelegramBlock({ stats, reload }: { stats: { pairs: number; dialogs: number; lastDate: string | null }; reload: () => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [state, setState] = useState<string | null>(null);
+  const onFile = async (file: File) => {
+    setState('Читаю файл…');
+    try {
+      const json = JSON.parse(await file.text());
+      const { pairs, dialogs } = parseTelegramExport(json);
+      if (!pairs.length) throw new Error('В файле не нашлось пар «вопрос покупателя → ответ магазина». Нужен result.json из «Экспорта данных» Telegram Desktop в формате JSON.');
+      let added = 0;
+      for (let i = 0; i < pairs.length; i += 400) {
+        setState(`Загружаю: ${Math.min(i + 400, pairs.length)} из ${pairs.length} пар…`);
+        added += (await reviewsApi.importTg(pairs.slice(i, i + 400))).added;
+      }
+      setState(`Готово: диалогов ${dialogs}, пар ${pairs.length}, новых ${added}.`);
+      reload();
+    } catch (e: any) { setState(e?.message || 'Ошибка'); }
+  };
+  return (
+    <div className="card">
+      <div className="card-title">Архив Telegram</div>
+      <div className="muted" style={{ fontSize: 13 }}>
+        В базе: {stats.pairs} пар «вопрос → ответ» из {stats.dialogs} диалогов{stats.lastDate ? `, последний ответ ${stats.lastDate}` : ''}.
+        Файл разбирается здесь, в браузере: на сервер уходят только пары без имён; телефоны и @username вырезаются. В GitHub архив не попадает.
+      </div>
+      <details style={{ marginTop: 8, fontSize: 13 }}>
+        <summary>Как выгрузить</summary>
+        Telegram Desktop под аккаунтом, куда пишут покупатели → Настройки → Продвинутые → «Экспорт данных из Telegram» → только «Личные чаты» →
+        формат «Машиночитаемый JSON», медиа не включать → «Экспортировать». Файл result.json лежит в Загрузки\Telegram Desktop\ChatExport_ДАТА.
+        Копию удобно хранить в «C:\Все для CLAUDE\Агент 4 — Отзывы и вопросы\02 Telegram-архивы».
+      </details>
+      <div className="row gap-8" style={{ marginTop: 8 }}>
+        <input ref={input} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={e => e.target.files?.[0] && onFile(e.target.files[0])} />
+        <button className="btn btn-sm" onClick={() => input.current?.click()}>Загрузить result.json</button>
+        {state && <span className="muted" style={{ fontSize: 12 }}>{state}</span>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Журнал ────────────────────────────────────────────────────────────────
+function LogTab() {
+  const [d, setD] = useState<Awaited<ReturnType<typeof reviewsApi.log>> | null>(null);
+  useEffect(() => { reviewsApi.log().then(setD).catch(() => setD({ log: [], usage: [] } as any)); }, []);
+  const byDay = useMemo(() => {
+    const m = new Map<string, { cost: number; calls: number }>();
+    for (const u of d?.usage || []) { const x = m.get(u.day) || { cost: 0, calls: 0 }; x.cost += u.cost; x.calls += u.calls; m.set(u.day, x); }
+    return [...m.entries()];
+  }, [d]);
+  if (!d) return <div className="muted"><SpinnerIcon size={14} className="spin" /> Загружаю…</div>;
+  return (
+    <div className="grid grid-2" style={{ gap: 16, alignItems: 'start' }}>
+      <div className="card">
+        <div className="card-title">Расход Claude по дням</div>
+        {!byDay.length && <div className="muted">Вызовов ещё не было.</div>}
+        {byDay.map(([day, x]) => <div key={day} className="flex-between" style={{ fontSize: 13 }}><span>{day}</span><span>{usd(x.cost)} · {x.calls} выз.</span></div>)}
+      </div>
+      <div className="card">
+        <div className="card-title">События</div>
+        <div style={{ maxHeight: 520, overflow: 'auto', fontSize: 12 }}>
+          {d.log.map((l, i) => (
+            <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid var(--border)', color: l.level === 'error' ? 'var(--bad)' : l.level === 'warn' ? 'var(--warn)' : undefined }}>
+              <span className="muted">{fmtDate(l.at)}</span> {l.message}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Настройки ─────────────────────────────────────────────────────────────
+function SettingsTab({ ov, onSaved }: { ov: ReviewsOverview; onSaved: (s: ReviewsOverview['settings']) => void }) {
+  const [s, setS] = useState(ov.settings);
+  const [state, setState] = useState<string | null>(null);
+  const save = async () => {
+    setState('сохраняю…');
+    try { const r = await reviewsApi.saveSettings(s); onSaved(r.settings); setState('сохранено'); } catch (e: any) { setState(e?.message || 'ошибка'); }
+  };
+  const num = (k: keyof typeof s) => (e: any) => setS({ ...s, [k]: Number(e.target.value) });
+  return (
+    <div className="card" style={{ maxWidth: 640 }}>
+      <div className="field"><label className="field-label">Ссылка на папку Яндекс.Диска (доступ по ссылке)</label>
+        <input className="input" value={s.yandexDiskUrl} onChange={e => setS({ ...s, yandexDiskUrl: e.target.value })} placeholder="https://disk.yandex.ru/d/…" /></div>
+      <div className="grid grid-2" style={{ gap: 12 }}>
+        <div className="field"><label className="field-label">Подлимит раздела на Claude, $ в месяц</label>
+          <input className="input" type="number" min={0} step={1} value={s.monthlyBudgetUsd} onChange={num('monthlyBudgetUsd')} /></div>
+        <div className="field"><label className="field-label">Общий лимит ключа, $ в месяц (для подписи)</label>
+          <input className="input" type="number" min={0} step={1} value={s.keyBudgetUsd} onChange={num('keyBudgetUsd')} /></div>
+        <div className="field"><label className="field-label">Отзывы с оценкой не выше — всегда на проверку</label>
+          <input className="input" type="number" min={0} max={5} value={s.escalateRatingMax} onChange={num('escalateRatingMax')} /></div>
+        <div className="field"><label className="field-label">Черновики после каждого сбора</label>
+          <label className="row gap-8"><input type="checkbox" checked={s.autoDraft} onChange={e => setS({ ...s, autoDraft: e.target.checked })} /> готовить автоматически</label></div>
+        <div className="field"><label className="field-label">Модель черновиков</label>
+          <input className="input" value={s.draftModel} onChange={e => setS({ ...s, draftModel: e.target.value })} /></div>
+        <div className="field"><label className="field-label">Модель чтения PDF и фото</label>
+          <input className="input" value={s.indexModel} onChange={e => setS({ ...s, indexModel: e.target.value })} /></div>
+      </div>
+      <div className="row gap-8"><button className="btn btn-primary" onClick={save}>Сохранить</button>{state && <span className="muted">{state}</span>}</div>
     </div>
   );
 }

@@ -163,18 +163,32 @@ export function cleanKnowledge(text: string): string {
 const PDF_PROMPT = 'Это материал о товаре интернет-магазина (инструкция, описание, упаковка). Выпиши из него по-русски всё, что пригодится, чтобы отвечать покупателям: характеристики с цифрами, комплектацию, как пользоваться, ограничения и меры безопасности, частые проблемы и их решения, гарантию. Сжато, списками, без вступлений, до 900 слов. Если полезного нет — ответь одним словом НЕТ.';
 const IMG_PROMPT = 'Это фото/картинка о товаре интернет-магазина. Перепиши по-русски полезный для покупателя текст с картинки (характеристики, размеры, комплектация) и перечисли, что входит в комплект, если это видно. Сжато, до 200 слов. Если полезного нет — ответь одним словом НЕТ.';
 
+/** Запрос к Claude идёт через релей Vercel, а у него предел тела запроса ~4,5 МБ. */
+const MAX_INLINE_BYTES = 3_200_000;
+
 async function extractWithClaude(kind: 'pdf' | 'image', url: string, name: string, model: string): Promise<string> {
+  // Ссылку Диска Claude сам открыть не может (robots.txt Яндекса запрещает) —
+  // скачиваем на сервере и отправляем содержимое файла.
+  const r = await fetch(url, { signal: AbortSignal.timeout(90_000) });
+  if (!r.ok) throw new Error(`Яндекс.Диск: файл не скачался (${r.status})`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.length > MAX_INLINE_BYTES) {
+    throw new SkipFile(`файл ${(buf.length / 1e6).toFixed(1)} МБ — больше 3 МБ, через релей не пройдёт; сожмите PDF или перенесите характеристики в Word`);
+  }
   const ext = name.toLowerCase().split('.').pop();
+  const data = buf.toString('base64');
   const block = kind === 'pdf'
-    ? { type: 'document', source: { type: 'url', url } }
-    : { type: 'image', source: { type: 'url', url } };
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
+    : { type: 'image', source: { type: 'base64', media_type: ext === 'png' ? 'image/png' : 'image/jpeg', data } };
   const { text } = await askClaude(kind === 'pdf' ? 'index-pdf' : 'index-image', {
     model, max_tokens: kind === 'pdf' ? 1800 : 500, temperature: 0,
     messages: [{ role: 'user', content: [block, { type: 'text', text: kind === 'pdf' ? PDF_PROMPT : IMG_PROMPT }] }],
   });
-  void ext;
   return /^\s*НЕТ\.?\s*$/i.test(text) ? '' : text.trim();
 }
+
+/** Файл осознанно пропущен (слишком большой и т.п.) — не ошибка, повторять не нужно. */
+class SkipFile extends Error {}
 
 function norm(s: string): string { return s.toUpperCase().replace(/[\s_]+/g, '').replace(/[,./\\]/g, ''); }
 
@@ -290,14 +304,15 @@ export function indexYandexDisk(): Promise<any> {
             rec.text = docxText(buf).slice(0, 20_000); rec.status = 'done';
           } else if (/\.pdf$/i.test(f.name)) {
             if (ENG.test(f.name + f.path) && hasRuInstr) { rec.status = 'skipped'; rec.note = 'есть русская инструкция'; }
-            else if ((f.size || 0) > 30e6) { rec.status = 'skipped'; rec.note = 'файл больше 30 МБ'; }
+            else if ((f.size || 0) > 3.2e6) { rec.status = 'skipped'; rec.note = `файл ${((f.size || 0) / 1e6).toFixed(1)} МБ — больше 3 МБ; сожмите PDF или перенесите характеристики в Word`; }
             else { rec.text = await extractWithClaude('pdf', await ydDownloadUrl(s.yandexDiskUrl, f.path), f.name, s.indexModel); rec.status = 'done'; }
           } else if (IMG_EXT.test(f.name)) {
             if (!IMG_USEFUL.test(f.name + ' ' + f.path)) { rec.status = 'skipped'; rec.note = 'обычное фото (можно отметить «прочитать»)'; }
-            else if ((f.size || 0) > 5e6) { rec.status = 'skipped'; rec.note = 'картинка больше 5 МБ'; }
+            else if ((f.size || 0) > 3.2e6) { rec.status = 'skipped'; rec.note = 'картинка больше 3 МБ'; }
             else { rec.text = await extractWithClaude('image', await ydDownloadUrl(s.yandexDiskUrl, f.path), f.name, s.indexModel); rec.status = 'done'; }
           } else { rec.status = 'skipped'; rec.note = 'неизвестный тип'; }
         } catch (e) {
+          if (e instanceof SkipFile) { rec.status = 'skipped'; rec.note = e.message; outFiles.push(rec); progress.done++; continue; }
           rec.status = 'error'; rec.note = String((e as Error)?.message ?? e).slice(0, 200);
           if (/Подлимит/.test(rec.note)) { progress.error = rec.note; }
         }

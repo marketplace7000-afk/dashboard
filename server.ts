@@ -96,6 +96,10 @@ app.listen(PORT, '0.0.0.0', () => {
     .then(m => m.scheduleCostsSync())
     .catch(e => console.warn('[costs] таймер сверки не запущен:', (e as Error).message));
   startTelegramBotSafe();
+  // Агент 4 «Отзывы и вопросы»: сбор каждые 30 мин + черновики + Яндекс.Диск ночью.
+  import('./api/_lib/reviews')
+    .then(m => m.scheduleReviews())
+    .catch(e => console.warn('[reviews] таймер не запущен:', (e as Error).message));
 });
 
 // Telegram-бот (если задан TELEGRAM_BOT_TOKEN). Импортим лениво, чтобы любая

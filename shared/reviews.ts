@@ -1,5 +1,5 @@
 /**
- * Агент 4 «Отзывы и вопросы» — общие типы сервера и кабинета.
+ * Агент 2 «Отзывы и вопросы» — общие типы сервера и кабинета.
  * ТЗ: проект Claude «Агенты для маркетплейсов», claude/ТЗ-агент-отзывы.md (v0.5).
  */
 
@@ -104,25 +104,16 @@ export type ReviewsOverview = {
   settings: ReviewSettings;
 };
 
-/** Ключи текстов базы знаний. */
-export type KbTextKey = 'tone' | 'faq' | 'scripts' | 'templates_5' | 'templates_4' | 'templates_low';
-export const KB_TEXT_TITLES: Record<KbTextKey, string> = {
-  tone: 'Правила тона',
-  faq: 'FAQ: доставка, возврат, гарантия',
-  scripts: 'Скрипты конфликтных ситуаций',
-  templates_5: 'Шаблоны на отзыв 5★ без текста (по одному в строке)',
-  templates_4: 'Шаблоны на отзыв 4★ без текста (по одному в строке)',
-  templates_low: 'Шаблоны на отзыв 1–3★ без текста (по одному в строке)',
-};
-
 export type KbFolder = {
   path: string;
   offerIds: string[];
   suggested: string[];
   confirmed: boolean;
-  files: { name: string; kind: string; status: 'done' | 'skipped' | 'pending' | 'error'; note?: string }[];
+  files: { name: string; kind: string; status: 'done' | 'skipped' | 'pending' | 'error'; note?: string; via?: string }[];
   textChars: number;
   updatedAt: number | null;
+  /** Когда папка впервые появилась на Диске (для пометки «новая»). */
+  firstSeenAt: number | null;
 };
 
 /** Пара «вопрос покупателя → ответ магазина» из архива Telegram (разбирается в браузере). */

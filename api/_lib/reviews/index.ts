@@ -1,7 +1,8 @@
 /**
- * /api/reviews/* — раздел «Отзывы и вопросы» (агент 4). Только после requireAuth.
- * Плюс собственный таймер сервера: сбор каждые 30 мин, черновики после сбора,
- * Яндекс.Диск — раз в сутки ночью (раздел 15 ТЗ).
+ * /api/reviews/* — раздел «Отзывы и вопросы» (агент 2). Только после requireAuth.
+ * Плюс собственный таймер сервера: каждые 30 мин — сбор, догрузка истории, чаты
+ * покупателей, черновики; Яндекс.Диск — каждые 6 часов (03/09/15/21 МСК);
+ * карточки товаров — раз в сутки; профиль стиля — раз в неделю.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
@@ -11,10 +12,14 @@ import { collectAll } from './collect';
 import { draftOne, draftPending } from './drafts';
 import { publishAnswer } from './publish';
 import {
-  getKbTexts, setKbText, listFolders, confirmFolder, folderText, indexYandexDisk, indexProgress,
-  importTgPairs, tgStats, offersWithoutMaterials,
+  listFolders, confirmFolder, folderText, indexYandexDisk, indexProgress, lastDiskSync,
+  importTgPairs, tgStats, offersWithoutMaterials, havePoppler,
 } from './kb';
-import { DIRECTIONS, KB_TEXT_TITLES, type ReviewCounters, type ReviewView, type KbTextKey } from '../../../shared/reviews';
+import {
+  refreshCards, cardStats, syncChats, chatStats, getStyleProfile, buildStyleProfile, styleProfileDue,
+} from './sources';
+import { kvGet, kvUpdatedAt } from './db';
+import { DIRECTIONS, type ReviewCounters, type ReviewView } from '../../../shared/reviews';
 
 function body(req: VercelRequest): any {
   if (typeof req.body === 'string') { try { return JSON.parse(req.body || '{}'); } catch { return {}; } }
@@ -123,16 +128,27 @@ export async function handleReviews(req: VercelRequest, res: VercelResponse, res
     }
     if (a === 'kb') {
       if (!b && req.method === 'GET') {
+        const hist = (k: string) => kvGet<any>(k, null);
+        const answered = (getDb().prepare(`SELECT marketplace, kind, COUNT(*) AS n FROM items
+          WHERE mp_answer IS NOT NULL AND mp_answer <> '' GROUP BY marketplace, kind`).all() as any[]);
         return res.status(200).json({
-          ok: true, texts: getKbTexts(), titles: KB_TEXT_TITLES, folders: listFolders(), telegram: tgStats(),
-          index: indexProgress(), withoutMaterials: offersWithoutMaterials(),
+          ok: true, folders: listFolders(), telegram: tgStats(), chats: chatStats(), cards: cardStats(),
+          index: indexProgress(), diskSync: lastDiskSync(), withoutMaterials: offersWithoutMaterials(),
+          poppler: await havePoppler(), style: getStyleProfile(),
+          history: {
+            answered,
+            done: {
+              wb_reviews: !!hist('hist:wb_reviews')?.done && !!hist('hist:wb_reviews_archive')?.done,
+              wb_questions: !!hist('hist:wb_questions')?.done,
+              ozon_questions: !!hist('hist:ozon_questions')?.done,
+            },
+          },
         });
       }
-      if (b === 'text' && req.method === 'POST') {
-        const p = body(req);
-        if (!(p.key in KB_TEXT_TITLES)) return res.status(400).json({ ok: false, error: 'bad_key' });
-        setKbText(p.key as KbTextKey, String(p.text ?? ''));
-        return res.status(200).json({ ok: true });
+      if (b === 'style' && req.method === 'POST') return res.status(200).json({ ok: true, style: await buildStyleProfile() });
+      if (b === 'sources' && req.method === 'POST') {
+        const [cards, chats] = await Promise.all([refreshCards(), syncChats()]);
+        return res.status(200).json({ ok: true, cards, chats });
       }
       if (b === 'folder' && req.method === 'GET') return res.status(200).json({ ok: true, text: folderText(String(req.query.path || '')) });
       if (b === 'folder' && req.method === 'POST') {
@@ -159,21 +175,39 @@ export async function handleReviews(req: VercelRequest, res: VercelResponse, res
 
 // ─── Таймер сервера ────────────────────────────────────────────────────────
 const EVERY_MS = 30 * 60_000;
-let lastDiskDay = '';
+const DISK_HOURS = new Set([3, 9, 15, 21]);
+let lastDiskSlot = '';
+let lastSecondary = 0;
 
 export function scheduleReviews(): void {
+  let ticking = false;
   const tick = async () => {
+    if (ticking) return;
+    ticking = true;
+    try { await tickOnce(); } finally { ticking = false; }
+  };
+  const tickOnce = async () => {
     try {
       await collectAll();
-      await draftPending();
     } catch (e) {
-      console.warn('[reviews] проход не удался:', (e as Error).message);
+      console.warn('[reviews] сбор не удался:', (e as Error).message);
     }
-    // Яндекс.Диск — раз в сутки, в 03:00–04:00 МСК.
     const msk = new Date(Date.now() + 3 * 3600_000);
-    const day = msk.toISOString().slice(0, 10);
-    if (msk.getUTCHours() === 3 && day !== lastDiskDay && getSettings().yandexDiskUrl) {
-      lastDiskDay = day;
+    const slot = `${msk.toISOString().slice(0, 10)}-${msk.getUTCHours()}`;
+    // Чаты покупателей — каждый проход (по курсору, только новое).
+    await syncChats().catch(() => { /* в журнале */ });
+    // Карточки товаров — раз в сутки (и сразу, если их ещё нет).
+    const cardsAt = kvUpdatedAt('cards_refresh');
+    if (!cardsAt || Date.now() - cardsAt > 23 * 3600_000) await refreshCards().catch(() => { /* в журнале */ });
+    // Профиль стиля — раз в неделю или когда истории стало заметно больше.
+    if (Date.now() - lastSecondary > 3600_000 && styleProfileDue()) {
+      lastSecondary = Date.now();
+      await buildStyleProfile().catch(e => console.warn('[reviews] профиль стиля:', (e as Error).message));
+    }
+    try { await draftPending(); } catch (e) { console.warn('[reviews] черновики:', (e as Error).message); }
+    // Яндекс.Диск — каждые 6 часов: новые папки, изменённые и удалённые файлы (по md5).
+    if (DISK_HOURS.has(msk.getUTCHours()) && slot !== lastDiskSlot && getSettings().yandexDiskUrl) {
+      lastDiskSlot = slot;
       indexYandexDisk().catch(() => { /* в журнале */ });
     }
   };

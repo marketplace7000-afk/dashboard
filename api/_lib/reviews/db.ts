@@ -1,5 +1,5 @@
 /**
- * Агент 4 «Отзывы и вопросы» — хранилище.
+ * Агент 2 «Отзывы и вопросы» — хранилище.
  * SQLite (node:sqlite, как agentQueue.ts): .av-cache/reviews.sqlite.
  * Тексты отзывов, база знаний и пары из Telegram — только здесь, в git не попадают.
  */
@@ -77,7 +77,18 @@ export function getDb(): any {
         model TEXT NOT NULL, input_tokens INTEGER, output_tokens INTEGER,
         cache_read INTEGER, cache_write INTEGER, cost_usd REAL NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS kb_cards (
+        marketplace TEXT NOT NULL, offer_id TEXT NOT NULL, name TEXT, text TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL, PRIMARY KEY (marketplace, offer_id)
+      );
+      CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
     `);
+    // Миграции: переписка из чатов площадок лежит рядом с Telegram (source = tg | wb_chat | ozon_chat).
+    for (const sql of [
+      "ALTER TABLE kb_tg ADD COLUMN source TEXT NOT NULL DEFAULT 'tg'",
+      'ALTER TABLE kb_tg ADD COLUMN offer_id TEXT',
+      'ALTER TABLE kb_folders ADD COLUMN first_seen_at INTEGER',
+    ]) { try { db.exec(sql); } catch { /* колонка уже есть */ } }
     return db;
   } catch (e) {
     initFailed = true;
@@ -245,4 +256,19 @@ export function usageByDay(days = 31): { day: string; purpose: string; cost: num
   return getDb().prepare(`SELECT strftime('%Y-%m-%d', (at / 1000) + 10800, 'unixepoch') AS day, purpose,
       SUM(cost_usd) AS cost, COUNT(*) AS calls FROM usage WHERE at >= ? GROUP BY day, purpose ORDER BY day DESC`)
     .all(since) as any[];
+}
+
+// ─── Служебные значения (курсоры догрузки истории, профиль стиля) ────────────
+export function kvGet<T = any>(key: string, fallback: T): T {
+  const r = getDb().prepare('SELECT value FROM kv WHERE key = ?').get(key) as any;
+  return r ? safeJson(r.value, fallback) : fallback;
+}
+export function kvSet(key: string, value: unknown): void {
+  getDb().prepare(`INSERT INTO kv (key, value, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+    .run(key, JSON.stringify(value), Date.now());
+}
+export function kvUpdatedAt(key: string): number | null {
+  const r = getDb().prepare('SELECT updated_at FROM kv WHERE key = ?').get(key) as any;
+  return r ? r.updated_at : null;
 }

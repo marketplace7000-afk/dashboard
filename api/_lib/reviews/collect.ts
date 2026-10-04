@@ -8,7 +8,7 @@
  */
 import { wbUpstream, ozonUpstream } from '../../_proxy';
 import { fetchWithRetry } from '../fetchRetry';
-import { upsertItem, markAnsweredExcept, setCollectState, rlog, getDb } from './db';
+import { upsertItem, markAnsweredExcept, setCollectState, rlog, getDb, kvGet, kvSet } from './db';
 
 const OZON_REVIEWS_NOTE = 'Ozon не отдаёт отзывы по API на текущей подписке (Premium Plus, проверено 04.10). Сбор — через агента на ПК, этап в разработке.';
 
@@ -66,16 +66,19 @@ async function collectWbFeedbacks(withHistory: boolean): Promise<{ total: number
     if (r.inserted) added++;
   }
   const closed = markAnsweredExcept('wb', 'review', ids);
+  const saveAnswered = (f: any) => upsertItem({
+    marketplace: 'wb', kind: 'review', externalId: String(f.id), ...wbProduct(f),
+    rating: Number(f.productValuation) || null, text: f.text || '', pros: f.pros || null, cons: f.cons || null,
+    author: f.userName || null, createdAt: ts(f.createdDate), answered: true, mpAnswer: f.answer?.text || null,
+  });
   if (withHistory) {
     const hist = await wbGet('/api/v1/feedbacks?isAnswered=true&take=500&skip=0&order=dateDesc');
-    for (const f of (hist.feedbacks || [])) {
-      upsertItem({
-        marketplace: 'wb', kind: 'review', externalId: String(f.id), ...wbProduct(f),
-        rating: Number(f.productValuation) || null, text: f.text || '', pros: f.pros || null, cons: f.cons || null,
-        author: f.userName || null, createdAt: ts(f.createdDate), answered: true, mpAnswer: f.answer?.text || null,
-      });
-    }
+    for (const f of (hist.feedbacks || [])) saveAnswered(f);
   }
+  // Догрузка всей истории ответов (обработанные + архив) — по странице за проход,
+  // пока не дойдём до конца. Нужна, чтобы ИИ учился на нашей реальной работе.
+  await backfillWb('hist:wb_reviews', '/api/v1/feedbacks?isAnswered=true', 'feedbacks', 2000, saveAnswered);
+  await backfillWb('hist:wb_reviews_archive', '/api/v1/feedbacks/archive?', 'feedbacks', 2000, saveAnswered);
   void closed;
   return { total: list.length, added };
 }
@@ -94,17 +97,34 @@ async function collectWbQuestions(withHistory: boolean): Promise<{ total: number
     if (r.inserted) added++;
   }
   markAnsweredExcept('wb', 'question', ids);
+  const saveAnswered = (q: any) => upsertItem({
+    marketplace: 'wb', kind: 'question', externalId: String(q.id), ...wbProduct(q),
+    text: q.text || '', author: q.userName || null, createdAt: ts(q.createdDate), answered: true,
+    mpAnswer: q.answer?.text || null,
+  });
   if (withHistory) {
     const hist = await wbGet('/api/v1/questions?isAnswered=true&take=500&skip=0&order=dateDesc');
-    for (const q of (hist.questions || [])) {
-      upsertItem({
-        marketplace: 'wb', kind: 'question', externalId: String(q.id), ...wbProduct(q),
-        text: q.text || '', author: q.userName || null, createdAt: ts(q.createdDate), answered: true,
-        mpAnswer: q.answer?.text || null,
-      });
-    }
+    for (const q of (hist.questions || [])) saveAnswered(q);
   }
+  await backfillWb('hist:wb_questions', '/api/v1/questions?isAnswered=true', 'questions', 2000, saveAnswered);
   return { total: list.length, added };
+}
+
+/** Одна страница догрузки истории WB; курсор (skip) хранится в kv. */
+async function backfillWb(key: string, base: string, field: string, take: number, save: (x: any) => void): Promise<void> {
+  const st = kvGet<{ skip: number; done: boolean }>(key, { skip: 0, done: false });
+  if (st.done) return;
+  try {
+    const sep = base.endsWith('?') ? '' : '&';
+    const page = await wbGet(`${base}${sep}take=${take}&skip=${st.skip}&order=dateDesc`);
+    const list: any[] = page?.[field] || [];
+    for (const x of list) save(x);
+    const next = { skip: st.skip + list.length, done: list.length < take || st.skip + list.length >= 199_000 };
+    kvSet(key, next);
+    if (next.done) rlog('info', `История загружена: ${key}`, { total: next.skip });
+  } catch (e) {
+    rlog('warn', `Догрузка истории ${key} не удалась`, { error: String((e as Error)?.message ?? e).slice(0, 200) });
+  }
 }
 
 // ─── Ozon: вопросы ─────────────────────────────────────────────────────────
@@ -138,33 +158,57 @@ async function collectOzonQuestions(withHistory: boolean): Promise<{ total: numb
   }
   if (complete) markAnsweredExcept('ozon', 'question', ids);
 
-  if (withHistory) await collectOzonQuestionHistory(skuMap);
+  await collectOzonQuestionHistory(skuMap, withHistory);
   return { total: ids.size, added };
 }
 
-/** Отвеченные вопросы + текст ответа магазина — примеры стиля. Не больше 30 ответов за проход. */
-async function collectOzonQuestionHistory(skuMap: Record<string, string>): Promise<void> {
-  let lastId = '';
-  for (let page = 0; page < 10; page++) {
-    const r = await ozonQuestionsPage('PROCESSED', lastId);
-    for (const q of r.questions || []) {
-      const sku = q.sku ? String(q.sku) : null;
-      upsertItem({
-        marketplace: 'ozon', kind: 'question', externalId: String(q.id),
-        sku, offerId: sku ? (skuMap[sku] || null) : null, productUrl: q.question_link || q.product_url || null,
-        text: q.text || '', author: q.author_name || null, createdAt: ts(q.published_at), answered: true,
-      });
+/**
+ * Отвеченные вопросы + текст ответа магазина — примеры нашей работы.
+ * Свежие 10 страниц раз в 6 часов; вся история — догрузкой по 20 страниц за проход;
+ * тексты ответов — до 100 за проход (отдельный запрос на каждый вопрос).
+ */
+async function collectOzonQuestionHistory(skuMap: Record<string, string>, recent: boolean): Promise<void> {
+  const save = (q: any) => {
+    const sku = q.sku ? String(q.sku) : null;
+    upsertItem({
+      marketplace: 'ozon', kind: 'question', externalId: String(q.id),
+      sku, offerId: sku ? (skuMap[sku] || null) : null, productUrl: q.question_link || q.product_url || null,
+      text: q.text || '', author: q.author_name || null, createdAt: ts(q.published_at), answered: true,
+    });
+  };
+  if (recent) {
+    let lastId = '';
+    for (let page = 0; page < 10; page++) {
+      const r = await ozonQuestionsPage('PROCESSED', lastId);
+      for (const q of r.questions || []) save(q);
+      if (!r.has_next || !r.last_id) break;
+      lastId = r.last_id;
     }
-    if (!r.has_next || !r.last_id) break;
-    lastId = r.last_id;
+  }
+  const st = kvGet<{ lastId: string; done: boolean; n: number }>('hist:ozon_questions', { lastId: '', done: false, n: 0 });
+  if (!st.done) {
+    try {
+      for (let page = 0; page < 20; page++) {
+        const r = await ozonQuestionsPage('PROCESSED', st.lastId);
+        for (const q of r.questions || []) save(q);
+        st.n += (r.questions || []).length;
+        if (!r.has_next || !r.last_id) { st.done = true; break; }
+        st.lastId = r.last_id;
+      }
+    } catch (e) {
+      rlog('warn', 'Ozon: догрузка истории вопросов прервалась', { error: String((e as Error).message).slice(0, 200) });
+    }
+    kvSet('hist:ozon_questions', st);
+    if (st.done) rlog('info', 'Ozon: история вопросов загружена', { total: st.n });
   }
   const need = getDb().prepare(`SELECT id, external_id, sku FROM items WHERE marketplace = 'ozon' AND kind = 'question'
-    AND answered_on_mp = 1 AND mp_answer IS NULL AND sku IS NOT NULL ORDER BY created_at DESC LIMIT 30`).all() as any[];
+    AND answered_on_mp = 1 AND mp_answer IS NULL AND sku IS NOT NULL ORDER BY created_at DESC LIMIT 100`).all() as any[];
   for (const row of need) {
     try {
       const a = await ozonPost('/v1/question/answer/list', { question_id: row.external_id, sku: Number(row.sku), last_id: '' });
       const text = (a.answers || []).map((x: any) => x.text).filter(Boolean).join('\n');
       getDb().prepare('UPDATE items SET mp_answer = ? WHERE id = ?').run(text || '', row.id);
+      await new Promise(res => setTimeout(res, 300));
     } catch (e) {
       rlog('warn', 'Ozon: не удалось получить ответ на вопрос', { id: row.external_id, error: String((e as Error).message) });
       break;

@@ -1,49 +1,48 @@
 /**
- * Черновики ответов (разделы 8, 10, 15 ТЗ) и автопубликация (раздел 7).
- * Модель — из настроек (по умолчанию claude-sonnet-5-5); неизменная часть
- * промпта кэшируется. Эскалация решается моделью И перепроверяется кодом.
+ * Черновики ответов агента 2 «Отзывы и вопросы» и автопубликация.
+ * Ответ всегда собирается под конкретный отзыв/вопрос и товар — шаблонов нет.
+ * Опора: профиль стиля (выжимка из наших реальных ответов), карточка товара с площадок,
+ * материалы с Яндекс.Диска, похожие прошлые ответы и переписка с покупателями.
+ * Эскалация решается моделью И перепроверяется кодом.
  */
 import { getDb, getItem, patchItem, getSettings, rlog, rowToItem } from './db';
 import { askClaude, BudgetExceeded, budgetState } from './claude';
-import { getKbTexts, productKnowledge, similarPastAnswers, similarTgPairs } from './kb';
+import { productKnowledge, similarPastAnswers, similarTgPairs, recentAnswers } from './kb';
+import { getStyleProfile } from './sources';
 import { publishAnswer } from './publish';
 import { directionOf, type ReviewItem } from '../../../shared/reviews';
 
-export const SYSTEM_PROMPT = `Ты — специалист поддержки покупателей интернет-магазина автотоваров и электроники «avto-vibe» (продажи на Wildberries и Ozon). Отвечаешь от имени магазина на отзывы и вопросы покупателей на карточках товаров.
+export const SYSTEM_PROMPT = `Ты — сотрудник поддержки интернет-магазина автотоваров и электроники «avto-vibe» (Wildberries и Ozon). Пишешь ответ магазина на отзыв или вопрос покупателя на карточке товара. Ответ публичный: его читает не только автор, но и все, кто выбирает этот товар.
 
-ТВОЙ ТОН:
-- Дружелюбно, по-деловому, без канцелярита и без заискивания.
-- Коротко: 1–4 предложения, если не требуется больше для сути ответа.
-- Всегда на русском, обращение на «вы».
-- На позитивный отзыв — благодарность и 1 короткая деталь по товару, без навязчивых призывов что-то купить ещё.
-- На вопрос — сразу конкретный ответ (цифры, характеристики, факты), без воды в начале.
-- На негатив/жалобу — без оправданий и без споров: признать ситуацию, извиниться по существу, предложить конкретное решение или следующий шаг.
-- Никогда не груби и не защищайся, даже если покупатель резок.
-- Пиши так, как отвечает магазин в примерах прошлых ответов.
+ГЛАВНОЕ: каждый ответ — личный. Он про ЭТОГО покупателя, ЭТОТ товар и ЭТУ ситуацию. Никаких шаблонных фраз, которые подошли бы к любому отзыву. Опирайся на то, что написал покупатель (его слова, его сценарий, его машину/устройство), и на факты о товаре.
 
-ТЕБЕ ДАНЫ (используй только это, не придумывай факты о товаре или политике магазина):
-1. Текст отзыва/вопроса, оценка (если есть), название и артикул товара.
-2. Правила тона и FAQ магазина.
-3. Карточка знаний товара (текст из инструкций, описаний, фото).
-4. Похожие прошлые ответы магазина на площадках — не противоречь им.
-5. Скрипты для конфликтных ситуаций.
-6. Похожие вопросы покупателей и ответы магазина из Telegram.
+КАК ОТВЕЧАТЬ:
+- Пиши так, как отвечает наш магазин (профиль стиля и прошлые ответы ниже) — но не копируй их дословно.
+- Благодарность (4–5★): поблагодари по-человечески, зацепись за конкретную деталь из отзыва, можно добавить одну полезную подсказку по использованию товара. Без навязчивых «покупайте ещё».
+- Отзыв без текста: короткая живая благодарность с упоминанием товара; не повторяй формулировки из списка «уже написано».
+- Вопрос: сразу по существу — факты, цифры, совместимость, порядок настройки. Без воды в начале.
+- Негатив и жалобы: без оправданий, без спора и без перекладывания вины на покупателя. Признай неудобство, покажи, что разобрались в его ситуации, дай конкретный следующий шаг (проверить настройку X, сделать Y, оформить возврат/обмен через личный кабинет площадки, написать нам в чат продавца на площадке — если так делал магазин). Цель — снять напряжение и вывести разговор в решение, чтобы и автор, и читатели увидели заботу.
+- Если покупатель ошибся в использовании — мягко подскажи, как правильно, не упрекая.
+- Обращение на «вы», по-русски, 1–5 предложений (больше — только если без этого не ответить на вопрос).
 
 ЖЁСТКИЕ ПРАВИЛА:
-- Если в материалах нет точного ответа (характеристика, срок, комплектация, причина неисправности и т.п.) — НЕ ДОГАДЫВАЙСЯ. Верни confidence "low" и нейтральный ответ без цифр, которых не знаешь.
-- Не обещай возврат денег, замену или компенсацию, если этого нет в выданных скриптах.
-- Не давай гарантий сверх указанных в материалах, без юридических и медицинских формулировок.
-- Не упоминай Telegram, другие площадки, телефоны и внешние ссылки, если этого нет в правилах магазина (площадки это запрещают).
-- Отвечай на русском.
+- Факты о товаре — только из выданных материалов (карточка, материалы Диска, прошлые ответы). Если точного ответа нет — НЕ ДОГАДЫВАЙСЯ: confidence "low", ответ без выдуманных цифр.
+- Не обещай денег, компенсаций, замены или подарков, которых магазин не предлагал в прошлых ответах.
+- Не пиши ссылок, телефонов, мессенджеров (Telegram, WhatsApp, Макс и т.п.), названий других площадок — это запрещено правилами WB и Ozon, даже если так было в старой переписке.
+- Не раскрывай поставщиков, закупочные цены, внутренние дела магазина.
+- Не груби и не иронизируй, даже если покупатель резок.
 
 ВЕРНИ СТРОГО JSON без пояснений вокруг:
-{"answer": "текст ответа покупателю", "confidence": "high"|"medium"|"low", "category": "positive"|"neutral"|"negative"|"complaint"|"question", "needs_escalation": true|false, "escalation_reason": "до 12 слов или null", "sources_used": ["faq", "product:<артикул>", "history:<id>", "telegram:<id>", "script"]}
+{"answer": "текст ответа покупателю", "confidence": "high"|"medium"|"low", "category": "positive"|"neutral"|"negative"|"complaint"|"question", "needs_escalation": true|false, "escalation_reason": "до 12 слов или null", "sources_used": ["style", "card:<артикул>", "product:<артикул>", "history:<id>", "chat:<id>"]}
 
 needs_escalation = true, если: confidence = "low", ИЛИ брак/подделка/повреждение/возврат/замена, ИЛИ грубость/угрозы/суд/Роспотребнадзор/жалоба, ИЛИ оценка 1–2. Иначе — false.`;
 
 /** Перепроверка кодом — модель не единственная защита (раздел 10 ТЗ). */
 const RISK = /брак|сломал|слома|не работа|неисправ|поддел|фейк|копия|подделк|поврежд|разбит|трещин|вернуть|возврат|верните|замен|деньги наз|суд|роспотреб|прокурат|жалоб|мошен|обман|кидал|развод|отказ.*гарант/i;
 const RUDE = /(^|[^а-яё])(х[уy][йяеи]|п[иi]зд|еба|ёба|бля|сук[аи]|муда|говн|дерьм)/i;
+
+/** Ссылки и контакты в ответе площадки запрещают — такой черновик только вручную. */
+export const FORBIDDEN = /https?:\/\/|www\.|taplink|t\.me|telegram|телеграм|whats ?app|ватсап|вотсап|viber|вайбер|\bмакс\b|@[a-z0-9_]{4,}|\+7[\s(-]*\d{3}|8[\s(-]*\d{3}[\s)-]*\d{3}[\s-]*\d{2}/i;
 
 export function codeEscalation(item: Pick<ReviewItem, 'text' | 'pros' | 'cons' | 'rating' | 'kind'>, ratingMax: number): string | null {
   const t = `${item.text || ''} ${item.pros || ''} ${item.cons || ''}`;
@@ -52,14 +51,6 @@ export function codeEscalation(item: Pick<ReviewItem, 'text' | 'pros' | 'cons' |
   const m = t.match(RISK);
   if (m) return `Риск: «${m[0]}»`;
   return null;
-}
-
-function pickTemplate(rating: number | null, texts: Record<string, string>): string | null {
-  const key = rating == null ? null : rating >= 5 ? 'templates_5' : rating === 4 ? 'templates_4' : 'templates_low';
-  if (!key) return null;
-  const lines = String(texts[key] || '').split('\n').map(s => s.trim()).filter(Boolean);
-  if (!lines.length) return null;
-  return lines[Math.floor(Math.random() * lines.length)];
 }
 
 export function extractJson(text: string): any {
@@ -88,52 +79,42 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
   if (item.answeredOnMarketplace || item.status === 'published' || item.status === 'skipped') return item;
   if (!opts.force && item.draftAnswer) return item;
   const s = getSettings();
-  const texts = getKbTexts();
   const isEmptyReview = item.kind === 'review' && !`${item.text}${item.pros || ''}${item.cons || ''}`.trim();
   const codeReason = codeEscalation(item, s.escalateRatingMax);
 
-  // Отзыв без текста — шаблон, без Claude (раздел 15).
-  if (isEmptyReview) {
-    const tpl = pickTemplate(item.rating, texts);
-    if (tpl) {
-      patchItem(id, {
-        draft_answer: tpl, draft_model: 'template', draft_cost: 0, confidence: 'high', category: 'positive',
-        escalation_reason: codeReason, status: codeReason ? 'escalated' : 'drafted', sources_used: JSON.stringify(['template']),
-        draft_attempts: 0,
-      });
-      return getItem(id);
-    }
-  }
-
-  const know = productKnowledge(item.offerId);
-  const past = similarPastAnswers(item, 5);
-  const tg = similarTgPairs(item, 5);
-
-  const staticBlock = [
-    `# Правила тона\n${texts.tone || '(не заданы — используй общий тон из инструкции)'}`,
-    `# FAQ магазина\n${texts.faq || '(не заполнен)'}`,
-    `# Скрипты конфликтных ситуаций\n${texts.scripts || '(не заполнены — по конфликтам ничего не обещай, ставь эскалацию)'}`,
-  ].join('\n\n');
+  const query = `${item.text} ${item.pros || ''} ${item.cons || ''} ${item.productName || ''}`;
+  const know = productKnowledge(item.offerId, query, isEmptyReview ? 1500 : 7000);
+  const past = similarPastAnswers(item, isEmptyReview ? 3 : 8);
+  const chats = isEmptyReview ? [] : similarTgPairs(item, 5);
+  const already = isEmptyReview ? recentAnswers('review', item.rating, 8) : [];
+  const style = getStyleProfile();
+  const chatName = (src: string) => src === 'wb_chat' ? 'чат WB' : src === 'ozon_chat' ? 'чат Ozon' : 'Telegram';
 
   const dynamic = [
     `# ${item.kind === 'review' ? 'Отзыв' : 'Вопрос'} покупателя (${item.marketplace === 'wb' ? 'Wildberries' : 'Ozon'})`,
     `Товар: ${item.productName || '—'}; артикул: ${item.offerId || '—'}`,
     item.rating != null ? `Оценка: ${item.rating} из 5` : '',
+    item.author ? `Имя покупателя (можно обратиться по имени, если уместно): ${item.author}` : '',
     item.pros ? `Достоинства: ${item.pros}` : '',
     item.cons ? `Недостатки: ${item.cons}` : '',
     `Текст: ${item.text || '(без текста)'}`,
-    `\n# Карточка знаний товара\n${know.text || '(материалов по этому товару нет)'}`,
-    `\n# Похожие прошлые ответы магазина\n${past.length ? past.map(p => `[history:${p.id}] ${p.rating ? p.rating + '★ ' : ''}«${p.text}» → «${p.answer}»`).join('\n') : '(нет)'}`,
-    `\n# Похожие обращения в Telegram\n${tg.length ? tg.map(p => `[telegram:${p.id}] «${p.question}» → «${p.answer}»`).join('\n') : '(нет)'}`,
+    `\n# Что известно о товаре\n${know.text || '(ни карточки, ни материалов — опирайся только на прошлые ответы, факты не придумывай)'}`,
+    `\n# Наши прошлые ответы на похожие ${item.kind === 'review' ? 'отзывы' : 'вопросы'} (сначала — по этому товару)\n${past.length ? past.map(p => `[history:${p.id}] ${p.rating ? p.rating + '★ ' : ''}«${p.text || '(без текста)'}» → «${p.answer}»`).join('\n') : '(нет)'}`,
+    chats.length ? `\n# Похожая переписка с покупателями\n${chats.map(p => `[chat:${p.id}] (${chatName(p.source)}) «${p.question}» → «${p.answer}»`).join('\n')}` : '',
+    already.length ? `\n# Уже написано недавно (не повторяй эти формулировки)\n${already.map(t => `— ${t}`).join('\n')}` : '',
   ].filter(Boolean).join('\n');
+
+  const styleBlock = `# Профиль стиля магазина (выжимка из наших реальных ответов)\n${style?.text || '(профиль ещё не составлен — ориентируйся на прошлые ответы ниже)'}`;
+  // Отзыв без текста — короткий ответ, хватает модели подешевле.
+  const model = isEmptyReview ? s.indexModel : s.draftModel;
 
   let res;
   try {
-    res = await askClaude('draft', {
-      model: s.draftModel, max_tokens: 1500, temperature: 0.4,
+    res = await askClaude(isEmptyReview ? 'draft-short' : 'draft', {
+      model, max_tokens: isEmptyReview ? 600 : 1500, temperature: 0.6,
       system: [
         { type: 'text', text: SYSTEM_PROMPT },
-        { type: 'text', text: staticBlock, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: styleBlock, cache_control: { type: 'ephemeral' } },
       ],
       messages: [{ role: 'user', content: dynamic }],
     });
@@ -151,6 +132,7 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
   const answer = String(j.answer || '').trim().slice(0, 1000);
   const reasons = [
     codeReason,
+    FORBIDDEN.test(answer) ? 'В ответе ссылка или контакт' : null,
     j.needs_escalation ? (j.escalation_reason || 'Модель просит проверку') : null,
     j.confidence === 'low' ? 'Низкая уверенность' : null,
     !answer ? 'Пустой ответ' : null,
@@ -158,7 +140,7 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
   const reason = reasons.length ? [...new Set(reasons)].join('; ') : null;
 
   patchItem(id, {
-    draft_answer: answer, draft_model: s.draftModel, draft_cost: res.cost,
+    draft_answer: answer, draft_model: model, draft_cost: res.cost,
     confidence: ['high', 'medium', 'low'].includes(j.confidence) ? j.confidence : 'low',
     category: j.category || null, escalation_reason: reason,
     status: reason ? 'escalated' : 'drafted',
@@ -194,7 +176,7 @@ export function draftPending(limit = 40): Promise<{ drafted: number; published: 
     for (const it of ready) {
       if (!s.autoPublish[directionOf(it.marketplace, it.kind)]) continue;
       if (it.marketplace === 'ozon' && it.kind === 'review') continue;
-      const again = codeEscalation(it, s.escalateRatingMax);
+      const again = codeEscalation(it, s.escalateRatingMax) || (FORBIDDEN.test(it.draftAnswer || '') ? 'В ответе ссылка или контакт' : null);
       if (again) { patchItem(it.id, { status: 'escalated', escalation_reason: again }); continue; }
       const r = await publishAnswer(it.id, it.draftAnswer!, 'auto');
       if (r.ok) published++;

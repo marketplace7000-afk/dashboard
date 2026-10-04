@@ -1,28 +1,22 @@
 /**
- * База знаний агента 4 (разделы 4–6 ТЗ):
- *  - тексты (тон, FAQ, скрипты, шаблоны) — редактируются в кабинете;
- *  - материалы по товарам с Яндекс.Диска (публичная ссылка, без токена);
- *  - пары «вопрос → ответ» из архива Telegram (разбор в браузере владельца,
- *    на сервер приходят только очищенные пары);
- *  - подбор похожих прошлых ответов магазина.
+ * База знаний агента 2 «Отзывы и вопросы»:
+ *  - материалы по товарам с Яндекс.Диска (публичная ссылка, без токена):
+ *    Word — разбор на сервере, PDF — pdftotext (poppler) на сервере бесплатно,
+ *    сканы и картинки — Claude (Haiku); изменения на Диске подхватываются по md5;
+ *  - пары «вопрос → ответ» из архива Telegram и чатов покупателей WB/Ozon
+ *    (на сервере только очищенные пары);
+ *  - подбор похожих прошлых ответов магазина и нужных кусков материалов.
+ * Шаблонов и ручных FAQ нет: ответ собирается под конкретный отзыв и товар.
  */
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { getDb, safeJson, getSettings, rlog } from './db';
 import { unzipAll } from '../zip';
 import { askClaude } from './claude';
-import type { KbTextKey, KbFolder, TgPair, ReviewItem } from '../../../shared/reviews';
-
-// ─── Тексты ────────────────────────────────────────────────────────────────
-export function getKbTexts(): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const r of getDb().prepare('SELECT key, text FROM kb_texts').all() as any[]) out[r.key] = r.text;
-  return out;
-}
-
-export function setKbText(key: KbTextKey, text: string): void {
-  getDb().prepare(`INSERT INTO kb_texts (key, text, updated_at) VALUES (?, ?, ?)
-    ON CONFLICT(key) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`)
-    .run(key, String(text || '').slice(0, 30_000), Date.now());
-}
+import type { KbFolder, TgPair, ReviewItem } from '../../../shared/reviews';
 
 // ─── Telegram ──────────────────────────────────────────────────────────────
 const PII = [
@@ -52,7 +46,7 @@ export function importTgPairs(pairs: TgPair[]): { added: number; total: number }
 }
 
 export function tgStats(): { pairs: number; dialogs: number; lastDate: string | null } {
-  const r = getDb().prepare('SELECT COUNT(*) AS n, COUNT(DISTINCT dialog_id) AS d, MAX(date) AS last FROM kb_tg').get() as any;
+  const r = getDb().prepare("SELECT COUNT(*) AS n, COUNT(DISTINCT dialog_id) AS d, MAX(date) AS last FROM kb_tg WHERE source = 'tg'").get() as any;
   return { pairs: r.n, dialogs: r.d, lastDate: r.last };
 }
 
@@ -70,33 +64,49 @@ function score(a: Set<string>, text: string): number {
   return n;
 }
 
-export function similarTgPairs(item: ReviewItem, limit = 5): { id: string; question: string; answer: string }[] {
+/** Похожие диалоги: Telegram + чаты покупателей WB/Ozon. Свой товар — с приоритетом. */
+export function similarTgPairs(item: ReviewItem, limit = 5): { id: string; source: string; question: string; answer: string }[] {
   const q = terms(`${item.text} ${item.pros || ''} ${item.cons || ''}`);
   if (!q.size) return [];
-  const rows = getDb().prepare('SELECT dialog_id, message_id, question, answer FROM kb_tg').all() as any[];
-  const off = (item.offerId || '').toLowerCase();
+  const rows = getDb().prepare('SELECT dialog_id, message_id, question, answer, source, offer_id FROM kb_tg').all() as any[];
+  const off = (item.offerId || '').toUpperCase();
   return rows
-    .map(r => ({ r, s: score(q, r.question) + (off && r.question.toLowerCase().includes(off) ? 3 : 0) }))
+    .map(r => ({
+      r,
+      s: score(q, r.question)
+        + (off && String(r.offer_id || '').toUpperCase() === off ? 2 : 0)
+        + (off && r.question.toUpperCase().includes(off) ? 3 : 0),
+    }))
     .filter(x => x.s >= 2)
     .sort((a, b) => b.s - a.s)
     .slice(0, limit)
-    .map(x => ({ id: `${x.r.dialog_id}:${x.r.message_id}`, question: x.r.question.slice(0, 600), answer: x.r.answer.slice(0, 600) }));
+    .map(x => ({
+      id: `${x.r.dialog_id}:${x.r.message_id}`, source: x.r.source || 'tg',
+      question: x.r.question.slice(0, 600), answer: x.r.answer.slice(0, 600),
+    }));
 }
 
 export function similarPastAnswers(item: ReviewItem, limit = 5): { id: number; text: string; answer: string; rating: number | null }[] {
   const rows = getDb().prepare(`SELECT id, text, mp_answer, rating, offer_id FROM items
     WHERE kind = ? AND mp_answer IS NOT NULL AND mp_answer <> '' AND id <> ?
-    ORDER BY created_at DESC LIMIT 2000`).all(item.kind, item.id) as any[];
+    ORDER BY created_at DESC LIMIT 6000`).all(item.kind, item.id) as any[];
   const q = terms(item.text);
   return rows
     .map(r => ({
       r,
-      s: (item.offerId && r.offer_id === item.offerId ? 3 : 0) + score(q, r.text)
+      s: (item.offerId && r.offer_id === item.offerId ? 4 : 0) + score(q, `${r.text}`)
         + (item.rating && r.rating && Math.abs(item.rating - r.rating) <= 1 ? 1 : 0),
     }))
     .sort((a, b) => b.s - a.s)
     .slice(0, limit)
     .map(x => ({ id: x.r.id, text: String(x.r.text || '').slice(0, 400), answer: String(x.r.mp_answer).slice(0, 600), rating: x.r.rating }));
+}
+
+/** Последние наши ответы на похожие по оценке отзывы — чтобы не повторяться дословно. */
+export function recentAnswers(kind: string, rating: number | null, limit = 6): string[] {
+  const rows = getDb().prepare(`SELECT mp_answer FROM items WHERE kind = ? AND mp_answer IS NOT NULL AND mp_answer <> ''
+    AND (? IS NULL OR rating = ?) ORDER BY created_at DESC LIMIT ?`).all(kind, rating, rating, limit) as any[];
+  return rows.map(r => String(r.mp_answer).slice(0, 300));
 }
 
 // ─── Яндекс.Диск ───────────────────────────────────────────────────────────
@@ -165,26 +175,101 @@ const IMG_PROMPT = 'Это фото/картинка о товаре интер�
 
 /** Запрос к Claude идёт через релей Vercel, а у него предел тела запроса ~4,5 МБ. */
 const MAX_INLINE_BYTES = 3_200_000;
+/** Больше этого PDF не качаем вовсе (чтение — на сервере, но память не резиновая). */
+const MAX_PDF_BYTES = 80_000_000;
+/** Версия разбора PDF: при смене все PDF перечитываются один раз. 2 = pdftotext на сервере. */
+const PDF_VERSION = 2;
 
-async function extractWithClaude(kind: 'pdf' | 'image', url: string, name: string, model: string): Promise<string> {
-  // Ссылку Диска Claude сам открыть не может (robots.txt Яндекса запрещает) —
-  // скачиваем на сервере и отправляем содержимое файла.
-  const r = await fetch(url, { signal: AbortSignal.timeout(90_000) });
+const run = promisify(execFile);
+let popplerOk: boolean | null = null;
+export async function havePoppler(): Promise<boolean> {
+  if (popplerOk !== null) return popplerOk;
+  try { await run('pdftotext', ['-v'], { timeout: 10_000 }); popplerOk = true; } catch (e: any) {
+    // pdftotext -v пишет версию в stderr и может вернуть 0 или 99 — главное, что бинарник есть.
+    popplerOk = e?.code !== 'ENOENT';
+  }
+  return popplerOk;
+}
+
+async function download(url: string, max: number): Promise<Buffer> {
+  const r = await fetch(url, { signal: AbortSignal.timeout(180_000) });
   if (!r.ok) throw new Error(`Яндекс.Диск: файл не скачался (${r.status})`);
-  const buf = Buffer.from(await r.arrayBuffer());
+  const len = Number(r.headers.get('content-length') || 0);
+  if (len > max) throw new SkipFile(`файл ${(len / 1e6).toFixed(0)} МБ — слишком большой`);
+  return Buffer.from(await r.arrayBuffer());
+}
+
+/** Сколько «буквенного» текста — отличаем текстовый PDF от скана. */
+function letters(s: string): number { return (s.match(/[A-Za-zА-Яа-яЁё]/g) || []).length; }
+
+async function claudeOnImages(images: { data: Buffer; mime: string }[], prompt: string, model: string, purpose: string, maxTokens: number): Promise<string> {
+  const content: any[] = images.map(im => ({ type: 'image', source: { type: 'base64', media_type: im.mime, data: im.data.toString('base64') } }));
+  content.push({ type: 'text', text: prompt });
+  const { text } = await askClaude(purpose, { model, max_tokens: maxTokens, temperature: 0, messages: [{ role: 'user', content }] });
+  return /^\s*НЕТ\.?\s*$/i.test(text) ? '' : text.trim();
+}
+
+/**
+ * PDF: сначала pdftotext на сервере (бесплатно, любой размер). Если текста почти нет —
+ * это скан: первые страницы в картинки низкого разрешения и пачками < 3 МБ в Claude.
+ * Без poppler — старый путь: файл целиком в Claude, если он меньше 3 МБ.
+ */
+export async function pdfKnowledge(url: string, name: string, model: string): Promise<{ text: string; via: string }> {
+  const buf = await download(url, MAX_PDF_BYTES);
+  if (!(await havePoppler())) {
+    if (buf.length > MAX_INLINE_BYTES) throw new SkipFile(`файл ${(buf.length / 1e6).toFixed(1)} МБ, а на сервере нет pdftotext`);
+    const { text } = await askClaude('index-pdf', {
+      model, max_tokens: 1800, temperature: 0,
+      messages: [{ role: 'user', content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: buf.toString('base64') } },
+        { type: 'text', text: PDF_PROMPT },
+      ] }],
+    });
+    return { text: /^\s*НЕТ\.?\s*$/i.test(text) ? '' : text.trim(), via: 'claude' };
+  }
+  const dir = await mkdtemp(join(tmpdir(), 'rv-pdf-'));
+  try {
+    const file = join(dir, 'in.pdf');
+    await writeFile(file, buf);
+    let raw = '';
+    try {
+      raw = (await run('pdftotext', ['-enc', 'UTF-8', file, '-'], { timeout: 120_000, maxBuffer: 64 * 1024 * 1024 })).stdout;
+    } catch (e) { rlog('warn', `pdftotext: ${name}`, { error: String((e as Error).message).slice(0, 200) }); }
+    const pages = Math.max(1, (raw.match(/\f/g) || []).length);
+    const text = raw.replace(/\f/g, '\n').replace(/[ \t]{2,}/g, ' ').replace(/\n\s*\n\s*\n+/g, '\n\n').trim();
+    if (letters(text) >= Math.min(800, 60 * pages)) return { text: text.slice(0, 80_000), via: 'pdftotext' };
+
+    // Скан: первые 12 страниц в JPEG 80 dpi.
+    await run('pdftoppm', ['-jpeg', '-r', '80', '-l', '12', file, join(dir, 'p')], { timeout: 180_000 });
+    const imgs = (await readdir(dir)).filter(f => /^p-\d+\.jpg$/.test(f)).sort();
+    const parts: string[] = [];
+    let batch: { data: Buffer; mime: string }[] = [];
+    let size = 0;
+    const flush = async () => {
+      if (!batch.length) return;
+      parts.push(await claudeOnImages(batch, PDF_PROMPT, model, 'index-pdf-scan', 1800));
+      batch = []; size = 0;
+    };
+    for (const f of imgs) {
+      const data = await readFile(join(dir, f));
+      if (size + data.length > 2_300_000 || batch.length >= 6) await flush();
+      batch.push({ data, mime: 'image/jpeg' }); size += data.length;
+    }
+    await flush();
+    return { text: parts.filter(Boolean).join('\n\n'), via: 'claude-scan' };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function imageKnowledge(url: string, name: string, model: string): Promise<string> {
+  const buf = await download(url, 40_000_000);
   if (buf.length > MAX_INLINE_BYTES) {
-    throw new SkipFile(`файл ${(buf.length / 1e6).toFixed(1)} МБ — больше 3 МБ, через релей не пройдёт; сожмите PDF или перенесите характеристики в Word`);
+    // Большое фото — уменьшаем через poppler нельзя; пропускаем с понятной причиной.
+    throw new SkipFile(`картинка ${(buf.length / 1e6).toFixed(1)} МБ — больше 3 МБ`);
   }
   const ext = name.toLowerCase().split('.').pop();
-  const data = buf.toString('base64');
-  const block = kind === 'pdf'
-    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
-    : { type: 'image', source: { type: 'base64', media_type: ext === 'png' ? 'image/png' : 'image/jpeg', data } };
-  const { text } = await askClaude(kind === 'pdf' ? 'index-pdf' : 'index-image', {
-    model, max_tokens: kind === 'pdf' ? 1800 : 500, temperature: 0,
-    messages: [{ role: 'user', content: [block, { type: 'text', text: kind === 'pdf' ? PDF_PROMPT : IMG_PROMPT }] }],
-  });
-  return /^\s*НЕТ\.?\s*$/i.test(text) ? '' : text.trim();
+  return claudeOnImages([{ data: buf, mime: ext === 'png' ? 'image/png' : 'image/jpeg' }], IMG_PROMPT, model, 'index-image', 500);
 }
 
 /** Файл осознанно пропущен (слишком большой и т.п.) — не ошибка, повторять не нужно. */
@@ -192,7 +277,7 @@ class SkipFile extends Error {}
 
 function norm(s: string): string { return s.toUpperCase().replace(/[\s_]+/g, '').replace(/[,./\\]/g, ''); }
 
-/** Наши артикулы: из собранных отзывов/вопросов и карты Ozon sku→offer_id. */
+/** Наши артикулы: из собранных отзывов/вопросов, карты Ozon sku→offer_id и карточек товаров. */
 async function knownOfferIds(): Promise<string[]> {
   const set = new Set<string>();
   for (const r of getDb().prepare('SELECT DISTINCT offer_id FROM items WHERE offer_id IS NOT NULL').all() as any[]) set.add(String(r.offer_id).trim());
@@ -200,14 +285,8 @@ async function knownOfferIds(): Promise<string[]> {
     const m = await (await import('../ozonShowcase')).getSkuMap();
     for (const v of Object.values(m)) set.add(String(v).trim());
   } catch { /* нет карты — не беда */ }
-  // Артикулы WB (vendorCode) — у товаров, по которым ещё не было отзывов, иначе их не узнать.
-  try {
-    const { fetchAllWbCards } = await import('../wbCards');
-    const { wbUpstream } = await import('../../_proxy');
-    const up = wbUpstream('content');
-    const { cards } = await fetchAllWbCards({ base: up.base, headers: up.headers as any });
-    for (const c of cards) if (c?.vendorCode) set.add(String(c.vendorCode).trim());
-  } catch (e) { rlog('warn', 'Яндекс.Диск: не удалось получить артикулы WB', { error: String((e as Error)?.message ?? e).slice(0, 200) }); }
+  // Артикулы из карточек WB/Ozon (обновляются раз в сутки, см. sources.ts) — без лишних запросов к WB.
+  for (const r of getDb().prepare('SELECT DISTINCT offer_id FROM kb_cards').all() as any[]) set.add(String(r.offer_id).trim());
   return [...set].filter(Boolean);
 }
 
@@ -247,6 +326,13 @@ let indexing: Promise<any> | null = null;
 export type IndexProgress = { running: boolean; done: number; total: number; current: string | null; startedAt: number | null; error: string | null };
 const progress: IndexProgress = { running: false, done: 0, total: 0, current: null, startedAt: null, error: null };
 export function indexProgress(): IndexProgress { return { ...progress }; }
+export type DiskSync = { at: number; added: string[]; changed: string[]; removed: string[] };
+let lastSync: DiskSync | null = null;
+export function lastDiskSync(): DiskSync | null {
+  if (lastSync) return lastSync;
+  const r = getDb().prepare("SELECT value FROM kv WHERE key = 'disk_sync'").get() as any;
+  return r ? safeJson(r.value, null) : null;
+}
 
 /** Обойти публичную папку, обновить карточки знаний (только изменённые файлы). */
 export function indexYandexDisk(): Promise<any> {
@@ -284,16 +370,23 @@ export function indexYandexDisk(): Promise<any> {
 
     const d = getDb();
     const getRow = d.prepare('SELECT * FROM kb_folders WHERE path = ?');
+    const stats = { added: [] as string[], changed: [] as string[], removed: [] as string[] };
     for (const [key, files] of groups) {
       const row = getRow.get(key) as any;
       const prevFiles: any[] = safeJson(row?.files, []);
       const prevByMd5 = new Map(prevFiles.map(f => [f.md5 + '|' + f.name, f]));
       const hasRuInstr = files.some(f => /\.pdf$/i.test(f.name) && /инструкц|руков/i.test(f.name + f.path) && !ENG.test(f.name + f.path));
       const outFiles: any[] = [];
+      // Папка изменилась: новый/изменённый файл или файл удалён с Диска.
+      let changed = !row || prevFiles.length !== files.length;
       for (const f of files) {
         progress.current = `${key}/${f.name}`;
         const prev = prevByMd5.get(f.md5 + '|' + f.name);
-        if (prev && (prev.status === 'done' || prev.status === 'skipped')) { outFiles.push(prev); progress.done++; continue; }
+        const isPdf = /\.pdf$/i.test(f.name);
+        const reusable = prev && (prev.status === 'done' || prev.status === 'skipped')
+          && (!isPdf || prev.v === PDF_VERSION || (prev.status === 'skipped' && /русская инструкция/.test(prev.note || '')));
+        if (reusable) { outFiles.push(prev); progress.done++; continue; }
+        changed = true;
         const rec: any = { name: f.name, path: f.path, md5: f.md5, kind: (f.name.split('.').pop() || '').toLowerCase(), status: 'pending', text: '' };
         try {
           if (SKIP_EXT.test(f.name)) { rec.status = 'skipped'; rec.note = 'не нужен для ответов'; }
@@ -302,14 +395,17 @@ export function indexYandexDisk(): Promise<any> {
             const href = await ydDownloadUrl(s.yandexDiskUrl, f.path);
             const buf = Buffer.from(await (await fetch(href, { signal: AbortSignal.timeout(60_000) })).arrayBuffer());
             rec.text = docxText(buf).slice(0, 20_000); rec.status = 'done';
-          } else if (/\.pdf$/i.test(f.name)) {
+          } else if (isPdf) {
+            rec.v = PDF_VERSION;
             if (ENG.test(f.name + f.path) && hasRuInstr) { rec.status = 'skipped'; rec.note = 'есть русская инструкция'; }
-            else if ((f.size || 0) > 3.2e6) { rec.status = 'skipped'; rec.note = `файл ${((f.size || 0) / 1e6).toFixed(1)} МБ — больше 3 МБ; сожмите PDF или перенесите характеристики в Word`; }
-            else { rec.text = await extractWithClaude('pdf', await ydDownloadUrl(s.yandexDiskUrl, f.path), f.name, s.indexModel); rec.status = 'done'; }
+            else {
+              const r = await pdfKnowledge(await ydDownloadUrl(s.yandexDiskUrl, f.path), f.name, s.indexModel);
+              rec.text = r.text; rec.via = r.via; rec.status = 'done';
+              if (!r.text) { rec.status = 'skipped'; rec.note = 'полезного текста нет'; }
+            }
           } else if (IMG_EXT.test(f.name)) {
-            if (!IMG_USEFUL.test(f.name + ' ' + f.path)) { rec.status = 'skipped'; rec.note = 'обычное фото (можно отметить «прочитать»)'; }
-            else if ((f.size || 0) > 3.2e6) { rec.status = 'skipped'; rec.note = 'картинка больше 3 МБ'; }
-            else { rec.text = await extractWithClaude('image', await ydDownloadUrl(s.yandexDiskUrl, f.path), f.name, s.indexModel); rec.status = 'done'; }
+            if (!IMG_USEFUL.test(f.name + ' ' + f.path)) { rec.status = 'skipped'; rec.note = 'обычное фото'; }
+            else { rec.text = await imageKnowledge(await ydDownloadUrl(s.yandexDiskUrl, f.path), f.name, s.indexModel); rec.status = 'done'; }
           } else { rec.status = 'skipped'; rec.note = 'неизвестный тип'; }
         } catch (e) {
           if (e instanceof SkipFile) { rec.status = 'skipped'; rec.note = e.message; outFiles.push(rec); progress.done++; continue; }
@@ -320,21 +416,35 @@ export function indexYandexDisk(): Promise<any> {
         progress.done++;
       }
       const text = outFiles.filter(f => f.status === 'done' && f.text)
-        .map(f => `### ${f.name}\n${cleanKnowledge(f.text)}`).join('\n\n').slice(0, 40_000);
+        .map(f => `### ${f.name}\n${cleanKnowledge(f.text)}`).join('\n\n').slice(0, 150_000);
       const name = key.split('/').pop() || key;
       const suggested = suggestOffers(name, offers);
-      const filesForDb = outFiles.map(f => ({ name: f.name, path: f.path, md5: f.md5, kind: f.kind, status: f.status, note: f.note, text: f.text }));
+      const filesForDb = outFiles.map(f => ({ name: f.name, path: f.path, md5: f.md5, kind: f.kind, status: f.status, note: f.note, text: f.text, v: f.v, via: f.via }));
       if (row) {
-        d.prepare('UPDATE kb_folders SET suggested = ?, files = ?, text = ?, updated_at = ?, offer_ids = CASE WHEN confirmed = 1 THEN offer_ids ELSE ? END WHERE path = ?')
-          .run(JSON.stringify(suggested), JSON.stringify(filesForDb), text, Date.now(), JSON.stringify(suggested), key);
+        d.prepare(`UPDATE kb_folders SET suggested = ?, files = ?, text = ?, updated_at = CASE WHEN ? THEN ? ELSE updated_at END,
+            offer_ids = CASE WHEN confirmed = 1 THEN offer_ids ELSE ? END WHERE path = ?`)
+          .run(JSON.stringify(suggested), JSON.stringify(filesForDb), text, changed ? 1 : 0, Date.now(), JSON.stringify(suggested), key);
       } else {
-        d.prepare('INSERT INTO kb_folders (path, offer_ids, suggested, confirmed, files, text, updated_at) VALUES (?, ?, ?, 0, ?, ?, ?)')
-          .run(key, JSON.stringify(suggested), JSON.stringify(suggested), JSON.stringify(filesForDb), text, Date.now());
+        d.prepare('INSERT INTO kb_folders (path, offer_ids, suggested, confirmed, files, text, updated_at, first_seen_at) VALUES (?, ?, ?, 0, ?, ?, ?, ?)')
+          .run(key, JSON.stringify(suggested), JSON.stringify(suggested), JSON.stringify(filesForDb), text, Date.now(), Date.now());
+        stats.added.push(key);
       }
+      if (changed && row) stats.changed.push(key);
       if (progress.error) break;
     }
-    rlog('info', 'Яндекс.Диск: материалы обновлены', { folders: groups.size, files: progress.total });
-    return { folders: groups.size, files: progress.total };
+    // Папки, которых на Диске больше нет (удалены или переименованы), — убираем из базы.
+    // Только после полного успешного обхода: при сбое Диска ничего не удаляем.
+    if (!progress.error) {
+      for (const r of d.prepare('SELECT path FROM kb_folders').all() as any[]) {
+        if (!groups.has(r.path)) { d.prepare('DELETE FROM kb_folders WHERE path = ?').run(r.path); stats.removed.push(r.path); }
+      }
+    }
+    lastSync = { at: Date.now(), added: stats.added, changed: stats.changed, removed: stats.removed };
+    getDb().prepare(`INSERT INTO kv (key, value, updated_at) VALUES ('disk_sync', ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(JSON.stringify(lastSync), Date.now());
+    rlog('info', 'Яндекс.Диск: материалы обновлены', { folders: groups.size, files: progress.total,
+      added: stats.added.length, changed: stats.changed.length, removed: stats.removed.length });
+    return { folders: groups.size, files: progress.total, ...stats };
   })().catch(e => {
     progress.error = String((e as Error)?.message ?? e).slice(0, 300);
     rlog('error', 'Яндекс.Диск: обход не удался', { error: progress.error });
@@ -349,9 +459,10 @@ export function listFolders(): KbFolder[] {
     offerIds: safeJson(r.offer_ids, []),
     suggested: safeJson(r.suggested, []),
     confirmed: !!r.confirmed,
-    files: (safeJson(r.files, []) as any[]).map(f => ({ name: f.name, kind: f.kind, status: f.status, note: f.note })),
+    files: (safeJson(r.files, []) as any[]).map(f => ({ name: f.name, kind: f.kind, status: f.status, note: f.note, via: f.via })),
     textChars: String(r.text || '').length,
     updatedAt: r.updated_at,
+    firstSeenAt: r.first_seen_at ?? null,
   }));
 }
 
@@ -365,25 +476,74 @@ export function confirmFolder(path: string, offerIds: string[]): void {
   getDb().prepare('UPDATE kb_folders SET offer_ids = ?, confirmed = 1 WHERE path = ?').run(JSON.stringify(clean), path);
 }
 
-/** Карточка знаний товара для черновика: папки товара + папка бренда, не длиннее limit символов. */
-export function productKnowledge(offerId: string | null, limit = 6000): { text: string; sources: string[] } {
+/** Куски текста материалов: абзацы, склеенные до ~450 символов, с именем файла. */
+export function chunksOf(text: string): { file: string; text: string }[] {
+  const out: { file: string; text: string }[] = [];
+  for (const block of String(text || '').split(/\n(?=### )/)) {
+    const m = block.match(/^### (.+)\n?/);
+    const file = m ? m[1].trim() : '';
+    const body = m ? block.slice(m[0].length) : block;
+    let cur = '';
+    for (const para of body.split(/\n\s*\n/)) {
+      if (cur && cur.length + para.length > 450) { out.push({ file, text: cur.trim() }); cur = ''; }
+      cur += (cur ? '\n' : '') + para;
+      while (cur.length > 900) { out.push({ file, text: cur.slice(0, 900) }); cur = cur.slice(900); }
+    }
+    if (cur.trim()) out.push({ file, text: cur.trim() });
+  }
+  return out;
+}
+
+/**
+ * Знания о товаре под конкретный отзыв/вопрос, не длиннее limit символов:
+ *  1) карточка товара с площадок (название, характеристики, описание — по API);
+ *  2) из материалов Диска — начало файла характеристик и куски, где есть слова из вопроса.
+ */
+export function productKnowledge(offerId: string | null, query = '', limit = 7000): { text: string; sources: string[] } {
   if (!offerId) return { text: '', sources: [] };
+  const up = offerId.toUpperCase();
+  const sources: string[] = [];
+  const parts: string[] = [];
+
+  const cards = getDb().prepare('SELECT marketplace, name, text FROM kb_cards WHERE UPPER(offer_id) = ?').all(up) as any[];
+  if (cards.length) {
+    // Обе площадки обычно описывают товар одинаково — берём более полную карточку и добавляем вторую, если влезает.
+    cards.sort((a, b) => String(b.text).length - String(a.text).length);
+    let cardText = `## Карточка товара (${cards[0].marketplace === 'wb' ? 'WB' : 'Ozon'})\n${String(cards[0].text).slice(0, 3000)}`;
+    if (cards[1] && cardText.length < 2000) cardText += `\n## Карточка (${cards[1].marketplace === 'wb' ? 'WB' : 'Ozon'})\n${String(cards[1].text).slice(0, 1200)}`;
+    parts.push(cardText);
+    sources.push(`card:${offerId}`);
+  }
+
   const rows = getDb().prepare('SELECT path, offer_ids, text FROM kb_folders').all() as any[];
-  const mine = rows.filter(r => (safeJson(r.offer_ids, []) as string[]).some(o => o.toUpperCase() === offerId.toUpperCase()));
-  if (!mine.length) return { text: '', sources: [] };
-  // Общая карточка бренда: папка, чей путь — начало пути папки товара (AFERIY ⊃ AFERIY/AFERIY-STAN-…).
-  const brandRows = rows.filter(r => !mine.includes(r) && mine.some(m => m.path.startsWith(r.path + '/')));
-  const parts = [...mine, ...brandRows].map(r => `## Материалы: ${r.path}\n${prioritize(r.text)}`);
-  return { text: parts.join('\n\n').slice(0, limit), sources: [`product:${offerId}`] };
+  const mine = rows.filter(r => (safeJson(r.offer_ids, []) as string[]).some(o => o.toUpperCase() === up));
+  if (mine.length) {
+    // Общая папка бренда: её путь — начало пути папки товара (AFERIY ⊃ AFERIY/AFERIY-STAN-…).
+    const brandRows = rows.filter(r => !mine.includes(r) && mine.some(m => m.path.startsWith(r.path + '/')));
+    const chunks = [...mine, ...brandRows].flatMap(r => chunksOf(r.text).map(c => ({ ...c, folder: r.path })));
+    const q = terms(query);
+    const isSpec = (c: { file: string }) => /характер|габар|параметр/i.test(c.file);
+    const ranked = chunks
+      .map((c, i) => ({ c, i, s: score(q, c.text) * 3 + (isSpec(c) ? 2 : 0) + (/инструкц|руков/i.test(c.file) ? 1 : 0) }))
+      .sort((a, b) => b.s - a.s || a.i - b.i);
+    let room = limit - parts.join('\n\n').length - 200;
+    const picked: typeof ranked = [];
+    for (const x of ranked) {
+      if (room <= 200) break;
+      if (x.c.text.length > room) continue;
+      picked.push(x); room -= x.c.text.length + 40;
+    }
+    // В исходном порядке файлов — так читается связнее.
+    picked.sort((a, b) => a.i - b.i);
+    if (picked.length) {
+      parts.push('## Материалы с Яндекс.Диска (выдержки)\n' + picked.map(x => `[${x.c.file}] ${x.c.text}`).join('\n---\n'));
+      sources.push(`product:${offerId}`);
+    }
+  }
+  return { text: parts.join('\n\n').slice(0, limit), sources };
 }
 
-/** Характеристики (docx) — первыми, потом инструкция, потом остальное. */
-function prioritize(text: string): string {
-  const blocks = String(text || '').split(/\n(?=### )/);
-  const rank = (b: string) => /характер|ссылка|габар/i.test(b.slice(0, 120)) ? 0 : /инструкц|руковод/i.test(b.slice(0, 120)) ? 1 : 2;
-  return blocks.sort((a, b) => rank(a) - rank(b)).join('\n');
-}
-
+/** Наши артикулы с отзывами/вопросами, по которым нет папки на Диске (отвечаем по карточке и истории). */
 export function offersWithoutMaterials(): string[] {
   const rows = getDb().prepare('SELECT offer_ids FROM kb_folders').all() as any[];
   const covered = new Set<string>();

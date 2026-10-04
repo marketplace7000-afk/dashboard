@@ -1,6 +1,6 @@
-// Клиент раздела «Отзывы и вопросы» (агент 4): /api/reviews/*.
+// Клиент раздела «Отзывы и вопросы» (агент 2): /api/reviews/*.
 import type {
-  ReviewItem, ReviewView, ReviewsOverview, ReviewSettings, KbFolder, TgPair, KbTextKey,
+  ReviewItem, ReviewView, ReviewsOverview, ReviewSettings, KbFolder, TgPair,
 } from '../../shared/reviews';
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -32,12 +32,19 @@ export const reviewsApi = {
   collect: () => post<{ collected: any; drafts: any }>('collect'),
   saveSettings: (patch: Partial<ReviewSettings>) => call<{ settings: ReviewSettings }>('settings', { method: 'PATCH', body: JSON.stringify(patch) }),
   kb: () => call<{
-    texts: Record<string, string>; titles: Record<KbTextKey, string>; folders: KbFolder[];
+    folders: KbFolder[];
     telegram: { pairs: number; dialogs: number; lastDate: string | null };
+    chats: { wb: number; ozon: number; at: number | null };
+    cards: { wb: number; ozon: number; at: number | null };
     index: { running: boolean; done: number; total: number; current: string | null; error: string | null };
+    diskSync: { at: number; added: string[]; changed: string[]; removed: string[] } | null;
     withoutMaterials: string[];
+    poppler: boolean;
+    style: { text: string; at: number; basedOn: number } | null;
+    history: { answered: { marketplace: string; kind: string; n: number }[]; done: { wb_reviews: boolean; wb_questions: boolean; ozon_questions: boolean } };
   }>('kb'),
-  saveText: (key: KbTextKey, text: string) => post('kb/text', { key, text }),
+  refreshSources: () => post('kb/sources'),
+  buildStyle: () => post('kb/style'),
   folderText: (path: string) => call<{ text: string }>(`kb/folder?path=${encodeURIComponent(path)}`),
   confirmFolder: (path: string, offerIds: string[]) => post<{ folders: KbFolder[] }>('kb/folder', { path, offerIds }),
   indexDisk: () => post('kb/index'),

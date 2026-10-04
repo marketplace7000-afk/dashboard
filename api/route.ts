@@ -235,6 +235,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return handleAgentsPanel(req, res, rest);
   }
 
+  // ─── /api/reviews/* — раздел «Отзывы и вопросы» (агент 4, ТЗ-агент-отзывы v0.5).
+  if (section === 'reviews') {
+    const { handleReviews } = await import('./_lib/reviews');
+    return handleReviews(req, res, rest);
+  }
+
   // ─── /api/wb/<scope>/* ───────────────────────────────────────────────────
   if (section === 'wb') {
     const [scope, ...wbRest] = rest;

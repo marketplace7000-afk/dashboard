@@ -31,6 +31,13 @@ else
   echo "AGENT_API_KEY=$KEY"
 fi
 
+echo "== 3b Чтение PDF на сервере (poppler-utils) =="
+if command -v pdftotext >/dev/null 2>&1; then
+  echo "pdftotext уже установлен."
+else
+  (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils) || echo "ВНИМАНИЕ: poppler-utils не установился — PDF будут читаться через Claude (до 3 МБ)."
+fi
+
 echo "== 4/5 Сборка фронта =="
 npm run build
 

@@ -28,6 +28,32 @@ function sanitizeModel(raw: string | undefined): string {
 }
 const DEFAULT_MODEL = sanitizeModel(process.env.ANTHROPIC_DEFAULT_MODEL) || 'claude-sonnet-4-6';
 
+
+/** Модели, которые ещё принимают temperature (поколение 4 и раньше). */
+export function supportsTemperature(model: string): boolean {
+  return !/claude-(sonnet|opus)-5|fable|mythos/i.test(model);
+}
+
+/**
+ * Запрос к Anthropic/релею с повтором при СЕТЕВОЙ ошибке (не при ответе 4xx/5xx).
+ * 04.10.2026: с сервера Timeweb до IP Vercel часть соединений не устанавливается
+ * (из 8 попыток curl 2 — таймаут соединения), Node отдаёт «fetch failed». Повтор
+ * через 1,5 и 4 с делает вызов надёжным. Ответ модели может идти до минуты,
+ * поэтому общий таймаут не ставим — только повторяем, если соединение не открылось.
+ */
+async function fetchRelay(url: string, init: RequestInit, attempts = 4): Promise<Response> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetch(url, init);
+    } catch (e) {
+      last = e;
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, [1500, 4000, 8000][i] ?? 8000));
+    }
+  }
+  throw last;
+}
+
 export type ImageBlock = {
   type: 'image';
   source: { type: 'base64'; media_type: string; data: string }
@@ -65,10 +91,13 @@ export async function callAnthropic(opts: AnthropicOptions): Promise<{ text: str
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new AnthropicError(503, 'ANTHROPIC_API_KEY not configured');
 
+  const model = opts.model || DEFAULT_MODEL;
   const body = {
-    model: opts.model || DEFAULT_MODEL,
+    model,
     max_tokens: opts.max_tokens ?? 1024,
-    temperature: opts.temperature ?? 0.4,
+    // У моделей поколения 5 (Sonnet/Opus 5.x, Fable, Mythos) параметр temperature
+    // снят: Anthropic отвечает 400 «temperature is deprecated for this model».
+    ...(supportsTemperature(model) ? { temperature: opts.temperature ?? 0.4 } : {}),
     ...(opts.system ? { system: opts.system } : {}),
     messages: opts.messages,
   };
@@ -83,7 +112,7 @@ export async function callAnthropic(opts: AnthropicOptions): Promise<{ text: str
   if (ANTHROPIC_PROXY_URL) headers['x-relay-secret'] = (process.env.RELAY_SECRET || '').trim();
   else headers['x-api-key'] = apiKey;
 
-  const r = await fetch(ANTHROPIC_URL, {
+  const r = await fetchRelay(ANTHROPIC_URL, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),

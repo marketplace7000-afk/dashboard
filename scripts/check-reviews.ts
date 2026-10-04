@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 process.env.REVIEWS_DB = join(tmpdir(), `reviews-check-${Date.now()}.sqlite`);
 
-const { suggestOffers, stripPii, docxText, importTgPairs, tgStats, productKeyOf } = await import('../api/_lib/reviews/kb');
+const { suggestOffers, stripPii, docxText, importTgPairs, tgStats, productKeyOf, cleanKnowledge } = await import('../api/_lib/reviews/kb');
 const { codeEscalation } = await import('../api/_lib/reviews/drafts');
 const { upsertItem, markAnsweredExcept, getDb } = await import('../api/_lib/reviews/db');
 
@@ -38,6 +38,9 @@ eq('пробелы в имени папки', productKeyOf(`${B}/  CARBITLINK-DU
 eq('фото/кит — не товар', productKeyOf(`${B}/AD-CARLINKIT-ULTRA/фото/кит/1.jpg`), 'AD-CARLINKIT-ULTRA');
 eq('инструкция с латиницей в имени — не товар', productKeyOf(`${B}/AFERIY/AFERIY-STAN-AF-P280-2kWh/инструкция на англ  AF-P280/a.pdf`), 'AFERIY/AFERIY-STAN-AF-P280-2kWh');
 eq('файл в корне — без товара', productKeyOf('/прайс.xlsx'), null);
+
+eq('TX.RX ↔ TX/RX', suggestOffers('HDMI-WIRELESS-CHD02-HD-TX.RX', ['HDMI-WIRELESS-CHD02-HD-TX/RX']), ['HDMI-WIRELESS-CHD02-HD-TX/RX']);
+eq('ссылки поставщика и ТН ВЭД вырезаются', cleanKnowledge('1.Ссылка на 1688: https://detail.1688.com/x\nМощность: 2400 Вт\nТН ВЭД: 8413702100\nРД: ДС ТР ТС'), 'Мощность: 2400 Вт');
 
 // 2. Эскалация кодом.
 eq('оценка 2 → эскалация', codeEscalation({ kind: 'review', rating: 2, text: 'норм', pros: null, cons: null }, 2), 'Оценка 2★');

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 process.env.REVIEWS_DB = join(tmpdir(), `reviews-check-${Date.now()}.sqlite`);
 
-const { suggestOffers, stripPii, docxText, importTgPairs, tgStats } = await import('../api/_lib/reviews/kb');
+const { suggestOffers, stripPii, docxText, importTgPairs, tgStats, productKeyOf } = await import('../api/_lib/reviews/kb');
 const { codeEscalation } = await import('../api/_lib/reviews/drafts');
 const { upsertItem, markAnsweredExcept, getDb } = await import('../api/_lib/reviews/db');
 
@@ -28,6 +28,16 @@ eq('пробел в начале имени', suggestOffers(' CARBITLINK-DUBL', 
 eq('точное совпадение', suggestOffers('FACE-MASK-QZ011-BLACK', offers), ['FACE-MASK-QZ011-BLACK']);
 eq('папка = начало нескольких артикулов', suggestOffers('BOARD-JSK-X04', offers).sort(), ['BOARD-JSK-X04-BLACK', 'BOARD-JSK-X04-WHITE']);
 eq('бренд без совпадений', suggestOffers('ECOFLOW', offers), []);
+
+
+// 1б. Папка товара для файла (структура Диска владельца на 04.10.2026).
+const B = '/База о товаре начального уровня ';
+eq('файл в подпапке инструкции', productKeyOf(`${B}/ALLPOWERS/ALLPOWERS-STAN1,5kWh-AP-S2000-PRO/Наша инструкция на Русском языке /x.pdf`), 'ALLPOWERS/ALLPOWERS-STAN1,5kWh-AP-S2000-PRO');
+eq('файл прямо в папке бренда', productKeyOf(`${B}/AFERIY/комплектация и ТН ВЭД.docx`), 'AFERIY');
+eq('пробелы в имени папки', productKeyOf(`${B}/  CARBITLINK-DUBL/ссылка и характеристики.docx`), 'CARBITLINK-DUBL');
+eq('фото/кит — не товар', productKeyOf(`${B}/AD-CARLINKIT-ULTRA/фото/кит/1.jpg`), 'AD-CARLINKIT-ULTRA');
+eq('инструкция с латиницей в имени — не товар', productKeyOf(`${B}/AFERIY/AFERIY-STAN-AF-P280-2kWh/инструкция на англ  AF-P280/a.pdf`), 'AFERIY/AFERIY-STAN-AF-P280-2kWh');
+eq('файл в корне — без товара', productKeyOf('/прайс.xlsx'), null);
 
 // 2. Эскалация кодом.
 eq('оценка 2 → эскалация', codeEscalation({ kind: 'review', rating: 2, text: 'норм', pros: null, cons: null }, 2), 'Оценка 2★');

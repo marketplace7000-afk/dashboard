@@ -36,7 +36,7 @@ const NAV_TOP: { key: Page; Icon: any; label: string }[] = [
 ];
 const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   { key: 'prices',      Icon: TagIcon,             label: 'Цены' },
-  { key: 'reviews',     Icon: ChatCircleTextIcon,  label: 'Отзывы' },
+  { key: 'reviews',     Icon: ChatCircleTextIcon,  label: 'Отзывы и вопросы' },
   { key: 'analytics',   Icon: ChartLineIcon,       label: 'Аналитика' },
   { key: 'ads',         Icon: MegaphoneIcon,       label: 'Реклама' },
   // «Модули» скрыт из меню по просьбе клиента (28.07) — роут и страница живы,
@@ -54,7 +54,7 @@ const NAV_CONFIG: { key: Page; Icon: any; label: string }[] = [
 const TITLES: Record<Page, string> = {
   dashboard: 'Дашборд',
   prices: 'Модуль «Цены»',
-  reviews: 'Модуль «Отзывы»',
+  reviews: 'Отзывы и вопросы',
   analytics: 'Модуль «Аналитика»',
   ads: 'Реклама',
   modules: 'Модули · акции, аудит карточек',

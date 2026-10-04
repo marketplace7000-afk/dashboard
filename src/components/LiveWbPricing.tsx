@@ -10,13 +10,11 @@
  *   - Архив                — раздельный scope 'prices-wb'
  */
 import { useState, useMemo, useEffect, Fragment } from 'react';
-import { useShowcaseCheck } from '../api/showcaseCheck';
 import { safeSetItem } from '../utils/safeStorage';
 import { onUiStateChange } from '../utils/uiState';
 import {
   CaretDownIcon,
   CaretUpIcon,
-  ArrowClockwiseIcon,
   SpinnerIcon,
   ImageIcon,
   TagIcon,
@@ -165,7 +163,6 @@ export function LiveWbPricing() {
   };
 
   // Кнопка «Проверить цены на витрине»: когда Routine снял витрину — подтянуть свежие цены покупателя.
-  const sc = useShowcaseCheck('wb', () => { void showcaseRes.refresh(true); void buyerRes.refresh(true); });
   const archivedSet = useMemo(() => new Set(getArchivedSKUs('prices-wb')), [archiveTick]);
   // Общая память: пришли изменения с сервера (другой пользователь/вкладка) — перечитать архив, параметры, сценарии.
   useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP(); setGpApplied(gp); setGpDraft(gp); setKnobs(loadKnobs()); }), []);
@@ -516,29 +513,8 @@ export function LiveWbPricing() {
               <option value="roi">по ROI ↓</option>
               <option value="name">по названию</option>
             </select>
-            {sc.pinOpen && !sc.pending ? (
-              <form onSubmit={(e) => { e.preventDefault(); void sc.submit(); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <input className="input" type="text" inputMode="numeric" autoComplete="off" name="showcase-pin" autoFocus value={sc.pin} onChange={(e) => sc.setPin(e.target.value)} placeholder="Пароль" style={{ width: 110, padding: '6px 10px', fontSize: 14, WebkitTextSecurity: 'disc' } as any} />
-                <button className="btn btn-sm" type="submit" disabled={sc.busy}>OK</button>
-                <button className="btn btn-sm" type="button" onClick={sc.closePin}>Отмена</button>
-                {sc.error && <span style={{ fontSize: 13, color: '#c62828', whiteSpace: 'nowrap' }}>{sc.error}</span>}
-              </form>
-            ) : (
-              <button
-                className="btn btn-sm"
-                onClick={sc.openPin}
-                disabled={!!sc.pending}
-                title="Принудительно обновить цены покупателя: Claude откроет витрины WB и Ozon в браузере и запишет реальные цены. Нужен пароль. Выполняется при ближайшем запуске задачи (каждый час в :14), нужен включённый компьютер с Chrome. Данные из API обновляются на сервере автоматически, без кнопок"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
-              >
-                {sc.pending ? <SpinnerIcon size={14} weight="bold" className="spin" /> : <ArrowClockwiseIcon size={14} weight="bold" />}
-                {sc.pending ? 'Обновление цен запрошено' : 'Обновить цены покупателя'}
-              </button>
-            )}
-            <span className="muted" style={{ fontSize: 13, flexBasis: '100%', textAlign: 'right', whiteSpace: 'normal' }} title="Когда последний раз снимались цены покупателя с витрины. Автоматических проверок нет: витрину снимает Claude только по вашему запросу (кнопка + пароль, затем напишите Claude в чат: обнови цены покупателя). Между проверками цена покупателя = текущая цена ЛК x (1 - СПП крайней проверки).">
-              {sc.pending
-                ? `запрос от ${fmtDateClock(sc.pending)} принят — чтобы Claude снял витрины, напишите ему в чат «обнови цены покупателя» (нужен включённый ПК с Chrome)`
-                : `цена на витрине проверена: ${fmtDateClock(showcaseLastAt ?? showcaseRes.data?.fetchedAt ?? buyerRes.fetchedAt)}`}
+            <span className="muted" style={{ fontSize: 13, flexBasis: '100%', textAlign: 'right', whiteSpace: 'normal' }} title="Когда агент на ПК последний раз снимал цены покупателя с витрины. Обход идёт по расписанию (06:00, 13:00, 20:00 МСК); внеплановый — раздел «Сборщики», кнопки «Цены WB сейчас» / «Цены Ozon сейчас». Между обходами цена покупателя = текущая цена ЛК × (1 − СПП последнего обхода).">
+              {`цена на витрине проверена: ${fmtDateClock(showcaseLastAt ?? showcaseRes.data?.fetchedAt ?? buyerRes.fetchedAt)}`}
             </span>
           </div>
         </div>

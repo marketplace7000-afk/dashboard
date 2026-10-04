@@ -118,6 +118,12 @@ eq('карточка в знаниях', pk.text.includes('Тестовый ад
 eq('нужный кусок инструкции найден', pk.text.includes('удерживайте кнопку 5 секунд'), true);
 eq('куски по файлам', chunksOf('### a.docx\nраз\n\nдва').map(c => c.file), ['a.docx']);
 void confirmFolder;
+// 10. Компоненты набора без артикула идут в знания артикула-набора (папка-родитель с именем артикула).
+d.prepare("INSERT INTO kb_folders (path, offer_ids, suggested, confirmed, files, text, updated_at) VALUES ('KIT-9-А-Б/PN111', '[]', '[]', 0, '[]', ?, 1)")
+  .run('### pn.pdf\nПолироль наносить на холодную поверхность.');
+eq('материалы компонента в наборе', productKnowledge('KIT-9-А/Б', 'как наносить полироль', 2000).text.includes('холодную поверхность'), true);
+eq('общая папка не нужна чужому артикулу', productKnowledge('TEST-1', 'полироль', 2000).text.includes('холодную'), false);
+eq('общая папка помечена', (await import('../api/_lib/reviews/kb')).listFolders().find(f => f.path === 'KIT-9-А-Б/PN111')?.shared, true);
 eq('png под видом jpg', imageMime(Buffer.from([0x89, 0x50, 0x4e, 0x47]), 'x.jpg'), 'image/png');
 
 if (fails) { console.log(`\nОшибок: ${fails}`); process.exit(1); }

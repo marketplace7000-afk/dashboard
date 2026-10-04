@@ -37,7 +37,7 @@ export const SYSTEM_PROMPT = `Ты — специалист поддержки �
 - Отвечай на русском.
 
 ВЕРНИ СТРОГО JSON без пояснений вокруг:
-{"answer": "текст ответа покупателю", "confidence": "high"|"medium"|"low", "category": "positive"|"neutral"|"negative"|"complaint"|"question", "needs_escalation": true|false, "escalation_reason": "строка или null", "sources_used": ["faq", "product:<артикул>", "history:<id>", "telegram:<id>", "script"]}
+{"answer": "текст ответа покупателю", "confidence": "high"|"medium"|"low", "category": "positive"|"neutral"|"negative"|"complaint"|"question", "needs_escalation": true|false, "escalation_reason": "до 12 слов или null", "sources_used": ["faq", "product:<артикул>", "history:<id>", "telegram:<id>", "script"]}
 
 needs_escalation = true, если: confidence = "low", ИЛИ брак/подделка/повреждение/возврат/замена, ИЛИ грубость/угрозы/суд/Роспотребнадзор/жалоба, ИЛИ оценка 1–2. Иначе — false.`;
 
@@ -62,11 +62,24 @@ function pickTemplate(rating: number | null, texts: Record<string, string>): str
   return lines[Math.floor(Math.random() * lines.length)];
 }
 
-function extractJson(text: string): any {
+export function extractJson(text: string): any {
   const a = text.indexOf('{');
   const b = text.lastIndexOf('}');
-  if (a < 0 || b <= a) throw new Error('Ответ модели без JSON');
-  return JSON.parse(text.slice(a, b + 1));
+  if (a >= 0 && b > a) {
+    try { return JSON.parse(text.slice(a, b + 1)); } catch { /* ниже — разбор обрезанного */ }
+  }
+  // Ответ обрезан лимитом токенов: достаём хотя бы поля по отдельности.
+  const field = (k: string) => {
+    const m = text.match(new RegExp(`"${k}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
+    return m ? JSON.parse(`"${m[1]}"`) : null;
+  };
+  const answer = field('answer');
+  if (!answer) throw new Error('Ответ модели без JSON');
+  return {
+    answer, confidence: field('confidence') || 'low', category: field('category'),
+    needs_escalation: !/"needs_escalation"\s*:\s*false/.test(text),
+    escalation_reason: field('escalation_reason') || 'Ответ модели обрезан', sources_used: [],
+  };
 }
 
 export async function draftOne(id: number, opts: { force?: boolean } = {}): Promise<ReviewItem | null> {
@@ -117,7 +130,7 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
   let res;
   try {
     res = await askClaude('draft', {
-      model: s.draftModel, max_tokens: 500, temperature: 0.4,
+      model: s.draftModel, max_tokens: 1500, temperature: 0.4,
       system: [
         { type: 'text', text: SYSTEM_PROMPT },
         { type: 'text', text: staticBlock, cache_control: { type: 'ephemeral' } },

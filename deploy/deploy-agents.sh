@@ -5,16 +5,20 @@
 # ключ агента в .env (если ещё нет), сборка фронта, перезапуск сервиса.
 set -e
 
+# Ветка — первым аргументом: curl …/deploy-agents.sh | bash -s feature/reviews-agent
+BRANCH="${1:-feature/agents}"
+DIR="dashboard-${BRANCH//\//-}"
+
 cd /opt/autovibe
 
-echo "== 1/5 Забираю ветку feature/agents с GitHub =="
-curl -sL https://github.com/marketplace7000-afk/dashboard/archive/refs/heads/feature/agents.tar.gz -o /tmp/agents.tar.gz
-rm -rf /tmp/dashboard-feature-agents
+echo "== 1/5 Забираю ветку $BRANCH с GitHub =="
+curl -sL "https://github.com/marketplace7000-afk/dashboard/archive/refs/heads/$BRANCH.tar.gz" -o /tmp/agents.tar.gz
+rm -rf "/tmp/$DIR"
 tar -xzf /tmp/agents.tar.gz -C /tmp
 
 echo "== 2/5 Копирую в /opt/autovibe (секреты, кэш и данные не трогаю) =="
 rsync -rlpt --exclude '.env' --exclude '.env.*' --exclude node_modules --exclude dist \
-  --exclude .av-cache --exclude av-data /tmp/dashboard-feature-agents/ /opt/autovibe/
+  --exclude .av-cache --exclude av-data "/tmp/$DIR/" /opt/autovibe/
 chown -R autovibe:autovibe /opt/autovibe
 
 echo "== 3/5 Ключ агента =="

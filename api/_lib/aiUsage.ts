@@ -32,6 +32,8 @@ const MODEL_PRICING: Record<string, { in: number; out: number }> = {
   'claude-opus-4-7':    { in: 5,  out: 25 },
   'claude-opus-4-6':    { in: 5,  out: 25 },
   'claude-opus-4-5':    { in: 5,  out: 25 },
+  'claude-sonnet-5-5':  { in: 2,  out: 10 },
+  'claude-opus-5-5':    { in: 4,  out: 20 },
   'claude-sonnet-5':    { in: 2,  out: 10 },
   'claude-sonnet-4-6':  { in: 3,  out: 15 },
   'claude-sonnet-4-5':  { in: 3,  out: 15 },

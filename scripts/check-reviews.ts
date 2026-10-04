@@ -9,7 +9,7 @@ import { deflateRawSync } from 'node:zlib';
 process.env.REVIEWS_DB = join(tmpdir(), `reviews-check-${Date.now()}.sqlite`);
 
 const { suggestOffers, stripPii, docxText, importTgPairs, tgStats, productKeyOf, cleanKnowledge } = await import('../api/_lib/reviews/kb');
-const { codeEscalation } = await import('../api/_lib/reviews/drafts');
+const { codeEscalation, extractJson } = await import('../api/_lib/reviews/drafts');
 const { upsertItem, markAnsweredExcept, getDb } = await import('../api/_lib/reviews/db');
 
 let fails = 0;
@@ -50,6 +50,9 @@ eq('обычный вопрос → без эскалации', codeEscalation({
 eq('отзыв 5 без риска', codeEscalation({ kind: 'review', rating: 5, text: 'Отличная станция, всё работает', pros: null, cons: null }, 2), null);
 
 eq('грубость → эскалация', codeEscalation({ kind: 'question', rating: null, text: 'что за говно прислали', pros: null, cons: null }, 2), 'Грубая лексика');
+
+eq('обрезанный JSON → ответ достаётся', extractJson('{"answer": "Здравствуйте! \\"Да\\".", "confidence": "low", "needs_escalation": true, "sources_used": ["history:5"').answer, 'Здравствуйте! "Да".');
+eq('целый JSON', extractJson('```json\n{"answer":"Ок","confidence":"high","needs_escalation":false}\n```').confidence, 'high');
 
 // 3. Очистка Telegram от персональных данных.
 eq('телефон и @username', stripPii('Позвоните +7 (912) 345-67-89 или @ivan_petrov'), 'Позвоните [скрыто] или [скрыто]');

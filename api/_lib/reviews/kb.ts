@@ -284,6 +284,9 @@ async function imageKnowledge(url: string, name: string, model: string): Promise
 /** Файл осознанно пропущен (слишком большой и т.п.) — не ошибка, повторять не нужно. */
 class SkipFile extends Error {}
 
+/** Сравнение без знаков: в имени папки «/» из артикула заменяют на «-» (POL-3M-…-С/К/О ↔ С-К-О). */
+function loose(s: string): string { return String(s || '').toUpperCase().replace(/Ё/g, 'Е').replace(/[^A-ZА-Я0-9]/g, ''); }
+
 function norm(s: string): string { return s.toUpperCase().replace(/[\s_]+/g, '').replace(/[,./\\]/g, ''); }
 
 /** Наши артикулы: из собранных отзывов/вопросов, карты Ozon sku→offer_id и карточек товаров. */
@@ -462,8 +465,19 @@ export function indexYandexDisk(): Promise<any> {
   return indexing;
 }
 
+/**
+ * Общая папка: артикул к ней не закреплён, а материалы относятся к вложенным папкам
+ * (бренд AFERIY, ECOFLOW) или к родительской папке-артикулу (компоненты набора POL-3M-…/PN05996).
+ * Подтверждения не требует (решение владельца 04.10).
+ */
+function isSharedFolder(r: any, all: any[]): boolean {
+  if ((safeJson(r.offer_ids, []) as string[]).length) return false;
+  return all.some(x => x.path.startsWith(r.path + '/')) || String(r.path).includes('/');
+}
+
 export function listFolders(): KbFolder[] {
-  return (getDb().prepare('SELECT * FROM kb_folders ORDER BY path').all() as any[]).map(r => ({
+  const all = getDb().prepare('SELECT * FROM kb_folders ORDER BY path').all() as any[];
+  return all.map(r => ({
     path: r.path,
     offerIds: safeJson(r.offer_ids, []),
     suggested: safeJson(r.suggested, []),
@@ -472,6 +486,7 @@ export function listFolders(): KbFolder[] {
     textChars: String(r.text || '').length,
     updatedAt: r.updated_at,
     firstSeenAt: r.first_seen_at ?? null,
+    shared: isSharedFolder(r, all),
   }));
 }
 
@@ -525,7 +540,11 @@ export function productKnowledge(offerId: string | null, query = '', limit = 700
   }
 
   const rows = getDb().prepare('SELECT path, offer_ids, text FROM kb_folders').all() as any[];
-  const mine = rows.filter(r => (safeJson(r.offer_ids, []) as string[]).some(o => o.toUpperCase() === up));
+  const offersOf = (r: any) => safeJson(r.offer_ids, []) as string[];
+  // Папка товара: артикул закреплён за папкой, ИЛИ общая папка без артикулов лежит внутри
+  // папки с именем-артикулом (набор POL-3M-…/PN05996 — материалы компонентов набора).
+  const mine = rows.filter(r => offersOf(r).some(o => o.toUpperCase() === up)
+    || (!offersOf(r).length && r.path.split('/').slice(0, -1).some((seg: string) => loose(seg) === loose(offerId))));
   if (mine.length) {
     // Общая папка бренда: её путь — начало пути папки товара (AFERIY ⊃ AFERIY/AFERIY-STAN-…).
     const brandRows = rows.filter(r => !mine.includes(r) && mine.some(m => m.path.startsWith(r.path + '/')));
@@ -554,9 +573,14 @@ export function productKnowledge(offerId: string | null, query = '', limit = 700
 
 /** Наши артикулы с отзывами/вопросами, по которым нет папки на Диске (отвечаем по карточке и истории). */
 export function offersWithoutMaterials(): string[] {
-  const rows = getDb().prepare('SELECT offer_ids FROM kb_folders').all() as any[];
+  const rows = getDb().prepare('SELECT path, offer_ids FROM kb_folders').all() as any[];
   const covered = new Set<string>();
-  for (const r of rows) for (const o of safeJson(r.offer_ids, []) as string[]) covered.add(o.toUpperCase());
+  const coveredLoose = new Set<string>();
+  for (const r of rows) {
+    const offers = safeJson(r.offer_ids, []) as string[];
+    for (const o of offers) covered.add(o.toUpperCase());
+    if (!offers.length) for (const seg of String(r.path).split('/').slice(0, -1)) coveredLoose.add(loose(seg));
+  }
   const ours = getDb().prepare(`SELECT offer_id, COUNT(*) AS n FROM items WHERE offer_id IS NOT NULL GROUP BY offer_id ORDER BY n DESC`).all() as any[];
-  return ours.map(r => String(r.offer_id)).filter(o => !covered.has(o.toUpperCase()));
+  return ours.map(r => String(r.offer_id)).filter(o => !covered.has(o.toUpperCase()) && !coveredLoose.has(loose(o)));
 }

@@ -6,7 +6,7 @@ import {
 } from '@phosphor-icons/react';
 import { reviewsApi, parseTelegramExport } from '../api/reviews';
 import {
-  DIRECTIONS, type ReviewItem, type ReviewView, type ReviewsOverview, type ReviewDirection, type KbFolder, type KbTextKey,
+  DIRECTIONS, type ReviewItem, type ReviewView, type ReviewsOverview, type ReviewDirection, type KbFolder,
 } from '../../shared/reviews';
 
 const MP_COLOR = { wb: '#cb11ab', ozon: '#005bff' } as const;
@@ -303,7 +303,7 @@ function ItemCard({ it, selected, onSelect, onReplace, onDrop }: {
             value={text} onChange={e => setText(e.target.value)} onBlur={saveIfChanged} disabled={it.status === 'skipped'} />
           <div className="flex-between" style={{ marginTop: 6, flexWrap: 'wrap', gap: 8 }}>
             <span className="muted" style={{ fontSize: 12 }}>
-              {it.sourcesUsed.length ? `Опора: ${it.sourcesUsed.map(s => s.split(':')[0]).filter((v, i, a) => a.indexOf(v) === i).map(s => ({ faq: 'FAQ', product: 'материалы товара', history: 'прошлые ответы', telegram: 'Telegram', script: 'скрипты', template: 'шаблон' } as any)[s] || s).join(' · ')}` : ''}
+              {it.sourcesUsed.length ? `Опора: ${it.sourcesUsed.map(s => s.split(':')[0]).filter((v, i, a) => a.indexOf(v) === i).map(s => ({ style: 'профиль стиля', card: 'карточка товара', product: 'материалы Диска', history: 'прошлые ответы', chat: 'переписка', telegram: 'Telegram' } as any)[s] || s).join(' · ')}` : ''}
               {it.draftModel && it.draftModel !== 'template' ? ` · ${it.draftModel}${it.draftCostUsd ? ` · ${usd(it.draftCostUsd)}` : ''}` : ''}
             </span>
             <div className="row gap-8">
@@ -345,38 +345,71 @@ function KnowledgeBase() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <div className="card">
-        <div className="card-title">Тексты для ответов</div>
-        <div className="grid grid-2" style={{ gap: 12 }}>
-          {(Object.keys(kb.titles) as KbTextKey[]).map(k => <KbTextEditor key={k} k={k} title={kb.titles[k]} initial={kb.texts[k] || ''} />)}
-        </div>
-      </div>
+      <LearningBlock kb={kb} reload={load} />
       <DiskBlock kb={kb} reload={load} />
       <TelegramBlock stats={kb.telegram} reload={load} />
     </div>
   );
 }
 
-function KbTextEditor({ k, title, initial }: { k: KbTextKey; title: string; initial: string }) {
-  const [v, setV] = useState(initial);
-  const [state, setState] = useState<string | null>(null);
-  const save = async () => {
-    setState('сохраняю…');
-    try { await reviewsApi.saveText(k, v); setState('сохранено'); } catch (e: any) { setState(e?.message || 'ошибка'); }
+type Kb = NonNullable<Awaited<ReturnType<typeof reviewsApi.kb>>>;
+
+/** На чём учится ИИ: наша история ответов, чаты покупателей, карточки товаров, профиль стиля. */
+function LearningBlock({ kb, reload }: { kb: Kb; reload: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const run = async (key: string, fn: () => Promise<any>, ok: string) => {
+    setBusy(key); setMsg(null);
+    try { await fn(); setMsg(ok); reload(); } catch (e: any) { setMsg(e?.message || 'Ошибка'); } finally { setBusy(null); }
   };
+  const ans = (mp: string, kind: string) => kb.history.answered.find(r => r.marketplace === mp && r.kind === kind)?.n || 0;
+  const hd = kb.history.done;
+  const st = (done: boolean) => done ? '' : ' · догружается';
   return (
-    <div className="field" style={{ margin: 0 }}>
-      <label className="field-label">{title}</label>
-      <textarea className="textarea" rows={6} style={{ width: '100%' }} value={v} onChange={e => { setV(e.target.value); setState(null); }} />
-      <div className="row gap-8" style={{ marginTop: 4 }}>
-        <button className="btn btn-sm" onClick={save} disabled={v === initial && state !== null}>Сохранить</button>
-        {state && <span className="muted" style={{ fontSize: 12 }}>{state}</span>}
+    <div className="card">
+      <div className="card-title">На чём учится ИИ</div>
+      <div className="muted" style={{ fontSize: 13 }}>
+        Шаблонов нет: под каждый отзыв и вопрос ИИ собирает ответ сам — по нашим прошлым ответам в кабинетах, переписке с покупателями,
+        карточке товара и материалам с Диска. Всё обновляется само.
+      </div>
+      <table style={{ width: '100%', marginTop: 10, fontSize: 13, borderCollapse: 'collapse' }}>
+        <tbody>
+          <tr><td style={{ padding: '4px' }}>Наши ответы на отзывы WB</td><td>{ans('wb', 'review')}{st(hd.wb_reviews)}</td></tr>
+          <tr><td style={{ padding: '4px' }}>Наши ответы на вопросы WB</td><td>{ans('wb', 'question')}{st(hd.wb_questions)}</td></tr>
+          <tr><td style={{ padding: '4px' }}>Наши ответы на вопросы Ozon</td><td>{ans('ozon', 'question')}{st(hd.ozon_questions)}</td></tr>
+          <tr><td style={{ padding: '4px' }}>Переписка в чатах покупателей</td><td>WB {kb.chats.wb} · Ozon {kb.chats.ozon} пар{kb.chats.at ? ` · обновлено ${ago(kb.chats.at)}` : ''}</td></tr>
+          <tr><td style={{ padding: '4px' }}>Карточки товаров (описание, характеристики)</td><td>WB {kb.cards.wb} · Ozon {kb.cards.ozon}{kb.cards.at ? ` · обновлено ${ago(kb.cards.at)}` : ''}</td></tr>
+          <tr><td style={{ padding: '4px' }}>Telegram</td><td>{kb.telegram.pairs} пар</td></tr>
+        </tbody>
+      </table>
+      <div style={{ marginTop: 10 }}>
+        <div className="flex-between" style={{ flexWrap: 'wrap', gap: 8 }}>
+          <b style={{ fontSize: 13 }}>Профиль стиля {kb.style ? <span className="muted" style={{ fontWeight: 400 }}>· составлен {fmtDate(kb.style.at)}</span> : <span className="muted" style={{ fontWeight: 400 }}>· ещё не составлен</span>}</b>
+          <div className="row gap-8">
+            <button className="btn btn-sm" disabled={!!busy} onClick={() => run('src', reviewsApi.refreshSources, 'Карточки и чаты обновлены')}>
+              {busy === 'src' ? <SpinnerIcon size={14} className="spin" /> : <ArrowsClockwiseIcon size={14} />} Карточки и чаты
+            </button>
+            <button className="btn btn-sm" disabled={!!busy} onClick={() => run('style', reviewsApi.buildStyle, 'Профиль стиля пересоставлен')}>
+              {busy === 'style' ? <SpinnerIcon size={14} className="spin" /> : <ArrowsClockwiseIcon size={14} />} Пересоставить профиль
+            </button>
+          </div>
+        </div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          ИИ сам читает наши реальные ответы и описывает, как магазин общается с покупателями. Обновляется раз в неделю (≈ $0,05).
+        </div>
+        {kb.style && (
+          <details style={{ marginTop: 6, fontSize: 13 }}>
+            <summary>Показать профиль</summary>
+            <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 360, overflow: 'auto', fontSize: 12, background: 'var(--bg-3)', padding: 8, borderRadius: 8 }}>{kb.style.text}</pre>
+          </details>
+        )}
+        {msg && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{msg}</div>}
       </div>
     </div>
   );
 }
 
-function DiskBlock({ kb, reload }: { kb: NonNullable<Awaited<ReturnType<typeof reviewsApi.kb>>>; reload: () => void }) {
+function DiskBlock({ kb, reload }: { kb: Kb; reload: () => void }) {
   const [openPath, setOpenPath] = useState<string | null>(null);
   const [preview, setPreview] = useState('');
   const start = async () => { await reviewsApi.indexDisk().catch((e: any) => alert(e.message)); setTimeout(reload, 1500); };
@@ -395,9 +428,20 @@ function DiskBlock({ kb, reload }: { kb: NonNullable<Awaited<ReturnType<typeof r
         </button>
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-        Ссылка на папку задаётся в «Настройках». Word читается бесплатно, PDF и фото комплектации — через Claude один раз; потом — только изменённые файлы.
+        Папка проверяется сама каждые 6 часов (03, 09, 15, 21 МСК): новые папки и файлы добавляются, изменённые перечитываются, удалённые убираются.
+        Word и PDF читаются на сервере бесплатно{kb.poppler ? '' : ' (PDF-модуль ещё не установлен — PDF до 3 МБ идут через Claude)'}; сканы и фото комплектации — через Claude один раз.
         {ix.current && <> Сейчас: {ix.current}</>}
       </div>
+      {kb.diskSync && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+          Последняя проверка {fmtDate(kb.diskSync.at)}: новых папок {kb.diskSync.added.length}, изменённых {kb.diskSync.changed.length}, удалённых {kb.diskSync.removed.length}.
+        </div>
+      )}
+      {kb.folders.some(f => !f.confirmed) && (
+        <div className="chip" style={{ marginTop: 6 }}>
+          Новые папки без подтверждения: {kb.folders.filter(f => !f.confirmed).length}. ИИ уже использует подобранные артикулы — проверьте и нажмите «Подтвердить».
+        </div>
+      )}
       {ix.error && <div className="chip bad" style={{ marginTop: 6 }}>{ix.error}</div>}
       {kb.folders.length > 0 && (
         <table style={{ width: '100%', marginTop: 10, fontSize: 13, borderCollapse: 'collapse' }}>
@@ -409,7 +453,7 @@ function DiskBlock({ kb, reload }: { kb: NonNullable<Awaited<ReturnType<typeof r
       )}
       {kb.withoutMaterials.length > 0 && (
         <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-          Нет материалов ({kb.withoutMaterials.length}): {kb.withoutMaterials.slice(0, 40).join(', ')}{kb.withoutMaterials.length > 40 ? '…' : ''}
+          Без папки на Диске ({kb.withoutMaterials.length}) — отвечаем по карточке товара и нашей истории: {kb.withoutMaterials.slice(0, 40).join(', ')}{kb.withoutMaterials.length > 40 ? '…' : ''}
         </div>
       )}
     </div>
@@ -426,8 +470,8 @@ function FolderRow({ fd, onPreview, open, preview, reload }: { fd: KbFolder; onP
   };
   return (
     <>
-      <tr style={{ borderTop: '1px solid var(--border)' }}>
-        <td style={{ padding: '6px 4px' }}>{fd.path}</td>
+      <tr style={{ borderTop: '1px solid var(--border)', background: fd.confirmed ? undefined : 'var(--bg-3)' }}>
+        <td style={{ padding: '6px 4px' }}>{fd.path}{!fd.confirmed && <span className="chip" style={{ marginLeft: 6 }}>новая</span>}</td>
         <td style={{ padding: '6px 4px' }}>
           <div className="row gap-8">
             <input className="input" style={{ width: 220, padding: '4px 8px' }} value={v} onChange={e => setV(e.target.value)} placeholder="артикулы через запятую" />

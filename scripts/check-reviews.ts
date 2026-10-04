@@ -1,5 +1,5 @@
 /**
- * Проверки агента 4 «Отзывы и вопросы» (без сети и без Claude):
+ * Проверки агента 2 «Отзывы и вопросы» (без сети и без Claude):
  * сопоставление папок Диска с артикулами, эскалация кодом, очистка Telegram,
  * извлечение текста из docx, правило «отвечено вручную в кабинете».
  */
@@ -9,7 +9,9 @@ import { deflateRawSync } from 'node:zlib';
 process.env.REVIEWS_DB = join(tmpdir(), `reviews-check-${Date.now()}.sqlite`);
 
 const { suggestOffers, stripPii, docxText, importTgPairs, tgStats, productKeyOf, cleanKnowledge } = await import('../api/_lib/reviews/kb');
-const { codeEscalation, extractJson } = await import('../api/_lib/reviews/drafts');
+const { codeEscalation, extractJson, FORBIDDEN } = await import('../api/_lib/reviews/drafts');
+const { pairsFromChat, wbCardText } = await import('../api/_lib/reviews/sources');
+const { chunksOf, productKnowledge, confirmFolder } = await import('../api/_lib/reviews/kb');
 const { upsertItem, markAnsweredExcept, getDb } = await import('../api/_lib/reviews/db');
 
 let fails = 0;
@@ -85,6 +87,37 @@ upsertItem({ marketplace: 'wb', kind: 'question', externalId: 'q2', text: 'во�
 markAnsweredExcept('wb', 'question', new Set(['q2']));
 const rows = getDb().prepare("SELECT external_id, answered_on_mp FROM items WHERE kind = 'question' ORDER BY external_id").all() as any[];
 eq('q1 отвечен в кабинете, q2 ещё открыт', rows.map(r => [r.external_id, r.answered_on_mp]), [['q1', 1], ['q2', 0]]);
+
+// 6. Чаты покупателей → пары: автосообщение магазина без вопроса не считается.
+eq('пары из чата', pairsFromChat([
+  { id: 'a', at: 1, fromBuyer: false, text: 'Вы оставили отзыв с низкой оценкой' },
+  { id: 'b', at: 2, fromBuyer: true, text: 'Не включается адаптер' },
+  { id: 'c', at: 3, fromBuyer: true, text: 'Машина Kia Rio' },
+  { id: 'd', at: 4, fromBuyer: false, text: 'Проверьте, включён ли CarPlay в настройках' },
+  { id: 'e', at: 5, fromBuyer: false, text: 'И перезагрузите магнитолу' },
+  { id: 'f', at: 6, fromBuyer: true, text: 'Спасибо, заработало' },
+]).map(p => [p.id, p.question, p.answer]), [['d', 'Не включается адаптер\nМашина Kia Rio', 'Проверьте, включён ли CarPlay в настройках\nИ перезагрузите магнитолу']]);
+
+// 7. Ссылки и контакты в ответе — только вручную.
+eq('ссылка в ответе', FORBIDDEN.test('Напишите нам: https://taplink.cc/x'), true);
+eq('мессенджер в ответе', FORBIDDEN.test('Пишите в Телеграм'), true);
+eq('обычный ответ', FORBIDDEN.test('Спасибо за отзыв! Максимальная мощность 2000 Вт.'), false);
+
+// 8. Карточка WB → текст.
+eq('карточка WB', wbCardText({ title: 'Адаптер', characteristics: [{ name: 'Цвет', value: ['черный'] }], description: '<p>Без проводов</p>' }),
+  'Название: Адаптер\nЦвет: черный\nОписание: Без проводов');
+
+// 9. Знания под вопрос: карточка + нужный кусок материалов, а не начало файла.
+const d = getDb();
+d.prepare("INSERT INTO kb_cards (marketplace, offer_id, name, text, updated_at) VALUES ('wb', 'TEST-1', 'Тест', 'Название: Тестовый адаптер', 1)").run();
+const filler = Array.from({ length: 30 }, (_, i) => `Абзац про упаковку номер ${i} без полезного.`).join('\n\n');
+d.prepare("INSERT INTO kb_folders (path, offer_ids, suggested, confirmed, files, text, updated_at) VALUES ('TEST-1', '[\"TEST-1\"]', '[]', 1, '[]', ?, 1)")
+  .run(`### инструкция.pdf\n${filler}\n\nСопряжение по Bluetooth: удерживайте кнопку 5 секунд до мигания.`);
+const pk = productKnowledge('TEST-1', 'как сделать сопряжение bluetooth', 900);
+eq('карточка в знаниях', pk.text.includes('Тестовый адаптер'), true);
+eq('нужный кусок инструкции найден', pk.text.includes('удерживайте кнопку 5 секунд'), true);
+eq('куски по файлам', chunksOf('### a.docx\nраз\n\nдва').map(c => c.file), ['a.docx']);
+void confirmFolder;
 
 if (fails) { console.log(`\nОшибок: ${fails}`); process.exit(1); }
 console.log('\ncheck-reviews: всё в порядке');

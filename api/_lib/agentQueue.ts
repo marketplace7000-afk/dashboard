@@ -11,9 +11,6 @@
  *   - running без progress/log > stale_after_min → failed 'stale' (retryable);
  *   - claimed, не ставший running за unclaim_after_min → обратно в queued;
  *   - паузы площадок с истёкшим paused_until → закрываются (cleared_by 'timer');
- *   - поднятый флаг «Проверить цены на витрине» (showcaseRequest) → задание
- *     showcase_prices, если такого нет в очереди. Так существующая кнопка
- *     дашборда работает через агента без изменений на фронте.
  */
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -425,19 +422,6 @@ export function maintainQueue(): void {
     const task = createTask(sc.type, P(sc.params, {}), 'schedule', { scheduleId: Number(sc.id) });
     d.prepare('UPDATE agent_schedules SET next_run_at=?, last_task_id=? WHERE id=?').run(next, task?.id ?? null, sc.id);
   }
-
-  // 5. Мост со старой кнопкой: поднят флаг «Проверить цены на витрине» → задание.
-  try {
-    const { getShowcaseRequest } = require('./showcaseRequest');
-    const req = getShowcaseRequest();
-    for (const mp of ['wb', 'ozon'] as Marketplace[]) {
-      if (!req[mp]) continue;
-      const open = d.prepare(`SELECT COUNT(*) AS n FROM agent_tasks WHERE type='showcase_prices'
-                              AND status IN ('queued','claimed','running')
-                              AND params LIKE ?`).get(`%"marketplace":"${mp}"%`);
-      if (!Number(open?.n)) createTask('showcase_prices', { marketplace: mp }, 'button');
-    }
-  } catch { /* модуль флага не критичен */ }
 }
 
 // ─── Данные для экрана «В работе» ───────────────────────────────────────────

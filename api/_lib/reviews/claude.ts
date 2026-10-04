@@ -5,7 +5,7 @@
  * поэтому сейчас обычный вызов + кэширование промпта; Batch — следующий шаг.
  */
 import { callAnthropic } from '../anthropic';
-import { addUsage, spendThisMonth, getSettings } from './db';
+import { addUsage, spendThisMonth, getSettings, rlog } from './db';
 
 /** $ за 1 млн токенов (platform.claude.com/docs/en/about-claude/pricing, 04.10.2026). */
 const PRICES: Record<string, { in: number; out: number; cacheRead: number }> = {
@@ -38,7 +38,7 @@ export function budgetState(): { spent: number; limit: number; ratio: number } {
 
 export async function askClaude(purpose: string, opts: {
   model: string; system?: any; messages: any[]; max_tokens: number; temperature?: number;
-}): Promise<{ text: string; cost: number; usage: any }> {
+}): Promise<{ text: string; cost: number; usage: any; stop: string | null }> {
   if (budgetState().ratio >= 1) throw new BudgetExceeded();
   const { text, raw } = await callAnthropic({
     model: opts.model, system: opts.system, messages: opts.messages as any,
@@ -46,9 +46,13 @@ export async function askClaude(purpose: string, opts: {
   });
   const usage = raw?.usage || {};
   const cost = costOf(opts.model, usage);
+  // У моделей 5.x часть лимита может уйти на размышления — тогда текст обрезается.
+  if (raw?.stop_reason === 'max_tokens') {
+    rlog('warn', `Claude упёрся в лимит токенов (${purpose})`, { model: opts.model, max_tokens: opts.max_tokens, out: usage.output_tokens });
+  }
   addUsage(purpose, opts.model, {
     in: usage.input_tokens ?? 0, out: usage.output_tokens ?? 0,
     cacheRead: usage.cache_read_input_tokens ?? 0, cacheWrite: usage.cache_creation_input_tokens ?? 0,
   }, cost);
-  return { text, cost, usage };
+  return { text, cost, usage, stop: raw?.stop_reason ?? null };
 }

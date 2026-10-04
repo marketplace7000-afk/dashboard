@@ -323,13 +323,14 @@ export async function buildStyleProfile(): Promise<StyleProfile> {
   ];
   if (lines.length < 15) throw new Error('Мало наших прошлых ответов для профиля стиля — дождитесь догрузки истории');
   const s = getSettings();
-  const { text } = await askClaude('style', {
-    model: s.draftModel, max_tokens: 2000,
+  const { text, usage, stop } = await askClaude('style', {
+    model: s.draftModel, max_tokens: 8000,
     messages: [{ role: 'user', content: `${STYLE_PROMPT}\n\n${lines.join('\n')}` }],
   });
   const prof: StyleProfile = { text: text.trim(), at: Date.now(), basedOn: answeredCount() };
+  rlog('info', 'Профиль стиля обновлён', { samples: lines.length, chars: prof.text.length, out: usage?.output_tokens, in: usage?.input_tokens, stop });
+  if (prof.text.length < 1200) throw new Error(`Профиль получился слишком коротким (${prof.text.length} симв., stop=${stop}) — повторите позже`);
   kvSet('style_profile', prof);
-  rlog('info', 'Профиль стиля обновлён', { samples: lines.length });
   return prof;
 }
 

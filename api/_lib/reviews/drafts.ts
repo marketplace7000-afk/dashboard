@@ -111,7 +111,7 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
   let res;
   try {
     res = await askClaude(isEmptyReview ? 'draft-short' : 'draft', {
-      model, max_tokens: isEmptyReview ? 600 : 1500, temperature: 0.6,
+      model, max_tokens: isEmptyReview ? 1200 : 4000, temperature: 0.6,
       system: [
         { type: 'text', text: SYSTEM_PROMPT },
         { type: 'text', text: styleBlock, cache_control: { type: 'ephemeral' } },

@@ -105,7 +105,7 @@ const SKIP_DIR = /фото для дизайнер|видео|video/i;
 const SKIP_EXT = /\.(mp4|mov|avi|psd|zip|rar|7z|ai|cdr|heic|webp|gif)$/i;
 const IMG_EXT = /\.(jpe?g|png)$/i;
 const IMG_USEFUL = /комплект|упаков|характерист|инструкц|габарит|размер|параметр/i;
-const ENG = /англ|eng|english|original/i;
+const ENG = /англ|eng|english|original|кит/i;
 
 type YdItem = { name: string; path: string; type: 'dir' | 'file'; size?: number; md5?: string; modified?: string; file?: string };
 
@@ -188,6 +188,24 @@ export function suggestOffers(folderName: string, offers: string[]): string[] {
   return all.filter(o => !all.some(p => p !== o && norm(p).includes(norm(o)) && inside.includes(p)));
 }
 
+/** Подпапки с материалами внутри папки товара — не товары. */
+const CONTENT_DIR = /инструкц|фото|ссылк|упаков|характер|видео|комплект|англ|^\s*кит|габарит|размер|руковод|сертиф|документ|рекл/i;
+export function isProductDir(name: string): boolean {
+  return /[A-Za-z]{2,}/.test(name) && !CONTENT_DIR.test(name);
+}
+/**
+ * Ключ товара для файла: от первой «товарной» папки до ближайшей «товарной»
+ * папки над файлом. «/База…/ALLPOWERS/ALLPOWERS-…-S2000-PRO/инструкция на русском/x.pdf»
+ * → «ALLPOWERS/ALLPOWERS-…-S2000-PRO»; файлы прямо в «AFERIY» → «AFERIY» (общая карточка бренда).
+ */
+export function productKeyOf(filePath: string): string | null {
+  const dirs = String(filePath || '').split('/').filter(Boolean).slice(0, -1);
+  let first = -1; let last = -1;
+  dirs.forEach((d, i) => { if (isProductDir(d)) { if (first < 0) first = i; last = i; } });
+  if (first < 0) return null;
+  return dirs.slice(first, last + 1).map(d => d.trim()).join('/');
+}
+
 let indexing: Promise<any> | null = null;
 export type IndexProgress = { running: boolean; done: number; total: number; current: string | null; startedAt: number | null; error: string | null };
 const progress: IndexProgress = { running: false, done: 0, total: 0, current: null, startedAt: null, error: null };
@@ -202,30 +220,27 @@ export function indexYandexDisk(): Promise<any> {
     Object.assign(progress, { running: true, done: 0, total: 0, current: null, startedAt: Date.now(), error: null });
     const offers = await knownOfferIds();
 
-    // 1. Дерево папок.
-    const folders: { path: string; name: string; files: YdItem[] }[] = [];
-    const walk = async (path: string, name: string, depth: number) => {
+    // 1. Все файлы папки (с путями). Структура владельца на 04.10:
+    //   «База о товаре начального уровня» / <товар или бренд> / [<товар>] / «инструкция на русском» | «фото» | …
+    const files: YdItem[] = [];
+    const walk = async (path: string, depth: number) => {
       const items = await ydList(s.yandexDiskUrl, path);
-      const files = items.filter(i => i.type === 'file');
-      if (files.length) folders.push({ path, name, files });
-      if (depth >= 4) return;
+      files.push(...items.filter(i => i.type === 'file'));
+      if (depth >= 6) return;
       for (const d of items.filter(i => i.type === 'dir')) {
         if (SKIP_DIR.test(d.name)) continue;
-        await walk(d.path, depth === 0 ? d.name : name + ' / ' + d.name, depth + 1);
+        await walk(d.path, depth + 1);
       }
     };
-    await walk('/', '', 0);
+    await walk('/', 0);
 
-    // Подпапки товара («Наша инструкция на Русском языке») относим к папке товара верхнего уровня.
-    const prodKey = (p: string) => p.split('/').filter(Boolean).slice(0, 1).join('/');
+    // 2. Файл относится к ближайшей «папке товара» (имя-артикул, не «инструкция»/«фото»).
     const groups = new Map<string, YdItem[]>();
-    for (const f of folders) {
-      const segs = f.path.split('/').filter(Boolean);
-      // Папки-бренды (AFERIY/ECOFLOW) содержат папки товаров: товар = вложенная папка с «-» в имени.
-      const key = segs.length >= 2 && /-/.test(segs[1]) && !/инструкц|фото|комплект/i.test(segs[1])
-        ? segs.slice(0, 2).join('/') : prodKey(f.path) || '/';
+    for (const f of files) {
+      const key = productKeyOf(f.path);
+      if (!key) continue;
       const arr = groups.get(key) || [];
-      arr.push(...f.files);
+      arr.push(f);
       groups.set(key, arr);
     }
     progress.total = [...groups.values()].reduce((n, a) => n + a.length, 0);
@@ -318,8 +333,8 @@ export function productKnowledge(offerId: string | null, limit = 6000): { text: 
   const rows = getDb().prepare('SELECT path, offer_ids, text FROM kb_folders').all() as any[];
   const mine = rows.filter(r => (safeJson(r.offer_ids, []) as string[]).some(o => o.toUpperCase() === offerId.toUpperCase()));
   if (!mine.length) return { text: '', sources: [] };
-  const brands = new Set(mine.map(r => r.path.split('/')[0]).filter((b: string) => b && !mine.some(m => m.path === b)));
-  const brandRows = rows.filter(r => brands.has(r.path));
+  // Общая карточка бренда: папка, чей путь — начало пути папки товара (AFERIY ⊃ AFERIY/AFERIY-STAN-…).
+  const brandRows = rows.filter(r => !mine.includes(r) && mine.some(m => m.path.startsWith(r.path + '/')));
   const parts = [...mine, ...brandRows].map(r => `## Материалы: ${r.path}\n${prioritize(r.text)}`);
   return { text: parts.join('\n\n').slice(0, limit), sources: [`product:${offerId}`] };
 }

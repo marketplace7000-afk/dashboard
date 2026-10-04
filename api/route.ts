@@ -642,7 +642,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
       const items = (body?.items ?? {}) as Record<string, { price: number; oldPrice?: number }>;
       const data = await ingestOzonShowcase(items);
-      try { (await import('./_lib/showcaseRequest')).clearShowcaseRequest('ozon'); } catch { /* флаг не критичен */ }
       return res.status(200).json({ ok: true, received: Object.keys(items).length, ...data });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
@@ -656,7 +655,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
       const items = (body?.items ?? {}) as Record<string, { price: number; oldPrice?: number }>;
       const data = await ingestWbShowcase(items);
-      try { (await import('./_lib/showcaseRequest')).clearShowcaseRequest('wb'); } catch { /* флаг не критичен */ }
       return res.status(200).json({ ok: true, received: Object.keys(items).length, ...data });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
@@ -710,33 +708,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(data);
     } catch (e: any) {
       return res.status(502).json({ error: 'wb_box_tariffs_failed', detail: String(e?.message ?? e) });
-    }
-  }
-
-  // ─── /api/showcase-check — кнопка «Проверить цены на витрине» (флаг для Routine) ───
-  if (section === 'showcase-check') {
-    try {
-      const sr = await import('./_lib/showcaseRequest');
-      if (req.method === 'POST') {
-        const body = (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {})) as { mp?: unknown; pin?: unknown };
-        // Пароль кнопки (SHOWCASE_PIN в .env): чтобы сотрудники не дёргали проверку просто так.
-        const needPin = (process.env.SHOWCASE_PIN || '').trim();
-        if (needPin && String(body.pin ?? '').trim() !== needPin) return res.status(403).json({ ok: false, error: 'bad_pin' });
-        const mp = body.mp === 'wb' || body.mp === 'ozon' ? body.mp : 'all';
-        sr.requestShowcaseCheck(mp);
-      }
-      const [{ getWbShowcase }, { getOzonShowcase }] = await Promise.all([import('./_lib/wbShowcase'), import('./_lib/ozonShowcase')]);
-      const [wbS, ozS] = await Promise.all([getWbShowcase().catch(() => null), getOzonShowcase().catch(() => null)]);
-      const pending = sr.getShowcaseRequest();
-      // fetchedAt перезаписывает и неудачная серверная попытка (0 товаров, 403), поэтому берём максимум `at` по товарам.
-      const lastAt = (sc: any): number | null => { let m = 0; for (const it of Object.values(sc?.items ?? {}) as any[]) if (Number(it?.at) > m) m = Number(it.at); return m || (sc?.fetchedAt ?? null); };
-      const lastCheck = { wb: lastAt(wbS), ozon: lastAt(ozS) };
-      // run: ТОЛЬКО принудительный запрос кнопкой (18.09.2026) — автосверку по давности снимка убрали.
-      const run = { wb: !!pending.wb, ozon: !!pending.ozon };
-      res.setHeader('cache-control', 'no-store');
-      return res.status(200).json({ ok: true, pending, lastCheck, run });
-    } catch (e: any) {
-      return res.status(500).json({ ok: false, error: 'showcase_check_failed', detail: String(e?.message ?? e).slice(0, 200) });
     }
   }
 

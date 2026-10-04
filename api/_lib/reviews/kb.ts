@@ -145,6 +145,21 @@ export function docxText(buf: Buffer): string {
     .trim();
 }
 
+
+/**
+ * Из материалов убираем то, что покупателю видеть нельзя: ссылки на поставщика
+ * (1688, Alibaba…), любые URL, коды ТН ВЭД и разрешительные документы для ввоза.
+ */
+export function cleanKnowledge(text: string): string {
+  return String(text || '')
+    .split('\n')
+    .filter(l => !/1688|alibaba|aliexpress|taobao|pinduoduo|HYPERLINK|ТН\s*ВЭД|^\s*РД\s*:|^\s*\d*\.?\s*ссылка/i.test(l))
+    .map(l => l.replace(/https?:\/\/\S+/g, '').replace(/www\.\S+/g, ''))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 const PDF_PROMPT = 'Это материал о товаре интернет-магазина (инструкция, описание, упаковка). Выпиши из него по-русски всё, что пригодится, чтобы отвечать покупателям: характеристики с цифрами, комплектацию, как пользоваться, ограничения и меры безопасности, частые проблемы и их решения, гарантию. Сжато, списками, без вступлений, до 900 слов. Если полезного нет — ответь одним словом НЕТ.';
 const IMG_PROMPT = 'Это фото/картинка о товаре интернет-магазина. Перепиши по-русски полезный для покупателя текст с картинки (характеристики, размеры, комплектация) и перечисли, что входит в комплект, если это видно. Сжато, до 200 слов. Если полезного нет — ответь одним словом НЕТ.';
 
@@ -161,7 +176,7 @@ async function extractWithClaude(kind: 'pdf' | 'image', url: string, name: strin
   return /^\s*НЕТ\.?\s*$/i.test(text) ? '' : text.trim();
 }
 
-function norm(s: string): string { return s.toUpperCase().replace(/[\s_]+/g, '').replace(/[,.]/g, ''); }
+function norm(s: string): string { return s.toUpperCase().replace(/[\s_]+/g, '').replace(/[,./\\]/g, ''); }
 
 /** Наши артикулы: из собранных отзывов/вопросов и карты Ozon sku→offer_id. */
 async function knownOfferIds(): Promise<string[]> {
@@ -171,6 +186,14 @@ async function knownOfferIds(): Promise<string[]> {
     const m = await (await import('../ozonShowcase')).getSkuMap();
     for (const v of Object.values(m)) set.add(String(v).trim());
   } catch { /* нет карты — не беда */ }
+  // Артикулы WB (vendorCode) — у товаров, по которым ещё не было отзывов, иначе их не узнать.
+  try {
+    const { fetchAllWbCards } = await import('../wbCards');
+    const { wbUpstream } = await import('../../_proxy');
+    const up = wbUpstream('content');
+    const { cards } = await fetchAllWbCards({ base: up.base, headers: up.headers as any });
+    for (const c of cards) if (c?.vendorCode) set.add(String(c.vendorCode).trim());
+  } catch (e) { rlog('warn', 'Яндекс.Диск: не удалось получить артикулы WB', { error: String((e as Error)?.message ?? e).slice(0, 200) }); }
   return [...set].filter(Boolean);
 }
 
@@ -282,7 +305,7 @@ export function indexYandexDisk(): Promise<any> {
         progress.done++;
       }
       const text = outFiles.filter(f => f.status === 'done' && f.text)
-        .map(f => `### ${f.name}\n${f.text}`).join('\n\n').slice(0, 40_000);
+        .map(f => `### ${f.name}\n${cleanKnowledge(f.text)}`).join('\n\n').slice(0, 40_000);
       const name = key.split('/').pop() || key;
       const suggested = suggestOffers(name, offers);
       const filesForDb = outFiles.map(f => ({ name: f.name, path: f.path, md5: f.md5, kind: f.kind, status: f.status, note: f.note, text: f.text }));

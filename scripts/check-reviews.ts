@@ -11,7 +11,7 @@ process.env.REVIEWS_DB = join(tmpdir(), `reviews-check-${Date.now()}.sqlite`);
 const { suggestOffers, stripPii, docxText, importTgPairs, tgStats, productKeyOf, cleanKnowledge } = await import('../api/_lib/reviews/kb');
 const { codeEscalation, extractJson, FORBIDDEN } = await import('../api/_lib/reviews/drafts');
 const { pairsFromChat, wbCardText } = await import('../api/_lib/reviews/sources');
-const { chunksOf, productKnowledge, confirmFolder } = await import('../api/_lib/reviews/kb');
+const { chunksOf, productKnowledge, confirmFolder, imageMime } = await import('../api/_lib/reviews/kb');
 const { upsertItem, markAnsweredExcept, getDb } = await import('../api/_lib/reviews/db');
 
 let fails = 0;
@@ -118,6 +118,7 @@ eq('карточка в знаниях', pk.text.includes('Тестовый ад
 eq('нужный кусок инструкции найден', pk.text.includes('удерживайте кнопку 5 секунд'), true);
 eq('куски по файлам', chunksOf('### a.docx\nраз\n\nдва').map(c => c.file), ['a.docx']);
 void confirmFolder;
+eq('png под видом jpg', imageMime(Buffer.from([0x89, 0x50, 0x4e, 0x47]), 'x.jpg'), 'image/png');
 
 if (fails) { console.log(`\nОшибок: ${fails}`); process.exit(1); }
 console.log('\ncheck-reviews: всё в порядке');

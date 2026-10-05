@@ -82,7 +82,18 @@ export function createSideResource<T>(url: string) {
               if (!state.loading) void load(false);
             }, Math.max(15_000, Math.round(pollMs / 5)))
           : null;
-        return () => { subs.delete(cb); if (t) clearInterval(t); };
+        // Вернулись на вкладку — не ждём таймера (05.10.2026: после обхода агента
+        // клиент открывал вкладку и видел старые цены до следующего тика).
+        const onVisible = () => {
+          if (!pollMs || typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+          if (state.fetchedAt && Date.now() - state.fetchedAt < 60_000) return;
+          if (!state.loading) void load(false);
+        };
+        if (pollMs && typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
+        return () => {
+          subs.delete(cb); if (t) clearInterval(t);
+          if (pollMs && typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
+        };
       }, [pollMs]);
       return { ...state, refresh: (f = false) => load(f) };
     },

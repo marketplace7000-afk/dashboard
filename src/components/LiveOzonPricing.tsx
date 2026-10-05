@@ -20,6 +20,7 @@ import { noteSwallowed } from '../utils/log';
 import { productEconRes, ozonStockRes, LIVE_POLL_MS } from '../api/pricingResources';
 import { lastSweep, decideInSale, type SweepRow } from '../utils/inSale';
 import { mskDate } from '../utils/mskDate';
+import { activeKnobs, pruneKnobs, type KnobBase, type AutoValues } from '../utils/knobs';
 import { useEffect as useEffectM } from 'react';
 let marginsPushedAt = 0;
 
@@ -93,10 +94,10 @@ export function LiveOzonPricing() {
   // акция закончилась (просьба клиента: «запоминать крайний СПП»).
   // Ресурсы живут в module-scope и умеют форс-обновление — кнопка «Обновить»
   // теперь реально перезапрашивает цену, а не отдаёт кэш (жалоба клиента 05.08).
-  const buyerRes = ozonBuyerPricesRes.use();
+  const buyerRes = ozonBuyerPricesRes.use(LIVE_POLL_MS);
   const ozBuyer = buyerRes.data?.items ?? {};
   const ozSppHist = buyerRes.data?.sppHistory ?? {};
-  const showcaseRes = ozonShowcaseRes.use();
+  const showcaseRes = ozonShowcaseRes.use(LIVE_POLL_MS);
   const ozShowcase = showcaseRes.data?.items ?? {};
   const showcaseLastAt = useMemo(() => { let m = 0; for (const it of Object.values(ozShowcase) as any[]) if (Number(it?.at) > m) m = Number(it.at); return m || null; }, [ozShowcase]);
   // Расход рекламы по каждому SKU из Performance API — чтобы ДРР считался из API,
@@ -111,8 +112,22 @@ export function LiveOzonPricing() {
   const loadKnobs = (): Record<number, Record<string, string>> => { try { return JSON.parse(localStorage.getItem(KNOBS_LS) || '{}'); } catch { return {}; } };
   const saveKnobs = (n: Record<number, Record<string, string>>) => { try { safeSetItem(KNOBS_LS, JSON.stringify(n)); } catch (e) { noteSwallowed('ui-prefs', 'сценарий не сохранён', e, 60 * 60_000); } };
   const [ozKnobs, setOzKnobs] = useState<Record<number, Record<string, string>>>(loadKnobs);
-  const setOzKnob = (pid: number, k: keyof OzKnobs, v: string) =>
+  // База ручных значений (05.10.2026, см. src/utils/knobs.ts): что было «по данным»
+  // в момент ввода. Данные обновились — ручное значение по этому полю снимается.
+  const KNOBS_BASE_LS = 'prices-ozon:knobs-base';
+  const loadBase = (): KnobBase => { try { return JSON.parse(localStorage.getItem(KNOBS_BASE_LS) || '{}'); } catch { return {}; } };
+  const saveBase = (n: KnobBase) => { try { safeSetItem(KNOBS_BASE_LS, JSON.stringify(n)); } catch (e) { noteSwallowed('ui-prefs', 'сценарий не сохранён', e, 60 * 60_000); } };
+  const [ozBase, setOzBase] = useState<KnobBase>(loadBase);
+  const setOzKnob = (pid: number, k: keyof OzKnobs, v: string, auto?: number) => {
     setOzKnobs(prev => { const n = { ...prev, [pid]: { ...prev[pid], [k]: v } }; saveKnobs(n); return n; });
+    if (auto !== undefined && Number.isFinite(auto)) {
+      setOzBase(prev => { const n = { ...prev, [pid]: { ...prev[pid], [k]: auto } }; saveBase(n); return n; });
+    }
+  };
+  const resetOzKnobs = (pid: number) => {
+    setOzKnobs(prev => { const n = { ...prev }; delete n[pid]; saveKnobs(n); return n; });
+    setOzBase(prev => { if (!prev[pid]) return prev; const n = { ...prev }; delete n[pid]; saveBase(n); return n; });
+  };
   const [archiveTick, setArchiveTick] = useState(0);
   const [search, setSearch] = useState('');
   const searchQ = search.trim().toLowerCase();
@@ -145,7 +160,7 @@ export function LiveOzonPricing() {
   // Кнопка «Проверить цены на витрине»: когда Routine снял витрину — подтянуть свежие цены покупателя.
   const archivedSet = useMemo(() => new Set(getArchivedSKUs('prices-ozon')), [archiveTick]);
   // Общая память: пришли изменения с сервера (другой пользователь/вкладка) — перечитать архив, параметры, сценарии.
-  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP(); setGpApplied(gp); setGpDraft(gp); setOzKnobs(loadKnobs()); }), []);
+  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP(); setGpApplied(gp); setGpDraft(gp); setOzKnobs(loadKnobs()); setOzBase(loadBase()); }), []);
 
   // Индекс sku → ProcurementItem (для маржи/ROI)
   const procurementBySku = useMemo(() => {
@@ -373,6 +388,27 @@ export function LiveOzonPricing() {
       apiReturn, apiAcq, drrFromTable, drrFromApi, hasOzonAd, acqPct, commIsDefault, oi, oc, marginPct, marginRub, roi, roiInfo, econRow };
   };
 
+  // Значения «по данным» для полей ручного расчёта — то, что стоит в полях без правок.
+  const ozAuto = (r: Row): AutoValues => {
+    const m = computeOzonRow(r, {});
+    return { price: m.oi.price, cost: m.oi.cost, spp: m.oi.spp, drr: m.oi.drr, commission: m.oi.commission,
+      acquiring: m.acqPct, buyout: 100 - m.oi.returnRate };
+  };
+  // Все данные, от которых зависят поля, пришли — можно судить, устарели ли ручные значения.
+  const ozDataReady = rows.length > 0 && !!pEconRes.fetchedAt && !!showcaseRes.fetchedAt && !!buyerRes.fetchedAt
+    && !!procurement.loadedAt && !pEconRes.loading && !showcaseRes.loading && !buyerRes.loading && !procurement.loading;
+  // Чистка: устаревшие ручные значения убираем из общей памяти, чтобы они не
+  // всплывали у других пользователей и после перезагрузки.
+  useEffectM(() => {
+    if (!ozDataReady || !Object.keys(ozKnobs).length) return;
+    const autoById: Record<string, AutoValues> = {};
+    for (const r of rows) if (ozKnobs[r.product_id]) autoById[String(r.product_id)] = ozAuto(r);
+    const res = pruneKnobs(ozKnobs as any, ozBase, autoById);
+    if (!res.dropped.length) return;
+    setOzKnobs(res.knobs as any); saveKnobs(res.knobs as any);
+    setOzBase(res.base); saveBase(res.base);
+  });
+
   // Ø СПП по видимым SKU — РЕАЛЬНАЯ скидка (цена покупателя ниже ЛК), а не мусор
   // от «потолка» акции. Считаем от цены ЛК и достоверной цены покупателя.
   const sppVals = visibleRows.map(r => computeOzonRow(r, {}).sppReal).filter(v => v > 0);
@@ -517,7 +553,9 @@ export function LiveOzonPricing() {
           </thead>
           <tbody>
             {sortedRows.map((r) => {
-              const kk = ozKnobs[r.product_id] || {};
+              // Ручные значения — только те, под которыми данные не поменялись (src/utils/knobs.ts).
+              const ozAutoRow = ozKnobs[r.product_id] ? ozAuto(r) : {};
+              const kk = activeKnobs(r.product_id, ozKnobs as any, ozBase, ozAutoRow);
               // Единый расчёт — те же цифры, что в сортировке/советнике (крутилки поверх).
               const { proc, cur, buyerFromShowcase, showcaseMem, showcase, buyerFromApi, buyerFromMemory, memHist, memAgeDays, buyerPrice, sppReal, cost, apiComm, apiLog,
                 apiReturn, drrFromTable, drrFromApi, hasOzonAd, acqPct, commIsDefault, oi, oc, marginPct, marginRub, roi, roiInfo, econRow } = computeOzonRow(r, kk);
@@ -576,6 +614,9 @@ export function LiveOzonPricing() {
                             {Math.round(marginPct ?? 0)}%
                           </b>
                           <div className="muted" style={{ fontSize: 13 }}>{marginRub.toLocaleString('ru-RU')} ₽</div>
+                          {Object.keys(kk).length > 0 && (
+                            <div style={{ fontSize: 12, color: 'var(--accent)' }} title="Маржа посчитана по ручным значениям из раскрытой строки. Они снимутся сами, как только по этим полям придут новые данные, или кнопкой «Сбросить».">✎ ручной расчёт</div>
+                          )}
                           {commIsDefault && (
                             <div style={{ fontSize: 12, color: 'var(--warn)' }} title={`Комиссия Ozon не пришла из API — взят дефолт ${OZON_DEFAULTS.commission}%. Раскрой строку и проверь/задай комиссию.`}>⚠ ком. {OZON_DEFAULTS.commission}%</div>
                           )}
@@ -650,13 +691,13 @@ export function LiveOzonPricing() {
                                     <label key={f.key} style={{ fontSize: 14 }}>
                                       <div className="muted" style={{ marginBottom: 3 }}>{f.label}{f.suffix ? `, ${f.suffix}` : ''}</div>
                                       <input className="input" type="number" value={f.val}
-                                        onChange={(e) => setOzKnob(r.product_id, f.key, e.target.value)}
+                                        onChange={(e) => setOzKnob(r.product_id, f.key, e.target.value, (ozAutoRow[f.key] ?? ozAuto(r)[f.key]))}
                                         style={{ width: '100%', ...(kk[f.key] !== undefined ? { borderColor: 'var(--accent)', fontWeight: 700 } : {}) }} />
                                     </label>
                                   ))}
                                 </div>
                                 {editedOz && (
-                                  <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => setOzKnobs(prev => { const n = { ...prev }; delete n[r.product_id]; saveKnobs(n); return n; })}>
+                                  <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => resetOzKnobs(r.product_id)}>
                                     Сбросить
                                   </button>
                                 )}

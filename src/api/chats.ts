@@ -1,4 +1,4 @@
-// Клиент раздела «Чаты с покупателями» (WB): /api/reviews/chats/*.
+// Клиент раздела «Чаты с покупателями» (WB и Ozon): /api/reviews/chats/*.
 export type ChatThread = {
   marketplace: 'wb' | 'ozon'; chatId: string; clientName: string | null; sku: string | null; offerId: string | null;
   productName: string | null; lastAt: number | null; lastFromBuyer: boolean; lastText: string | null;
@@ -9,6 +9,8 @@ export type ChatThread = {
 };
 export type ChatMsg = { id: string; at: number; fromBuyer: boolean; text: string };
 export type ChatView = 'waiting' | 'drafts' | 'all';
+export type ChatMp = 'all' | 'wb' | 'ozon';
+export type ChatCounts = { waiting: number; drafts: number; wb: { waiting: number; drafts: number }; ozon: { waiting: number; drafts: number } };
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api/reviews/chats${path}`, {
@@ -24,15 +26,15 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T,>(path: string, body: unknown) => call<T>(path, { method: 'POST', body: JSON.stringify(body) });
 
 export const chatsApi = {
-  list: (view: ChatView, q = '', offset = 0) =>
-    call<{ total: number; threads: ChatThread[]; counts: { waiting: number; drafts: number }; totals: { threads: number; messages: number } }>(
-      `?view=${view}&q=${encodeURIComponent(q)}&limit=60&offset=${offset}`),
-  thread: (id: string) => call<{ thread: ChatThread; messages: ChatMsg[] }>(`/thread?id=${encodeURIComponent(id)}`),
-  draft: (id: string) => post<{ thread: ChatThread }>('/thread/draft', { id }),
-  save: (id: string, text: string) => post<{ thread: ChatThread }>('/thread/save', { id, text }),
-  send: (id: string, text: string) => post<{ ok: boolean; error?: string; thread?: ChatThread }>('/thread/send', { id, text }),
-  skip: (id: string) => post<{ thread: ChatThread }>('/thread/skip', { id }),
-  unskip: (id: string) => post<{ thread: ChatThread }>('/thread/unskip', { id }),
+  list: (view: ChatView, mp: ChatMp, q = '', offset = 0) =>
+    call<{ total: number; threads: ChatThread[]; counts: ChatCounts; totals: { threads: number; messages: number; wb: number; ozon: number } }>(
+      `?view=${view}&mp=${mp === 'all' ? '' : mp}&q=${encodeURIComponent(q)}&limit=60&offset=${offset}`),
+  thread: (mp: string, id: string) => call<{ thread: ChatThread; messages: ChatMsg[] }>(`/thread?mp=${mp}&id=${encodeURIComponent(id)}`),
+  draft: (mp: string, id: string) => post<{ thread: ChatThread }>('/thread/draft', { mp, id }),
+  save: (mp: string, id: string, text: string) => post<{ thread: ChatThread }>('/thread/save', { mp, id, text }),
+  send: (mp: string, id: string, text: string) => post<{ ok: boolean; error?: string; thread?: ChatThread }>('/thread/send', { mp, id, text }),
+  skip: (mp: string, id: string) => post<{ thread: ChatThread }>('/thread/skip', { mp, id }),
+  unskip: (mp: string, id: string) => post<{ thread: ChatThread }>('/thread/unskip', { mp, id }),
   sync: () => post<{ result: any }>('/sync', {}),
-  counts: () => call<{ waiting: number; drafts: number }>('/counts'),
+  counts: () => call<ChatCounts>('/counts'),
 };

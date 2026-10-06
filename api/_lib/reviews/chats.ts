@@ -1,20 +1,21 @@
 /**
- * Раздел «Чаты с покупателями» (WB): черновик ответа под весь диалог и отправка.
+ * Раздел «Чаты с покупателями» (WB и Ozon): черновик ответа под весь диалог и отправка.
  * База та же, что у «Отзывов и вопросов»: профиль стиля, карточка товара и материалы Диска,
  * наши прошлые ответы, переписка из Telegram и чатов. Отправка — только кнопкой
- * (тумблер «авто» для WB есть, по умолчанию выключен; эскалация не отправляется никогда).
- * Конституция 1.2.0, принцип X: разрешённая запись — текстовый ответ покупателю в чате.
+ * (тумблер «авто» отдельно для WB и для Ozon, по умолчанию выключены; эскалация не отправляется никогда).
+ * Конституция 1.3.0, принцип X: разрешённая запись — текстовый ответ покупателю в чате WB/Ozon.
  */
 import { getDb, getSettings, rlog } from './db';
 import { askClaude, BudgetExceeded, budgetState } from './claude';
 import { productKnowledge, similarTgPairs, similarPastAnswers } from './kb';
-import { getStyleProfile, syncWbChats, WB_CHAT_BASE, wbChatHeaders } from './sources';
+import { getStyleProfile, syncWbChats, syncOzonChats, WB_CHAT_BASE, wbChatHeaders } from './sources';
+import { ozonUpstream } from '../../_proxy';
 import { codeEscalation, extractJson, FORBIDDEN } from './drafts';
 import {
   chatDb, chatMessages, getThread, patchThread, rowToThread, replySignOf, addMessages, type ChatThread,
 } from './chatStore';
 
-export const CHAT_PROMPT = `Ты — сотрудник поддержки интернет-магазина автотоваров и электроники «avto-vibe». Ведёшь переписку с покупателем в чате Wildberries. Чаще всего это вопросы об адаптерах CarPlay / Android Auto, Android-приставках и другой автоэлектронике: совместимость с машиной и магнитолой, подключение и настройка, прошивка, неисправности, возврат.
+export const CHAT_PROMPT = `Ты — сотрудник поддержки интернет-магазина автотоваров и электроники «avto-vibe». Ведёшь переписку с покупателем в чате продавца на маркетплейсе (Wildberries или Ozon — указано в диалоге). Чаще всего это вопросы об адаптерах CarPlay / Android Auto, Android-приставках и другой автоэлектронике: совместимость с машиной и магнитолой, подключение и настройка, прошивка, неисправности, возврат.
 
 ГЛАВНОЕ: ответь на последние сообщения покупателя с учётом всего диалога. Это живой разговор, а не публичный отзыв: можно задать уточняющий вопрос (марка и год авто, модель магнитолы, телефон, что именно не работает), дать пошаговую инструкцию, предложить следующий шаг.
 
@@ -22,13 +23,13 @@ export const CHAT_PROMPT = `Ты — сотрудник поддержки ин�
 - Пиши так, как отвечает наш магазин (профиль стиля, прошлые ответы и переписка ниже), но не копируй дословно.
 - Сначала суть: конкретный ответ или шаги по порядку. Без воды и канцелярита, на «вы».
 - Решение проблем — по шагам, опираясь на материалы товара и на то, как магазин решал такие же случаи раньше.
-- Если покупатель недоволен — без спора и оправданий: признай неудобство, предложи понятный путь (проверить настройку, обновить прошивку, оформить возврат или обмен через личный кабинет Wildberries — если так делал магазин).
+- Если покупатель недоволен — без спора и оправданий: признай неудобство, предложи понятный путь (проверить настройку, обновить прошивку, оформить возврат или обмен через личный кабинет площадки — если так делал магазин).
 - Если для ответа не хватает данных о машине/магнитоле/телефоне — спроси их, а не угадывай.
 - Длина — сколько нужно для сути: обычно 1–5 предложений, инструкция — коротким списком.
 
 ЖЁСТКИЕ ПРАВИЛА:
 - Факты о товаре (совместимость, характеристики, комплектация) — только из выданных материалов и прошлых ответов магазина. Нет данных — не выдумывай: confidence "low", спроси уточнение или скажи, что уточнишь.
-- Никаких ссылок, телефонов, мессенджеров (Telegram, WhatsApp, Макс, Viber), taplink, названий других площадок — Wildberries это запрещает, даже если раньше магазин так писал.
+- Никаких ссылок, телефонов, мессенджеров (Telegram, WhatsApp, Макс, Viber), taplink, названий других площадок — маркетплейсы это запрещают, даже если раньше магазин так писал.
 - Не обещай денег, компенсаций, подарков, которых магазин не предлагал.
 - Не груби и не иронизируй.
 
@@ -41,11 +42,14 @@ needs_escalation = true, если: confidence = "low", ИЛИ брак/возв�
 export type ChatView = 'waiting' | 'drafts' | 'all';
 const WAIT_DAYS = 14;
 
-export function listThreads(q: { view?: string; q?: string; limit?: number; offset?: number }): { total: number; threads: ChatThread[]; counts: { waiting: number; drafts: number } } {
+export type ChatCounts = { waiting: number; drafts: number; wb: { waiting: number; drafts: number }; ozon: { waiting: number; drafts: number } };
+
+export function listThreads(q: { view?: string; q?: string; mp?: string; limit?: number; offset?: number }): { total: number; threads: ChatThread[]; counts: ChatCounts } {
   const d = chatDb();
   const since = Date.now() - WAIT_DAYS * 86400_000;
-  const where: string[] = ["marketplace = 'wb'", 'last_at IS NOT NULL'];
+  const where: string[] = ['last_at IS NOT NULL'];
   const args: any[] = [];
+  if (q.mp === 'wb' || q.mp === 'ozon') { where.push('marketplace = ?'); args.push(q.mp); }
   const view = (q.view || 'waiting') as ChatView;
   if (view === 'waiting') { where.push("last_from_buyer = 1 AND status NOT IN ('skipped','sent') AND last_at >= ?"); args.push(since); }
   else if (view === 'drafts') where.push("status IN ('drafted','escalated')");
@@ -62,13 +66,16 @@ export function listThreads(q: { view?: string; q?: string; limit?: number; offs
   return { total, threads: rows.map(rowToThread), counts: chatCounts() };
 }
 
-export function chatCounts(): { waiting: number; drafts: number } {
+export function chatCounts(): ChatCounts {
   const d = chatDb();
   const since = Date.now() - WAIT_DAYS * 86400_000;
-  const waiting = (d.prepare(`SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = 'wb' AND last_from_buyer = 1
-    AND status NOT IN ('skipped','sent') AND last_at >= ?`).get(since) as any).n;
-  const drafts = (d.prepare("SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = 'wb' AND status IN ('drafted','escalated')").get() as any).n;
-  return { waiting, drafts };
+  const one = (mp: string) => ({
+    waiting: (d.prepare(`SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = ? AND last_from_buyer = 1
+      AND status NOT IN ('skipped','sent') AND last_at >= ?`).get(mp, since) as any).n,
+    drafts: (d.prepare("SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = ? AND status IN ('drafted','escalated')").get(mp) as any).n,
+  });
+  const wb = one('wb'); const ozon = one('ozon');
+  return { waiting: wb.waiting + ozon.waiting, drafts: wb.drafts + ozon.drafts, wb, ozon };
 }
 
 export function threadWithMessages(mp: string, chatId: string) {
@@ -93,14 +100,14 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
   const pseudo: any = { id: -1, kind: 'question', text: ask, pros: null, cons: null, rating: null, offerId: th.offerId };
   const know = productKnowledge(th.offerId, `${ask} ${th.productName || ''}`, 7000);
   const past = th.offerId ? similarPastAnswers(pseudo, 6) : [];
-  const chats = similarTgPairs(pseudo, 8).filter(p => !p.id.startsWith(`wb:${chatId}:`));
+  const chats = similarTgPairs(pseudo, 8).filter(p => !p.id.startsWith(`${mp === 'wb' ? 'wb' : 'oz'}:${chatId}:`));
   const style = getStyleProfile();
   const fmt = (t: number) => new Date(t + 3 * 3600_000).toISOString().slice(0, 16).replace('T', ' ');
   const chatName = (src: string) => src === 'wb_chat' ? 'чат WB' : src === 'ozon_chat' ? 'чат Ozon' : 'Telegram';
 
   const dynamic = [
-    `# Диалог в чате Wildberries`,
-    `Покупатель: ${th.clientName || '—'}; товар: ${th.productName || '—'}; артикул: ${th.offerId || '—'}${th.sku ? `; nmID ${th.sku}` : ''}`,
+    `# Диалог в чате ${mp === 'wb' ? 'Wildberries' : 'Ozon'}`,
+    `Покупатель: ${th.clientName || '—'}; товар: ${th.productName || '—'}; артикул: ${th.offerId || '—'}${th.sku ? `; ${mp === 'wb' ? 'nmID' : 'SKU'} ${th.sku}` : ''}`,
     `\n# Переписка (старые сверху, время МСК)`,
     ...msgs.map(m => `[${fmt(m.at)}] ${m.fromBuyer ? 'Покупатель' : 'Магазин'}: ${m.text.slice(0, 1200)}`),
     `\n# Что известно о товаре\n${know.text || '(ни карточки, ни материалов — опирайся только на прошлые ответы, факты не придумывай)'}`,
@@ -149,32 +156,44 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
 
 // ─── Отправка ──────────────────────────────────────────────────────────────
 export async function sendThread(mp: string, chatId: string, text: string, by: 'owner' | 'auto'): Promise<{ ok: boolean; error?: string; thread?: ChatThread | null }> {
-  if (mp !== 'wb') return { ok: false, error: 'Отправка пока только в чаты WB' };
+  if (mp !== 'wb' && mp !== 'ozon') return { ok: false, error: 'Неизвестная площадка' };
   const msg = String(text || '').trim();
   if (!msg) return { ok: false, error: 'Пустое сообщение' };
   if (msg.length > 1000) return { ok: false, error: 'Сообщение длиннее 1000 символов' };
   if (by === 'auto' && FORBIDDEN.test(msg)) return { ok: false, error: 'В ответе ссылка или контакт' };
-  const sign = replySignOf(mp, chatId);
-  if (!sign) return { ok: false, error: 'Нет подписи чата (replySign) — дождитесь синхронизации' };
-  const form = new FormData();
-  form.append('replySign', sign);
-  form.append('message', msg);
   let errText = '';
   try {
-    const r = await fetch(`${WB_CHAT_BASE}/api/v1/seller/message`, { method: 'POST', headers: wbChatHeaders(), body: form, signal: AbortSignal.timeout(30_000) });
-    const t = await r.text();
-    let j: any = null; try { j = JSON.parse(t); } catch { /* не JSON */ }
-    if (!r.ok || (Array.isArray(j?.errors) && j.errors.length)) errText = `WB ${r.status}: ${String(j?.detail || j?.error || (Array.isArray(j?.errors) ? j.errors.join('; ') : '') || t).slice(0, 200)}`;
+    if (mp === 'wb') {
+      const sign = replySignOf(mp, chatId);
+      if (!sign) return { ok: false, error: 'Нет подписи чата (replySign) — дождитесь синхронизации' };
+      const form = new FormData();
+      form.append('replySign', sign);
+      form.append('message', msg);
+      const r = await fetch(`${WB_CHAT_BASE}/api/v1/seller/message`, { method: 'POST', headers: wbChatHeaders(), body: form, signal: AbortSignal.timeout(30_000) });
+      const t = await r.text();
+      let j: any = null; try { j = JSON.parse(t); } catch { /* не JSON */ }
+      if (!r.ok || (Array.isArray(j?.errors) && j.errors.length)) errText = `WB ${r.status}: ${String(j?.detail || j?.error || (Array.isArray(j?.errors) ? j.errors.join('; ') : '') || t).slice(0, 200)}`;
+    } else {
+      const up = ozonUpstream();
+      const r = await fetch(`${up.base}/v1/chat/send/message`, {
+        method: 'POST', headers: { ...(up.headers as any), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: msg }), signal: AbortSignal.timeout(30_000),
+      });
+      const t = await r.text();
+      let j: any = null; try { j = JSON.parse(t); } catch { /* не JSON */ }
+      if (!r.ok || (j && j.result && j.result !== 'success')) errText = `Ozon ${r.status}: ${String(j?.message || j?.result || t).slice(0, 200)}`;
+    }
   } catch (e) { errText = String((e as Error)?.message ?? e).slice(0, 200); }
+  const mpName = mp === 'wb' ? 'WB' : 'Ozon';
   if (errText) {
     patchThread(mp, chatId, { send_error: errText });
-    rlog('error', 'Чат WB: сообщение не отправлено', { chat: chatId, by, error: errText });
+    rlog('error', `Чат ${mpName}: сообщение не отправлено`, { chat: chatId, by, error: errText });
     return { ok: false, error: errText, thread: getThread(mp, chatId) };
   }
-  // Своё сообщение сразу в ленту; событие от WB с настоящим id придёт при синхронизации.
-  addMessages('wb', chatId, [{ id: `local:${Date.now()}`, at: Date.now(), fromBuyer: false, text: msg }]);
+  // Своё сообщение сразу в ленту; событие площадки с настоящим id придёт при синхронизации.
+  addMessages(mp as 'wb' | 'ozon', chatId, [{ id: `local:${Date.now()}`, at: Date.now(), fromBuyer: false, text: msg }]);
   patchThread(mp, chatId, { status: 'sent', sent_at: Date.now(), sent_by: by, send_error: null, draft_answer: null });
-  rlog('info', 'Чат WB: ответ отправлен', { chat: chatId, by, text: msg.slice(0, 300) });
+  rlog('info', `Чат ${mpName}: ответ отправлен`, { chat: chatId, by, text: msg.slice(0, 300) });
   return { ok: true, thread: getThread(mp, chatId) };
 }
 
@@ -184,19 +203,21 @@ export function chatTick(): Promise<any> {
   if (busy) return busy;
   busy = (async () => {
     const out: any = {};
-    try { out.sync = await syncWbChats(10); } catch (e) { out.sync = { error: String((e as Error).message).slice(0, 200) }; }
+    try { out.wb = await syncWbChats(10); } catch (e) { out.wb = { error: String((e as Error).message).slice(0, 200) }; }
+    try { out.ozon = await syncOzonChats(80); } catch (e) { out.ozon = { error: String((e as Error).message).slice(0, 200) }; }
     const s = getSettings();
     if (!s.chatAutoDraft) return out;
     const d = chatDb();
-    const rows = d.prepare(`SELECT chat_id FROM chat_threads WHERE marketplace = 'wb' AND status = 'new' AND last_from_buyer = 1
+    const rows = d.prepare(`SELECT marketplace, chat_id FROM chat_threads WHERE status = 'new' AND last_from_buyer = 1
       AND last_at >= ? AND draft_attempts < 3 ORDER BY last_at DESC LIMIT 15`).all(Date.now() - 48 * 3600_000) as any[];
     let drafted = 0; let sent = 0;
     for (const r of rows) {
       if (budgetState().ratio >= 0.9) { out.stopped = 'budget'; break; }
       try {
-        const th = await draftThread('wb', r.chat_id); drafted++;
-        if (s.chatAutoSendWb && th?.status === 'drafted' && th.draftAnswer) {
-          const res = await sendThread('wb', r.chat_id, th.draftAnswer, 'auto');
+        const th = await draftThread(r.marketplace, r.chat_id); drafted++;
+        const auto = r.marketplace === 'wb' ? s.chatAutoSendWb : s.chatAutoSendOzon;
+        if (auto && th?.status === 'drafted' && th.draftAnswer) {
+          const res = await sendThread(r.marketplace, r.chat_id, th.draftAnswer, 'auto');
           if (res.ok) sent++;
         }
       } catch (e) { if (e instanceof BudgetExceeded) { out.stopped = 'budget'; break; } }
@@ -215,11 +236,10 @@ export function scheduleChats(): void {
 }
 
 /** Для проверок: число диалогов и сообщений. */
-export function chatTotals(): { threads: number; messages: number } {
+export function chatTotals(): { threads: number; messages: number; wb: number; ozon: number } {
   const d = chatDb();
-  return {
-    threads: (d.prepare("SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = 'wb'").get() as any).n,
-    messages: (d.prepare("SELECT COUNT(*) AS n FROM chat_messages WHERE marketplace = 'wb'").get() as any).n,
-  };
+  const th = (mp: string) => (d.prepare('SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = ? AND last_at IS NOT NULL').get(mp) as any).n;
+  const wb = th('wb'); const ozon = th('ozon');
+  return { threads: wb + ozon, wb, ozon, messages: (d.prepare('SELECT COUNT(*) AS n FROM chat_messages').get() as any).n };
 }
 void getDb;

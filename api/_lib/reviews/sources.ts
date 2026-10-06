@@ -245,51 +245,80 @@ async function syncWbChatsOnce(maxPages: number): Promise<{ events: number; pair
   return { events, pairs };
 }
 
-async function syncOzonChats(maxChats = 60): Promise<{ chats: number; pairs: number }> {
+/** Название и артикул Ozon по sku: карта активных товаров + карточки (в т.ч. архивные). */
+function ozonOfferName(sku: string | null, skuMap: Record<string, string>): { offerId: string | null; name: string | null } {
+  if (!sku) return { offerId: null, name: null };
+  let offerId = skuMap[sku] || null;
+  if (!offerId) {
+    const r = getDb().prepare("SELECT offer_id FROM items WHERE marketplace = 'ozon' AND sku = ? AND offer_id IS NOT NULL LIMIT 1").get(sku) as any;
+    offerId = r?.offer_id || null;
+  }
+  let name: string | null = null;
+  if (offerId) {
+    const c = getDb().prepare("SELECT name FROM kb_cards WHERE marketplace = 'ozon' AND UPPER(offer_id) = UPPER(?)").get(offerId) as any;
+    name = c?.name || null;
+  }
+  return { offerId, name };
+}
+
+let ozSyncing: Promise<{ chats: number; pairs: number; messages: number }> | null = null;
+/** Синхронизация чатов Ozon (только изменившиеся с прошлого раза; один проход за раз). */
+export function syncOzonChats(maxChats = 60): Promise<{ chats: number; pairs: number; messages: number }> {
+  if (ozSyncing) return ozSyncing;
+  ozSyncing = syncOzonChatsOnce(maxChats).finally(() => { ozSyncing = null; });
+  return ozSyncing;
+}
+
+async function syncOzonChatsOnce(maxChats: number): Promise<{ chats: number; pairs: number; messages: number }> {
   let skuMap: Record<string, string> = {};
   try { skuMap = await (await import('../ozonShowcase')).getSkuMap(); } catch { /* без артикулов */ }
-  const seen = kvGet<Record<string, string>>('ozchat_seen', {});
-  const todo: string[] = [];
+  chatDb();
+  // v2: с 06.10 сообщения Ozon хранятся в chat_messages (раньше — только пары), поэтому новый список «увиденных».
+  const seen = kvGet<Record<string, string>>('ozchat_seen2', {});
+  const todo: { id: string; last: string }[] = [];
   let cursor = '';
-  for (let page = 0; page < 30 && todo.length < maxChats; page++) {
+  for (let page = 0; page < 50 && todo.length < maxChats; page++) {
     const r = await ozonPost('/v3/chat/list', { filter: { chat_status: 'All' }, limit: 100, ...(cursor ? { cursor } : {}) });
     for (const c of r?.chats || []) {
       const id = c?.chat?.chat_id;
       const type = String(c?.chat?.chat_type || '');
       if (!id || /support/i.test(type)) continue;  // переписка с поддержкой Ozon — не покупатели
-      if (seen[id] === String(c.last_message_id)) continue;
-      todo.push(id);
-      seen[`${id}#last`] = String(c.last_message_id);
+      const last = String(c.last_message_id ?? '');
+      if (seen[id] === last) continue;
+      todo.push({ id, last });
       if (todo.length >= maxChats) break;
     }
     if (!r?.has_next || !r?.cursor) break;
     cursor = r.cursor;
   }
-  let pairs = 0;
-  for (const id of todo) {
+  let pairs = 0; let messages = 0;
+  for (const { id, last } of todo) {
     try {
       const h = await ozonPost('/v3/chat/history', { chat_id: id, direction: 'Backward', limit: 100 });
       const msgs: ChatMsg[] = [];
       let sku: string | null = null;
       for (const m of h?.messages || []) {
         const type = String(m?.user?.type || '');
-        const text = (Array.isArray(m?.data) ? m.data.join('\n') : String(m?.data || '')).trim();
         if (m?.context?.sku && !sku) sku = String(m.context.sku);
-        if (!text || !/customer|seller/i.test(type)) continue;
+        if (!/customer|seller/i.test(type)) continue;  // уведомления, бот, поддержка — не переписка
+        let text = (Array.isArray(m?.data) ? m.data.join('\n') : String(m?.data || '')).trim();
+        if (!text && (m?.images?.length || m?.files?.length)) text = '[фото/файл]';
+        if (!text) continue;
         msgs.push({ id: String(m.message_id), at: Date.parse(m.created_at) || 0, fromBuyer: /customer/i.test(type), text: text.slice(0, 2000) });
       }
-      pairs += savePairs('ozon_chat', id, sku ? (skuMap[sku] || null) : null, msgs);
-      seen[id] = seen[`${id}#last`];
+      const { offerId, name } = ozonOfferName(sku, skuMap);
+      setThreadMeta('ozon', id, { replySign: id, sku, offerId, productName: name });
+      messages += addMessages('ozon', id, msgs);
+      pairs += savePairs('ozon_chat', id, offerId, msgs.filter(m => !/^\[(фото|файл)/.test(m.text)));
+      seen[id] = last;
     } catch (e) {
       rlog('warn', 'Ozon: история чата не получена', { error: errText(e) });
       break;
     }
-    delete seen[`${id}#last`];
-    await sleep(400);
+    await sleep(350);
   }
-  for (const k of Object.keys(seen)) if (k.endsWith('#last')) delete seen[k];
-  kvSet('ozchat_seen', seen);
-  return { chats: todo.length, pairs };
+  kvSet('ozchat_seen2', seen);
+  return { chats: todo.length, pairs, messages };
 }
 
 let syncing: Promise<any> | null = null;

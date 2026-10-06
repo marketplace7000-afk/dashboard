@@ -138,6 +138,10 @@ eq('общая папка помечена', (await import('../api/_lib/reviews/
   cs.addMessages('wb', 'c1', [{ id: 'e3', at: 3000, fromBuyer: true, text: 'Не помогло' }]);
   eq('покупатель снова написал → ждёт ответа', cs.getThread('wb', 'c1')?.status, 'new');
   eq('подпись для ответа есть', cs.getThread('wb', 'c1')?.canReply, true);
+  // Тот же id чата на Ozon — отдельный диалог.
+  cs.setThreadMeta('ozon', 'c1', { replySign: 'c1' });
+  cs.addMessages('ozon', 'c1', [{ id: 'o1', at: 5000, fromBuyer: true, text: 'Подойдёт к Kia Rio 2019?' }]);
+  eq('Ozon отдельно от WB', [cs.chatMessages('ozon', 'c1').length, cs.chatMessages('wb', 'c1').length], [1, 3]);
 }
 eq('«Макс» как мессенджер', FORBIDDEN.test('пишите в Макс'), true);
 eq('«Максим» — не мессенджер', FORBIDDEN.test('Максим, спасибо'), false);

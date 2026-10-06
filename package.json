@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "serve": "tsx server.ts",
-    "check": "tsx scripts/check-periods.ts && tsx scripts/check-repricer.ts && tsx scripts/check-ozon-report.ts && tsx scripts/check-product-econ.ts && tsx scripts/check-wb-ads.ts && tsx scripts/check-tg-gate.ts && tsx scripts/check-ozon-zip.ts && tsx scripts/check-wb-showcase.ts && tsx scripts/check-sklad-layout.ts && tsx scripts/check-costs-match.ts && tsx scripts/check-ozon-stock.ts && tsx scripts/check-in-sale.ts && tsx scripts/check-ozon-showcase.ts && tsx scripts/check-ozon-instock.ts && tsx scripts/check-reviews.ts"
+    "check": "tsx scripts/check-periods.ts && tsx scripts/check-repricer.ts && tsx scripts/check-ozon-report.ts && tsx scripts/check-product-econ.ts && tsx scripts/check-wb-ads.ts && tsx scripts/check-tg-gate.ts && tsx scripts/check-ozon-zip.ts && tsx scripts/check-wb-showcase.ts && tsx scripts/check-sklad-layout.ts && tsx scripts/check-costs-match.ts && tsx scripts/check-ozon-stock.ts && tsx scripts/check-in-sale.ts && tsx scripts/check-ozon-showcase.ts && tsx scripts/check-ozon-instock.ts && tsx scripts/check-reviews.ts && tsx scripts/check-knobs.ts"
   },
   "dependencies": {
     "@lobehub/icons": "^5.8.0",

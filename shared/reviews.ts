@@ -73,6 +73,10 @@ export type ReviewSettings = {
   yandexDiskUrl: string;
   /** Генерировать черновики автоматически после сбора. */
   autoDraft: boolean;
+  /** Чаты: готовить черновик к каждому новому сообщению покупателя (за последние 48 ч). */
+  chatAutoDraft: boolean;
+  /** Чаты WB: отправлять черновик без кнопки (только без эскалации). Старт — выключено. */
+  chatAutoSendWb: boolean;
 };
 
 export const DEFAULT_REVIEW_SETTINGS: ReviewSettings = {
@@ -84,6 +88,8 @@ export const DEFAULT_REVIEW_SETTINGS: ReviewSettings = {
   keyBudgetUsd: 20,
   yandexDiskUrl: '',
   autoDraft: false,
+  chatAutoDraft: true,
+  chatAutoSendWb: false,
 };
 
 export type ReviewCounters = Record<ReviewDirection, { unanswered: number; pending: number }>;

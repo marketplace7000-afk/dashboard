@@ -35,6 +35,7 @@ import { wbBuyerPricesRes, wbCardEconRes, wbBoxTariffsRes, adsBySkuRes, productE
 import { fmtClock, fmtDateClock } from '../api/sideResource';
 import { wbImageUrl } from '../utils/wbBasket';
 import { mskDate } from '../utils/mskDate';
+import { activeKnobs, pruneKnobs, type KnobBase, type AutoValues } from '../utils/knobs';
 import { noteSwallowed } from '../utils/log';
 import { adsAdvice } from '../utils/adsAdvice';
 import { useEffect as useEffectM } from 'react';
@@ -76,7 +77,7 @@ export function LiveWbPricing() {
   // Цена покупателя с СПП — живьём из продаж WB (finishedPrice), не из таблицы.
   // Module-scope ресурс с форс-обновлением: кнопка «Обновить» теперь реально
   // перезапрашивает цену покупателя, а не отдаёт кэш (жалоба клиента 05.08).
-  const buyerRes = wbBuyerPricesRes.use();
+  const buyerRes = wbBuyerPricesRes.use(LIVE_POLL_MS);
   const stockRes = wbStockRes.use(LIVE_POLL_MS);
   const buyerPrices: Record<string, BuyerPrice> = buyerRes.data?.items ?? {};
   // Экономика карточек WB по nmId (комиссия категории + объём в литрах). Сервер
@@ -102,7 +103,7 @@ export function LiveWbPricing() {
 
   // Живая витрина WB. Единственный источник, где есть СПП площадки: в Seller API
   // её нет вообще, и любая «цена покупателя» не с витрины — уже не сегодняшняя.
-  const showcaseRes = wbShowcaseRes.use();
+  const showcaseRes = wbShowcaseRes.use(LIVE_POLL_MS);
   const wbShowcase = showcaseRes.data?.items ?? {};
   // Когда витрина реально снималась в последний раз (fetchedAt перезаписывает и пустая серверная попытка) и средний СПП магазина по снимку.
   const showcaseLastAt = useMemo(() => { let m = 0; for (const it of Object.values(wbShowcase) as any[]) if (Number(it?.at) > m) m = Number(it.at); return m || null; }, [wbShowcase]);
@@ -128,8 +129,22 @@ export function LiveWbPricing() {
   const loadKnobs = (): Record<number, Record<string, string>> => { try { return JSON.parse(localStorage.getItem(KNOBS_LS) || '{}'); } catch { return {}; } };
   const saveKnobs = (n: Record<number, Record<string, string>>) => { try { safeSetItem(KNOBS_LS, JSON.stringify(n)); } catch (e) { noteSwallowed('ui-prefs', 'сценарий не сохранён', e, 60 * 60_000); } };
   const [knobs, setKnobs] = useState<Record<number, Record<string, string>>>(loadKnobs);
-  const setKnob = (nmId: number, k: keyof CalcKnobs, v: string) =>
+  // База ручных значений (05.10.2026, см. src/utils/knobs.ts): что было «по данным»
+  // в момент ввода. Данные обновились — ручное значение по этому полю снимается.
+  const KNOBS_BASE_LS = 'prices-wb:knobs-base';
+  const loadBase = (): KnobBase => { try { return JSON.parse(localStorage.getItem(KNOBS_BASE_LS) || '{}'); } catch { return {}; } };
+  const saveBase = (n: KnobBase) => { try { safeSetItem(KNOBS_BASE_LS, JSON.stringify(n)); } catch (e) { noteSwallowed('ui-prefs', 'сценарий не сохранён', e, 60 * 60_000); } };
+  const [knobsBase, setKnobsBase] = useState<KnobBase>(loadBase);
+  const setKnob = (nmId: number, k: keyof CalcKnobs, v: string, auto?: number) => {
     setKnobs(prev => { const n = { ...prev, [nmId]: { ...prev[nmId], [k]: v } }; saveKnobs(n); return n; });
+    if (auto !== undefined && Number.isFinite(auto)) {
+      setKnobsBase(prev => { const n = { ...prev, [nmId]: { ...prev[nmId], [k]: auto } }; saveBase(n); return n; });
+    }
+  };
+  const resetKnobs = (nmId: number) => {
+    setKnobs(prev => { const n = { ...prev }; delete n[nmId]; saveKnobs(n); return n; });
+    setKnobsBase(prev => { if (!prev[nmId]) return prev; const n = { ...prev }; delete n[nmId]; saveBase(n); return n; });
+  };
   const [archiveTick, setArchiveTick] = useState(0);
   const [search, setSearch] = useState('');
   const searchQ = search.trim().toLowerCase();
@@ -165,7 +180,7 @@ export function LiveWbPricing() {
   // Кнопка «Проверить цены на витрине»: когда Routine снял витрину — подтянуть свежие цены покупателя.
   const archivedSet = useMemo(() => new Set(getArchivedSKUs('prices-wb')), [archiveTick]);
   // Общая память: пришли изменения с сервера (другой пользователь/вкладка) — перечитать архив, параметры, сценарии.
-  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP(); setGpApplied(gp); setGpDraft(gp); setKnobs(loadKnobs()); }), []);
+  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP(); setGpApplied(gp); setGpDraft(gp); setKnobs(loadKnobs()); setKnobsBase(loadBase()); }), []);
 
   const procurementBySku = useMemo(() => {
     const m = new Map<string, typeof procurement.items[number]>();
@@ -325,11 +340,11 @@ export function LiveWbPricing() {
       nds: gp('nds', WB_DEFAULTS.nds),
     };
     // Без себестоимости расчёт неполон → маржу не выдаём за достоверную.
-    const calc = cost > 0 ? calcWbProfit(inp) : null;
+    const calc = inp.cost > 0 ? calcWbProfit(inp) : null; // 06.10: ручная себестоимость тоже считается
     const marginPct = calc ? Math.round(calc.margin) : null;
     const marginRub = calc ? Math.round(calc.profit) : null;
     const roi = calc ? Math.round(calc.roi) : null;
-    const roiInfo = roi !== null && cost > 0 ? roiStatus(roi, cost) : null;
+    const roiInfo = roi !== null && inp.cost > 0 ? roiStatus(roi, inp.cost) : null;
     return { proc, mainSize, salesBuyer, seraya, lkPrice, lkFromApi, buyerPrice, buyerFromApiOrSales, buyerSource, saleAgeDays, sppPct,
       cost, econ, catComm, volL, logFromApi, storFromApi, commIsDefault, inp, calc, marginPct, marginRub, roi, roiInfo, showcase, econRow };
   };
@@ -400,6 +415,26 @@ export function LiveWbPricing() {
     }
     marginsPushedAt = Date.now();
     safeSetItem('prices-wb:margins', JSON.stringify({ at: marginsPushedAt, items }));
+  });
+
+  // Значения «по данным» для полей ручного расчёта — то, что стоит в полях без правок.
+  const wbAuto = (r: Row): AutoValues => {
+    const m = computeWbRow(r, {});
+    return { retail: m.inp.retail, cost: m.inp.cost, spp: m.inp.spp, drr: m.inp.drr, buyout: m.inp.buyout, commission: m.inp.commission };
+  };
+  // Все данные, от которых зависят поля, пришли — можно судить, устарели ли ручные значения.
+  const wbDataReady = allRows.length > 0 && !!pEconRes.fetchedAt && !!showcaseRes.fetchedAt && !!buyerRes.fetchedAt
+    && !!econRes.fetchedAt && !!procurement.loadedAt
+    && !pEconRes.loading && !showcaseRes.loading && !buyerRes.loading && !econRes.loading && !procurement.loading;
+  // Чистка устаревших ручных значений (05.10.2026). Хук — тоже ДО ранних return (см. выше).
+  useEffectM(() => {
+    if (!wbDataReady || !Object.keys(knobs).length) return;
+    const autoById: Record<string, AutoValues> = {};
+    for (const r of allRows) if (knobs[r.nmId]) autoById[String(r.nmId)] = wbAuto(r);
+    const res = pruneKnobs(knobs as any, knobsBase, autoById);
+    if (!res.dropped.length) return;
+    setKnobs(res.knobs as any); saveKnobs(res.knobs as any);
+    setKnobsBase(res.base); saveBase(res.base);
   });
 
   if (bundle.loading) {
@@ -563,7 +598,9 @@ export function LiveWbPricing() {
                 || (r.nmId ? wbImageUrl(r.nmId) : '');
               const isOpen = expanded[r.nmId] ?? false;
               const isArchived = archivedSet.has(archivedKey(r));
-              const k = knobs[r.nmId] || {};
+              // Ручные значения — только те, под которыми данные не поменялись (src/utils/knobs.ts).
+              const wbAutoRow = knobs[r.nmId] ? wbAuto(r) : {};
+              const k = activeKnobs(r.nmId, knobs as any, knobsBase, wbAutoRow);
               // Единый расчёт — те же цифры, что в сортировке/советнике (крутилки поверх).
               const { proc, salesBuyer, lkPrice, lkFromApi, buyerPrice, buyerSource, saleAgeDays, sppPct,
                 cost, catComm, volL, logFromApi, storFromApi, commIsDefault, inp, calc, showcase,
@@ -639,6 +676,9 @@ export function LiveWbPricing() {
                             {Math.round(marginPct ?? 0)}%
                           </b>
                           <div className="muted" style={{ fontSize: 13 }}>{marginRub.toLocaleString('ru-RU')} ₽</div>
+                          {Object.keys(k).length > 0 && (
+                            <div style={{ fontSize: 12, color: 'var(--accent)' }} title="Маржа посчитана по ручным значениям из раскрытой строки. Они снимутся сами, как только по этим полям придут новые данные, или кнопкой «Сбросить».">✎ ручной расчёт</div>
+                          )}
                           {commIsDefault && (
                             <div style={{ fontSize: 12, color: 'var(--warn)' }} title={`Комиссия WB не пришла из API — взят дефолт ${WB_DEFAULTS.commission}%. Реальная (обычно ~35.5% для автотоваров) может быть выше → маржа завышена. Раскрой строку и задай комиссию.`}>⚠ ком. {WB_DEFAULTS.commission}%</div>
                           )}
@@ -733,14 +773,14 @@ export function LiveWbPricing() {
                                           className="input"
                                           type="number"
                                           value={f.val}
-                                          onChange={(e) => setKnob(r.nmId, f.key, e.target.value)}
+                                          onChange={(e) => setKnob(r.nmId, f.key, e.target.value, (wbAutoRow[f.key] ?? wbAuto(r)[f.key]))}
                                           style={{ width: '100%', ...(k[f.key] !== undefined ? { borderColor: 'var(--accent)', fontWeight: 700 } : {}) }}
                                         />
                                       </label>
                                     ))}
                                   </div>
                                   {edited && (
-                                    <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => setKnobs(prev => { const n = { ...prev }; delete n[r.nmId]; saveKnobs(n); return n; })}>
+                                    <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => resetKnobs(r.nmId)}>
                                       Сбросить к данным из таблицы
                                     </button>
                                   )}

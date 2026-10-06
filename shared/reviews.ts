@@ -77,6 +77,8 @@ export type ReviewSettings = {
   chatAutoDraft: boolean;
   /** Чаты WB: отправлять черновик без кнопки (только без эскалации). Старт — выключено. */
   chatAutoSendWb: boolean;
+  /** Чаты Ozon: то же для Ozon. Старт — выключено. */
+  chatAutoSendOzon: boolean;
 };
 
 export const DEFAULT_REVIEW_SETTINGS: ReviewSettings = {
@@ -90,6 +92,7 @@ export const DEFAULT_REVIEW_SETTINGS: ReviewSettings = {
   autoDraft: false,
   chatAutoDraft: true,
   chatAutoSendWb: false,
+  chatAutoSendOzon: false,
 };
 
 export type ReviewCounters = Record<ReviewDirection, { unanswered: number; pending: number }>;

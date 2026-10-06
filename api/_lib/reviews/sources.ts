@@ -15,6 +15,7 @@ import { fetchWithRetry } from '../fetchRetry';
 import { getDb, kvGet, kvSet, kvUpdatedAt, rlog, getSettings } from './db';
 import { stripPii } from './kb';
 import { askClaude } from './claude';
+import { chatDb, addMessages, chatMessages, setThreadMeta, getThread, wbOfferByNm } from './chatStore';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const errText = (e: unknown) => String((e as Error)?.message ?? e).slice(0, 200);
@@ -163,24 +164,51 @@ function savePairs(source: 'wb_chat' | 'ozon_chat', chatId: string, offerId: str
   return n;
 }
 
-/** Сырые сообщения WB копим по чатам (лента событий приходит вперемешку), пары пересобираем. */
-function wbChatBuffer(chatId: string): ChatMsg[] { return kvGet<ChatMsg[]>(`wbchat:${chatId}`, []); }
+export const WB_CHAT_BASE = 'https://buyer-chat-api.wildberries.ru';
+/** Токен для чатов WB: отдельный WB_TOKEN_CHAT, если задан, иначе токен «Вопросы и отзывы». */
+export function wbChatHeaders(): Record<string, string> {
+  const own = (process.env.WB_TOKEN_CHAT || '').trim();
+  return own ? { Authorization: own } : (wbUpstream('feedbacks').headers as any);
+}
 
-async function syncWbChats(maxPages = 30): Promise<{ events: number; pairs: number }> {
-  const up = wbUpstream('feedbacks');
-  const base = 'https://buyer-chat-api.wildberries.ru';
+/** Текст события WB: текст сообщения или пометка о вложении. */
+function wbEventText(e: any): string {
+  const t = String(e.message?.text || '').trim();
+  if (t) return t;
+  const att = e.message?.attachments || {};
+  if (att.images?.length) return `[фото: ${att.images.length}]`;
+  if (att.files?.length) return `[файл: ${att.files.map((f: any) => f.name).filter(Boolean).join(', ') || att.files.length}]`;
+  if (att.goodCard) return '[карточка товара]';
+  return '';
+}
+
+let wbSyncing: Promise<{ events: number; pairs: number }> | null = null;
+/** Синхронизация чатов WB (один проход за раз: её зовут и 5-минутный таймер чатов, и общий 30-минутный). */
+export function syncWbChats(maxPages = 30): Promise<{ events: number; pairs: number }> {
+  if (wbSyncing) return wbSyncing;
+  wbSyncing = syncWbChatsOnce(maxPages).finally(() => { wbSyncing = null; });
+  return wbSyncing;
+}
+
+async function syncWbChatsOnce(maxPages: number): Promise<{ events: number; pairs: number }> {
   const get = async (path: string) => {
-    const r = await fetchWithRetry(`${base}${path}`, { headers: up.headers as any }, { maxRetries: 2, timeoutMs: 60_000 });
+    const r = await fetchWithRetry(`${WB_CHAT_BASE}${path}`, { headers: wbChatHeaders() }, { maxRetries: 2, timeoutMs: 60_000 });
     const t = await r.text();
     if (!r.ok) throw new Error(`WB чаты ${r.status}: ${t.slice(0, 200)}`);
     return JSON.parse(t);
   };
-  // Чат → товар (nmID → артикул).
-  const chatGood = kvGet<Record<string, number>>('wbchat_goods', {});
+  chatDb();
+  // Список чатов: подпись для ответа (replySign), имя покупателя, товар.
   try {
     const list = await get('/api/v1/seller/chats');
-    for (const c of list?.result || []) if (c?.chatID && c?.goodCard?.nmID) chatGood[c.chatID] = c.goodCard.nmID;
-    kvSet('wbchat_goods', chatGood);
+    for (const c of list?.result || []) {
+      if (!c?.chatID) continue;
+      const nm = c?.goodCard?.nmID ? String(c.goodCard.nmID) : null;
+      setThreadMeta('wb', c.chatID, {
+        replySign: c.replySign || null, clientName: c.clientName || null, sku: nm,
+        offerId: wbOfferByNm(nm), productName: c?.goodCard?.name || null,
+      });
+    }
   } catch (e) { rlog('warn', 'WB: список чатов не получен', { error: errText(e) }); }
 
   let next = kvGet<number | null>('wbchat_next', null);
@@ -189,19 +217,19 @@ async function syncWbChats(maxPages = 30): Promise<{ events: number; pairs: numb
   for (let page = 0; page < maxPages; page++) {
     const j = await get(`/api/v1/seller/events${next ? `?next=${next}` : ''}`);
     const evs: any[] = j?.result?.events || [];
-    const bufs = new Map<string, ChatMsg[]>();
+    const byChat = new Map<string, ChatMsg[]>();
     for (const e of evs) {
       if (e.eventType !== 'message' || !e.chatID) continue;
-      const text = String(e.message?.text || '').trim();
+      const text = wbEventText(e);
       if (!text) continue;
-      const buf = bufs.get(e.chatID) || wbChatBuffer(e.chatID);
-      bufs.set(e.chatID, buf);
-      if (buf.some(m => m.id === String(e.eventID))) continue;
-      buf.push({ id: String(e.eventID), at: Number(e.addTimestamp) || Date.parse(e.addTime) || 0, fromBuyer: e.sender === 'client', text: text.slice(0, 2000) });
-      touched.add(e.chatID);
-      events++;
+      const arr = byChat.get(e.chatID) || [];
+      arr.push({ id: String(e.eventID), at: Number(e.addTimestamp) || Date.parse(e.addTime) || 0, fromBuyer: e.sender === 'client', text: text.slice(0, 2000) });
+      byChat.set(e.chatID, arr);
     }
-    for (const [id, buf] of bufs) kvSet(`wbchat:${id}`, buf.slice(-200));
+    for (const [id, arr] of byChat) {
+      const n = addMessages('wb', id, arr);
+      if (n) { events += n; touched.add(id); }
+    }
     const nx = Number(j?.result?.next) || null;
     if (!evs.length || !nx || nx === next) break;
     next = nx;
@@ -210,9 +238,9 @@ async function syncWbChats(maxPages = 30): Promise<{ events: number; pairs: numb
   }
   let pairs = 0;
   for (const id of touched) {
-    const nm = chatGood[id];
-    const offer = nm ? kvGet<string | null>(`wbnm:${nm}`, null) : null;
-    pairs += savePairs('wb_chat', id, offer, wbChatBuffer(id));
+    const th = getThread('wb', id);
+    // Пометки о вложениях в базу знаний не берём.
+    pairs += savePairs('wb_chat', id, th?.offerId || null, chatMessages('wb', id).filter(m => !/^\[(фото|файл|карточка)/.test(m.text)));
   }
   return { events, pairs };
 }

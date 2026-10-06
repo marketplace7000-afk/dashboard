@@ -19,6 +19,8 @@ import {
   refreshCards, cardStats, syncChats, chatStats, getStyleProfile, buildStyleProfile, styleProfileDue,
 } from './sources';
 import { kvGet, kvUpdatedAt } from './db';
+import { listThreads, threadWithMessages, draftThread, sendThread, chatTick, chatCounts, chatTotals, scheduleChats } from './chats';
+import { getThread, patchThread } from './chatStore';
 import { DIRECTIONS, type ReviewCounters, type ReviewView } from '../../../shared/reviews';
 
 function body(req: VercelRequest): any {
@@ -166,6 +168,36 @@ export async function handleReviews(req: VercelRequest, res: VercelResponse, res
         return res.status(200).json({ ok: true, ...importTgPairs(pairs) });
       }
     }
+    // ─── Чаты с покупателями (WB) ───
+    if (a === 'chats') {
+      const p = req.method === 'POST' ? body(req) : {};
+      const id = String((req.query as any).id || p.id || '');
+      if (!b && req.method === 'GET') return res.status(200).json({ ok: true, ...listThreads(req.query as any), totals: chatTotals() });
+      if (b === 'counts' && req.method === 'GET') return res.status(200).json({ ok: true, ...chatCounts() });
+      if (b === 'sync' && req.method === 'POST') return res.status(200).json({ ok: true, result: await chatTick() });
+      if (b === 'thread') {
+        if (!getThread('wb', id)) return res.status(404).json({ ok: false, error: 'not_found' });
+        if (!c && req.method === 'GET') return res.status(200).json({ ok: true, ...threadWithMessages('wb', id) });
+        if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method_not_allowed' });
+        if (c === 'draft') return res.status(200).json({ ok: true, thread: await draftThread('wb', id) });
+        if (c === 'save') {
+          const th = getThread('wb', id)!;
+          patchThread('wb', id, { draft_answer: String(p.text ?? '').slice(0, 1000), status: th.status === 'new' || th.status === 'idle' ? 'drafted' : th.status });
+          return res.status(200).json({ ok: true, thread: getThread('wb', id) });
+        }
+        if (c === 'send') {
+          const r = await sendThread('wb', id, String(p.text ?? ''), 'owner');
+          return res.status(r.ok ? 200 : 400).json(r);
+        }
+        if (c === 'skip') { patchThread('wb', id, { status: 'skipped' }); return res.status(200).json({ ok: true, thread: getThread('wb', id) }); }
+        if (c === 'unskip') {
+          const th = getThread('wb', id)!;
+          patchThread('wb', id, { status: th.draftAnswer ? (th.escalationReason ? 'escalated' : 'drafted') : (th.lastFromBuyer ? 'new' : 'idle') });
+          return res.status(200).json({ ok: true, thread: getThread('wb', id) });
+        }
+      }
+      return res.status(404).json({ ok: false, error: 'not_found' });
+    }
     if (a === 'log' && req.method === 'GET') return res.status(200).json({ ok: true, log: readLog(300), usage: usageByDay(31) });
     return res.status(404).json({ ok: false, error: 'not_found' });
   } catch (e) {
@@ -213,4 +245,6 @@ export function scheduleReviews(): void {
   };
   setTimeout(tick, 60_000);
   setInterval(tick, EVERY_MS).unref();
+  // Чаты с покупателями — чаще: каждые 5 минут (сообщения в чате ждут ответа быстрее отзывов).
+  scheduleChats();
 }

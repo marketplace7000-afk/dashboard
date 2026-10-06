@@ -42,7 +42,7 @@ const RISK = /брак|сломал|слома|не работа|неиспра�
 const RUDE = /(^|[^а-яё])(х[уy][йяеи]|п[иi]зд|еба|ёба|бля|сук[аи]|муда|говн|дерьм)/i;
 
 /** Ссылки и контакты в ответе площадки запрещают — такой черновик только вручную. */
-export const FORBIDDEN = /https?:\/\/|www\.|taplink|t\.me|telegram|телеграм|whats ?app|ватсап|вотсап|viber|вайбер|\bмакс\b|@[a-z0-9_]{4,}|\+7[\s(-]*\d{3}|8[\s(-]*\d{3}[\s)-]*\d{3}[\s-]*\d{2}/i;
+export const FORBIDDEN = /https?:\/\/|www\.|taplink|t\.me|telegram|телеграм|whats ?app|ватсап|вотсап|viber|вайбер|(^|[^а-яё])макс([^а-яё]|$)|@[a-z0-9_]{4,}|\+7[\s(-]*\d{3}|8[\s(-]*\d{3}[\s)-]*\d{3}[\s-]*\d{2}/i;
 
 export function codeEscalation(item: Pick<ReviewItem, 'text' | 'pros' | 'cons' | 'rating' | 'kind'>, ratingMax: number): string | null {
   const t = `${item.text || ''} ${item.pros || ''} ${item.cons || ''}`;

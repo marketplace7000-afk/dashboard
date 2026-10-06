@@ -3,13 +3,14 @@ import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, ChartLineIcon, PaperPlaneTiltIcon,
   GearIcon, GraphIcon, SquaresFourIcon,
   CaretRightIcon, MegaphoneIcon,
-  ListIcon, RobotIcon
+  ListIcon, RobotIcon, ChatsCircleIcon
 } from '@phosphor-icons/react';
 import { AgentHosts } from './pages/AgentHosts';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Prices } from './pages/Prices';
 import { Reviews } from './pages/Reviews';
+import { Chats } from './pages/Chats';
 import { Analytics } from './pages/Analytics';
 import { Settings } from './pages/Settings';
 import { Agents } from './pages/Agents';
@@ -21,7 +22,7 @@ import { prefetchAll } from './api/prefetch';
 import { setUnauthorizedHandler } from './api/http';
 import { noteSwallowed } from './utils/log';
 
-type Page = 'dashboard' | 'prices' | 'reviews' | 'analytics' | 'modules' | 'ads' | 'agents' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'prices' | 'reviews' | 'chats' | 'analytics' | 'modules' | 'ads' | 'agents' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -37,6 +38,7 @@ const NAV_TOP: { key: Page; Icon: any; label: string }[] = [
 const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   { key: 'prices',      Icon: TagIcon,             label: 'Цены' },
   { key: 'reviews',     Icon: ChatCircleTextIcon,  label: 'Отзывы и вопросы' },
+  { key: 'chats',       Icon: ChatsCircleIcon,     label: 'Чаты с покупателями' },
   { key: 'analytics',   Icon: ChartLineIcon,       label: 'Аналитика' },
   { key: 'ads',         Icon: MegaphoneIcon,       label: 'Реклама' },
   // «Модули» скрыт из меню по просьбе клиента (28.07) — роут и страница живы,
@@ -55,6 +57,7 @@ const TITLES: Record<Page, string> = {
   dashboard: 'Дашборд',
   prices: 'Модуль «Цены»',
   reviews: 'Отзывы и вопросы',
+  chats: 'Чаты с покупателями',
   analytics: 'Модуль «Аналитика»',
   ads: 'Реклама',
   modules: 'Модули · акции, аудит карточек',
@@ -165,6 +168,7 @@ export function App() {
           {page === 'dashboard' && <Dashboard onNav={(k) => setPage(k as Page)} />}
           {page === 'prices' && <Prices />}
           {page === 'reviews' && <Reviews />}
+          {page === 'chats' && <Chats />}
           {page === 'analytics' && <Analytics />}
           {page === 'ads' && <Ads />}
           {page === 'settings' && <Settings />}

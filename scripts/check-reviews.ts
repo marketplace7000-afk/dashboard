@@ -124,6 +124,23 @@ d.prepare("INSERT INTO kb_folders (path, offer_ids, suggested, confirmed, files,
 eq('материалы компонента в наборе', productKnowledge('KIT-9-А/Б', 'как наносить полироль', 2000).text.includes('холодную поверхность'), true);
 eq('общая папка не нужна чужому артикулу', productKnowledge('TEST-1', 'полироль', 2000).text.includes('холодную'), false);
 eq('общая папка помечена', (await import('../api/_lib/reviews/kb')).listFolders().find(f => f.path === 'KIT-9-А-Б/PN111')?.shared, true);
+// 11. Чаты: статус диалога по последнему сообщению, своё сообщение не дублируется.
+{
+  const cs = await import('../api/_lib/reviews/chatStore');
+  cs.setThreadMeta('wb', 'c1', { replySign: 'sig', clientName: 'Иван' });
+  cs.addMessages('wb', 'c1', [{ id: 'e1', at: 1000, fromBuyer: true, text: 'Не подключается к магнитоле' }]);
+  eq('новое сообщение покупателя → ждёт ответа', cs.getThread('wb', 'c1')?.status, 'new');
+  cs.addMessages('wb', 'c1', [{ id: 'local:1', at: 2000, fromBuyer: false, text: 'Проверьте Bluetooth' }]);
+  eq('ответили → не ждёт', cs.getThread('wb', 'c1')?.status, 'idle');
+  cs.addMessages('wb', 'c1', [{ id: 'e2', at: 2001, fromBuyer: false, text: 'Проверьте Bluetooth' }]);
+  eq('своё сообщение не задваивается', cs.chatMessages('wb', 'c1').map(m => m.id), ['e1', 'e2']);
+  cs.patchThread('wb', 'c1', { status: 'sent' });
+  cs.addMessages('wb', 'c1', [{ id: 'e3', at: 3000, fromBuyer: true, text: 'Не помогло' }]);
+  eq('покупатель снова написал → ждёт ответа', cs.getThread('wb', 'c1')?.status, 'new');
+  eq('подпись для ответа есть', cs.getThread('wb', 'c1')?.canReply, true);
+}
+eq('«Макс» как мессенджер', FORBIDDEN.test('пишите в Макс'), true);
+eq('«Максим» — не мессенджер', FORBIDDEN.test('Максим, спасибо'), false);
 eq('png под видом jpg', imageMime(Buffer.from([0x89, 0x50, 0x4e, 0x47]), 'x.jpg'), 'image/png');
 
 if (fails) { console.log(`\nОшибок: ${fails}`); process.exit(1); }

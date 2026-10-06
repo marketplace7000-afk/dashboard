@@ -379,11 +379,11 @@ export function LiveOzonPricing() {
       nds: gp('nds', OZON_DEFAULTS.nds),
     };
     // Без себестоимости расчёт неполон → маржу не выдаём за достоверную.
-    const oc = cost > 0 ? calcOzonProfit(oi) : null;
+    const oc = oi.cost > 0 ? calcOzonProfit(oi) : null; // 06.10: ручная себестоимость тоже считается
     const marginPct = oc ? Math.round(oc.margin) : null;
     const marginRub = oc ? Math.round(oc.profit) : null;
     const roi = oc ? Math.round(oc.roi) : null;
-    const roiInfo = roi !== null && cost > 0 ? roiStatus(roi, cost) : null;
+    const roiInfo = roi !== null && oi.cost > 0 ? roiStatus(roi, oi.cost) : null;
     return { proc, cur, ozb, buyerFromShowcase, showcaseMem, showcase, buyerFromApi, buyerFromTable, buyerFromMemory, memHist, memAgeDays, buyerPrice, sppReal, cost, apiComm, apiLog,
       apiReturn, apiAcq, drrFromTable, drrFromApi, hasOzonAd, acqPct, commIsDefault, oi, oc, marginPct, marginRub, roi, roiInfo, econRow };
   };

@@ -340,11 +340,11 @@ export function LiveWbPricing() {
       nds: gp('nds', WB_DEFAULTS.nds),
     };
     // Без себестоимости расчёт неполон → маржу не выдаём за достоверную.
-    const calc = cost > 0 ? calcWbProfit(inp) : null;
+    const calc = inp.cost > 0 ? calcWbProfit(inp) : null; // 06.10: ручная себестоимость тоже считается
     const marginPct = calc ? Math.round(calc.margin) : null;
     const marginRub = calc ? Math.round(calc.profit) : null;
     const roi = calc ? Math.round(calc.roi) : null;
-    const roiInfo = roi !== null && cost > 0 ? roiStatus(roi, cost) : null;
+    const roiInfo = roi !== null && inp.cost > 0 ? roiStatus(roi, inp.cost) : null;
     return { proc, mainSize, salesBuyer, seraya, lkPrice, lkFromApi, buyerPrice, buyerFromApiOrSales, buyerSource, saleAgeDays, sppPct,
       cost, econ, catComm, volL, logFromApi, storFromApi, commIsDefault, inp, calc, marginPct, marginRub, roi, roiInfo, showcase, econRow };
   };

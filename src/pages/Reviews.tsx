@@ -97,14 +97,14 @@ export function Reviews() {
                 <div key={d.key} className="card" style={{ padding: '8px 10px', minWidth: 210, flex: '1 1 210px' }}>
                   <div className="flex-between">
                     <span className="row gap-8"><span className="mp-tab-dot" style={{ background: MP_COLOR[d.mp], width: 8, height: 8 }} /><b>{d.title}</b></span>
-                    <label className="row" style={{ gap: 4, fontSize: 12, opacity: disabled ? 0.5 : 1 }} title="Автопубликация ответов без эскалации">
+                    <label className="row" style={{ gap: 4, fontSize: 12, opacity: disabled ? 0.5 : 1 }} title={disabled ? 'Ozon не даёт отвечать на отзывы по API — ответ вставляется в кабинете' : 'Автопубликация ответов без эскалации'}>
                       <input type="checkbox" checked={auto} disabled={disabled} onChange={e => toggleAuto(d.key, e.target.checked)} /> авто
                     </label>
                   </div>
                   <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                    {disabled
+                    {disabled && !st?.ok
                       ? (st?.note || 'Нет доступа по API')
-                      : <>без ответа {c.unanswered} · ждут {c.pending} · сбор {ago(st?.at ?? null)}{st && !st.ok && st.error ? <span style={{ color: 'var(--bad)' }}> · ошибка</span> : null}</>}
+                      : <>без ответа {c.unanswered} · ждут {c.pending} · сбор {ago(st?.at ?? null)}{disabled ? ' (агент на ПК)' : ''}{st && !st.ok && st.error ? <span style={{ color: 'var(--bad)' }}> · ошибка</span> : null}</>}
                   </div>
                 </div>
               );
@@ -221,7 +221,14 @@ function Inbox({ counts, onChanged }: { counts: { un: number; pend: number }; on
 
       {err && <div className="chip bad">{err}</div>}
       {loading && !items.length && <div className="muted"><SpinnerIcon size={14} className="spin" /> Загружаю…</div>}
-      {!loading && !items.length && !err && <div className="card muted">Здесь пусто. {view === 'unanswered' ? 'Все отзывы и вопросы отвечены.' : ''}</div>}
+      {!loading && !items.length && !err && (
+        (f.mp || f.kind || f.rating || f.q.trim() || f.days)
+          ? <div className="card muted">
+              По выбранным фильтрам пусто{view === 'unanswered' && counts.un ? <> — а всего неотвеченных <b>{counts.un}</b></> : ''}.{' '}
+              <button className="btn btn-sm" onClick={() => setF({ mp: '', kind: '', rating: '', q: '', days: '' })}>Сбросить фильтры</button>
+            </div>
+          : <div className="card muted">Здесь пусто. {view === 'unanswered' ? 'Все отзывы и вопросы отвечены.' : ''}</div>
+      )}
 
       {items.map(it => (
         <ItemCard key={it.id} it={it} selected={sel.has(it.id)}
@@ -314,10 +321,21 @@ function ItemCard({ it, selected, onSelect, onReplace, onDrop }: {
                   <button className="btn btn-sm" disabled={!!busy} onClick={() => act('draft', async () => onReplace((await reviewsApi.draft(it.id)).item))}>
                     {busy === 'draft' ? <SpinnerIcon size={14} className="spin" /> : <SparkleIcon size={14} />} {it.draftAnswer ? 'Переписать' : 'Черновик'}
                   </button>
-                  <button className="btn btn-sm btn-primary" disabled={!!busy || ozonReview || !text.trim()} onClick={publish}
-                    title={ozonReview ? 'Ответы на отзывы Ozon — через агента на ПК (в разработке)' : ''}>
-                    {busy === 'publish' ? <SpinnerIcon size={14} className="spin" /> : <PaperPlaneRightIcon size={14} />} Опубликовать
-                  </button>
+                  {ozonReview ? (
+                    <button className="btn btn-sm btn-primary" disabled={!text.trim()}
+                      title="Ozon не даёт отвечать на отзывы по API: ответ копируется, открывается кабинет — вставьте его в отзыв (Ctrl+V). После ответа отзыв сам уйдёт из списка при следующем сборе."
+                      onClick={async () => {
+                        try { await navigator.clipboard.writeText(text.trim()); } catch { /* без буфера — откроем кабинет всё равно */ }
+                        if (text !== (it.draftAnswer || '')) saveIfChanged();
+                        window.open('https://seller.ozon.ru/app/reviews', '_blank', 'noopener');
+                      }}>
+                      <ArrowSquareOutIcon size={14} /> Скопировать и открыть Ozon
+                    </button>
+                  ) : (
+                    <button className="btn btn-sm btn-primary" disabled={!!busy || !text.trim()} onClick={publish}>
+                      {busy === 'publish' ? <SpinnerIcon size={14} className="spin" /> : <PaperPlaneRightIcon size={14} />} Опубликовать
+                    </button>
+                  )}
                 </>}
             </div>
           </div>

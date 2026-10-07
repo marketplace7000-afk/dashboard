@@ -145,6 +145,17 @@ eq('общая папка помечена', (await import('../api/_lib/reviews/
 }
 eq('«Макс» как мессенджер', FORBIDDEN.test('пишите в Макс'), true);
 eq('«Максим» — не мессенджер', FORBIDDEN.test('Максим, спасибо'), false);
+// 12. Отзывы Ozon от агента на ПК: новые добавляются, исчезнувшие из полного списка — отвечены.
+{
+  const { ingestOzonReviews } = await import('../api/_lib/reviews/collect');
+  const row = (uuid: string) => ({ uuid, sku: '1', offer_id: 'OZ-1', title: 'Товар', url: null, text: 'Греется', rating: 5, published_at: '2026-10-01T10:00:00Z', is_empty: false });
+  eq('первый сбор', ingestOzonReviews([row('r1'), row('r2')], true).added, 2);
+  const r = ingestOzonReviews([row('r2')], true);
+  eq('ответили в кабинете → закрыт', r.closed, 1);
+  const st = getDb().prepare("SELECT external_id, answered_on_mp FROM items WHERE marketplace = 'ozon' AND kind = 'review' ORDER BY external_id").all() as any[];
+  eq('статусы отзывов Ozon', st.map(x => [x.external_id, x.answered_on_mp]), [['r1', 1], ['r2', 0]]);
+  eq('неполный список ничего не закрывает', ingestOzonReviews([], false).closed, 0);
+}
 eq('png под видом jpg', imageMime(Buffer.from([0x89, 0x50, 0x4e, 0x47]), 'x.jpg'), 'image/png');
 
 if (fails) { console.log(`\nОшибок: ${fails}`); process.exit(1); }

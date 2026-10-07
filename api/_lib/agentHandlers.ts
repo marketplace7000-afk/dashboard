@@ -76,6 +76,14 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     return;
   }
 
+  // Отзывы Ozon из кабинета (сценарий ozon_reviews) → раздел «Отзывы и вопросы».
+  if (what === 'reviews-ingest') {
+    const { ingestOzonReviews } = await import('./reviews/collect');
+    const r = ingestOzonReviews(Array.isArray(b?.reviews) ? b.reviews : [], !!b?.complete);
+    res.status(200).json({ ok: true, ...r });
+    return;
+  }
+
   if (what === 'tasks' && idStr === 'claim') {
     maintainQueue();
     const name = String(b?.name || 'unknown');
@@ -86,6 +94,10 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     if (task.type === 'showcase_prices' && !(task.params.skus?.length)) {
       const filled = await fillShowcaseParams(task.params.marketplace);
       task.params = { ...task.params, ...filled };
+    }
+    // Отзывы Ozon: id компании в кабинете = Client-Id Seller API.
+    if (task.type === 'ozon_reviews' && !task.params.company_id) {
+      task.params = { ...task.params, marketplace: 'ozon', company_id: String(process.env.OZON_CLIENT_ID || '').trim() };
     }
     res.status(200).json({ task, settings: getSettings() });
     return;

@@ -10,7 +10,7 @@ import { wbUpstream, ozonUpstream } from '../../_proxy';
 import { fetchWithRetry } from '../fetchRetry';
 import { upsertItem, markAnsweredExcept, setCollectState, rlog, getDb, kvGet, kvSet } from './db';
 
-const OZON_REVIEWS_NOTE = 'Ozon не отдаёт отзывы по API на текущей подписке (Premium Plus, проверено 04.10). Сбор — через агента на ПК, этап в разработке.';
+const OZON_REVIEWS_NOTE = 'Ozon не отдаёт отзывы по API на текущей подписке — их собирает агент на ПК из кабинета (раздел «Сборщики», задание «Отзывы Ozon»).';
 
 function ts(s: unknown): number {
   const t = Date.parse(String(s || ''));
@@ -276,11 +276,44 @@ export function collectAll(): Promise<CollectSummary> {
         rlog('error', `Сбор ${dir} не удался`, { error: msg });
       }
     }
-    setCollectState('ozon_reviews', false, null, OZON_REVIEWS_NOTE);
+    // Отзывы Ozon приходят от агента на ПК (ingestOzonReviews); здесь только подпись, если агент давно молчит.
+    const oz = getDb().prepare("SELECT at, ok FROM collect_state WHERE direction = 'ozon_reviews'").get() as any;
+    if (!oz || !oz.ok || Date.now() - Number(oz.at || 0) > 3 * 3600_000) setCollectState('ozon_reviews', false, null, OZON_REVIEWS_NOTE);
     if (withHistory) lastHistoryAt = Date.now();
     const added = Object.values(out).reduce((s, x) => s + (x.added || 0), 0);
     if (added) rlog('info', `Сбор: новых ${added}`, out);
     return out;
   })().finally(() => { running = null; });
   return running;
+}
+
+// ─── Ozon: отзывы от агента на ПК ───────────────────────────────────────────
+export type OzonReviewIn = {
+  uuid: string; sku: string | null; offer_id: string | null; title: string | null; url: string | null;
+  text: string; rating: number | null; published_at: string | null; is_empty: boolean;
+};
+
+/**
+ * Отзывы «ждут ответа» из кабинета Ozon (сценарий ozon_reviews на ПК).
+ * complete = кабинет отдал список до конца: тогда всё, чего в нём больше нет, — отвечено.
+ */
+export function ingestOzonReviews(rows: OzonReviewIn[], complete: boolean): { total: number; added: number; closed: number } {
+  const ids = new Set<string>();
+  let added = 0;
+  for (const x of rows.slice(0, 5000)) {
+    if (!x?.uuid) continue;
+    ids.add(String(x.uuid));
+    const r = upsertItem({
+      marketplace: 'ozon', kind: 'review', externalId: String(x.uuid),
+      sku: x.sku ? String(x.sku) : null, offerId: x.offer_id ? String(x.offer_id) : null,
+      productName: x.title ? String(x.title).slice(0, 300) : null, productUrl: x.url ? String(x.url) : null,
+      rating: Number(x.rating) || null, text: String(x.text || '').slice(0, 5000),
+      createdAt: ts(x.published_at), answered: false,
+    });
+    if (r.inserted) added++;
+  }
+  const closed = complete ? markAnsweredExcept('ozon', 'review', ids) : 0;
+  setCollectState('ozon_reviews', true, null, 'Собирает агент на ПК из кабинета Ozon');
+  if (added || closed) rlog('info', `Отзывы Ozon (агент на ПК): новых ${added}, закрыто ${closed}`, { total: ids.size, complete });
+  return { total: ids.size, added, closed };
 }

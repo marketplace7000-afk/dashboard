@@ -14,7 +14,7 @@
 
 export type Marketplace = 'wb' | 'ozon';
 
-export type AgentTaskType = 'showcase_prices' | 'competitor_watch' | 'funnel_compare';
+export type AgentTaskType = 'showcase_prices' | 'competitor_watch' | 'funnel_compare' | 'ozon_reviews';
 
 export type AgentTaskStatus = 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -73,6 +73,7 @@ export const TASK_TYPE_TITLES: Record<AgentTaskType, string> = {
   showcase_prices: 'Цены покупателя',
   competitor_watch: 'Мониторинг конкурентов',
   funnel_compare: 'Воронка продаж',
+  ozon_reviews: 'Отзывы Ozon',
 };
 
 export const SCENARIO_STAGES: Record<AgentTaskType, StageDef[]> = {
@@ -95,6 +96,13 @@ export const SCENARIO_STAGES: Record<AgentTaskType, StageDef[]> = {
     { stage: 'collect_competitors', title: 'Данные по конкурентам',  counted: true  },
     { stage: 'ingest',              title: 'Отправка в дашборд',     counted: false },
     { stage: 'analyze',             title: 'Анализ (Claude)',        counted: false },
+  ],
+  // Отзывы Ozon из кабинета продавца (API отзывов закрыт на подписке владельца).
+  // Только чтение: страница отзывов кабинета и её же запрос списка.
+  ozon_reviews: [
+    { stage: 'open_cabinet', title: 'Кабинет Ozon',        counted: false },
+    { stage: 'reviews_list', title: 'Отзывы без ответа',   counted: true  },
+    { stage: 'ingest',       title: 'Отправка в дашборд',  counted: false },
   ],
 };
 

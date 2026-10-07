@@ -105,3 +105,11 @@ export async function ingest(path: 'wb-showcase-ingest' | 'ozon-showcase-ingest'
     return r.status === 200 && !!r.json?.ok;
   } catch (e) { localLog(`[api] ingest не прошёл: ${(e as Error).message}`); return false; }
 }
+
+/** Отзывы Ozon из кабинета → дашборд (раздел «Отзывы и вопросы»). complete = список полный. */
+export async function reviewsIngest(reviews: unknown[], complete: boolean): Promise<boolean> {
+  try {
+    const r = await call<{ ok: boolean }>(`/api/agent/reviews-ingest`, { marketplace: 'ozon', reviews, complete });
+    return r.status === 200 && !!r.json?.ok;
+  } catch (e) { localLog(`[api] reviews-ingest не прошёл: ${(e as Error).message}`); return false; }
+}

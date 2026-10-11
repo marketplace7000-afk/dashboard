@@ -89,11 +89,14 @@ function cronTimes(cron: string, dayStart: number): number[] {
     .map(h => dayStart + h * 3_600_000 + minute * 60_000);
 }
 
-/** Читаемое расписание: «06:00, 13:00, 20:00» или «каждый час». */
+/** Читаемое расписание: «06:00, 13:00, 20:00», «каждый час, 07:20–23:20» или «каждый час». */
 function cronLabel(cron: string): string {
   const times = cronTimes(cron, mskDayStart(Date.now()));
   if (!times.length) return cron;
   if (times.length >= 24) return 'каждый час';
+  // Подряд идущие часы одной строкой — иначе подпись на шкале «Сутки» растягивается на полэкрана.
+  const hourly = times.length > 4 && times.every((t, i) => i === 0 || t - times[i - 1] === 3_600_000);
+  if (hourly) return `каждый час, ${fmtClock(times[0])}⁠–⁠${fmtClock(times[times.length - 1])}`;
   return times.map(t => fmtClock(t)).join(', ');
 }
 

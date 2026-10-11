@@ -19,7 +19,8 @@ const LOG_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'logs');
 
 export function localLog(line: string): void {
   const ts = new Date().toISOString();
-  console.log(`${ts} ${line}`);
+  // Сначала файл, потом консоль: вывод в окно Windows может встать (выделение
+  // мышью в консоли), и тогда строка хотя бы останется в журнале (11.10.2026).
   try {
     mkdirSync(LOG_DIR, { recursive: true });
     const day = ts.slice(0, 10);
@@ -31,6 +32,7 @@ export function localLog(line: string): void {
       if (m && new Date(m[1]).getTime() < cutoff) unlinkSync(join(LOG_DIR, f));
     }
   } catch { /* локальный журнал не критичен */ }
+  console.log(`${ts} ${line}`);
 }
 
 async function call<T>(path: string, body: unknown): Promise<{ status: number; json: T | null }> {

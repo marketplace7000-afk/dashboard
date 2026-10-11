@@ -9,9 +9,11 @@
  * форматирования (конституция). Списки этапов приезжают в ответе live.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { reviewsApi } from '../api/reviews';
+import type { ReviewsOverview } from '../../shared/reviews';
 import {
   RobotIcon, PlayIcon, XCircleIcon, PauseIcon, WarningIcon, CheckCircleIcon,
-  ProhibitIcon, ClockIcon, CaretDownIcon, CaretUpIcon,
+  ProhibitIcon, ClockIcon, CaretDownIcon, CaretUpIcon, ArrowsClockwiseIcon,
 } from '@phosphor-icons/react';
 
 // ─── Типы ответа /api/agents/live (сервер — единственная точка истины) ───────
@@ -32,10 +34,10 @@ type Task = {
 type Host = { name: string; last_seen_at: number | null; paused: boolean; version: string; chrome_ok: boolean; online: boolean };
 type Pause = { id: number; marketplace: 'wb' | 'ozon'; reason: string; paused_until: number | null };
 type Run = { task_id: number; level: string; message: string; data?: any; created_at: number };
-type Schedule = { id: number; type: string; cron: string; enabled: boolean; next_run_at: number | null };
+type Schedule = { id: number; type: string; params?: { marketplace?: string; [k: string]: unknown }; cron: string; enabled: boolean; next_run_at: number | null };
 type Live = {
   ok: boolean; disabled?: boolean; hosts: Host[]; tasks: Task[]; queued: Task[];
-  finished_today: Task[]; pauses: Pause[]; runs: Run[]; schedules?: Schedule[];
+  finished_today: Task[]; last_runs?: Record<string, Task>; pauses: Pause[]; runs: Run[]; schedules?: Schedule[];
   stages: Record<string, StageDef[]>; titles: Record<string, string>; now: number;
 };
 
@@ -222,6 +224,164 @@ function FinishedRow({ task, live }: { task: Task; live: Live }) {
   );
 }
 
+// ─── Карточки агентов: каждый агент виден, со статусом и кнопкой запуска ────
+
+type Lane = { type: string; mp: 'wb' | 'ozon'; label: string };
+type AgentDef = { num: number; title: string; about: string; lanes: Lane[]; server?: boolean };
+
+const AGENTS: AgentDef[] = [
+  {
+    num: 1, title: 'Цены покупателя',
+    about: 'Витрины WB и Ozon в Chrome агента → цены в разделе «Цены»',
+    lanes: [
+      { type: 'showcase_prices', mp: 'wb', label: 'Wildberries' },
+      { type: 'showcase_prices', mp: 'ozon', label: 'Ozon' },
+    ],
+  },
+  {
+    num: 2, title: 'Отзывы и вопросы',
+    about: 'Отзывы Ozon — агент на ПК из кабинета; остальное собирает сервер',
+    lanes: [{ type: 'ozon_reviews', mp: 'ozon', label: 'Отзывы Ozon (кабинет)' }],
+    server: true,
+  },
+];
+
+const SERVER_DIRS: { key: 'wb_reviews' | 'wb_questions' | 'ozon_questions'; label: string }[] = [
+  { key: 'wb_reviews', label: 'Отзывы WB' },
+  { key: 'wb_questions', label: 'Вопросы WB' },
+  { key: 'ozon_questions', label: 'Вопросы Ozon' },
+];
+
+type LaneState = { kind: 'running' | 'queued' | 'paused' | 'ok' | 'failed' | 'never'; text: string; sub: string };
+
+function laneState(l: Lane, live: Live): LaneState {
+  const same = (t: Task) => t.type === l.type && (t.params?.marketplace ?? '') === l.mp;
+  const next = (live.schedules ?? []).find(s => s.enabled && s.type === l.type && (!s.params?.marketplace || s.params.marketplace === l.mp));
+  const nextStr = next?.next_run_at ? `следующий по расписанию в ${fmtClock(next.next_run_at)}` : 'расписание выключено';
+  const act = live.tasks.find(same);
+  if (act) {
+    const pr = act.progress;
+    const items = pr?.items_total ? ` · ${pr.items_done ?? 0} из ${pr.items_total}` : '';
+    return {
+      kind: 'running',
+      text: `Выполняется${pr ? `: этап ${pr.stage_index} из ${pr.stages_total}${items}` : ' — запускается'}`,
+      sub: `${pr?.message ?? ''}${act.claimed_by ? ` · ${act.claimed_by}` : ''}${act.started_at ? ` · идёт ${fmtAgo(act.started_at, live.now)}` : ''}`,
+    };
+  }
+  const q = live.queued.find(same);
+  if (q) return { kind: 'queued', text: `В очереди на ${fmtClock(q.scheduled_for)}`, sub: 'ждёт свободный хост' };
+  const pz = live.pauses.find(p => p.marketplace === l.mp);
+  const last = live.last_runs?.[`${l.type}:${l.mp}`];
+  const lastStr = last ? `последний ${fmtAgo(last.finished_at ?? last.created_at, live.now)} назад (${fmtClock(last.finished_at)})` : '';
+  if (pz) return { kind: 'paused', text: `Площадка на паузе — ${PAUSE_LABEL[pz.reason] ?? pz.reason}`, sub: 'снимите паузу вверху, после входа в аккаунт в окне Chrome агента' };
+  if (!last) return { kind: 'never', text: 'Ещё не запускался', sub: nextStr };
+  if (last.status === 'done') return { kind: 'ok', text: last.summary || 'Выполнено', sub: `${lastStr} · ${nextStr}` };
+  return { kind: 'failed', text: `Ошибка: ${last.error ?? 'неизвестно'}`, sub: `${lastStr} · ${nextStr}` };
+}
+
+const KIND_COLOR: Record<LaneState['kind'], string> = {
+  running: 'var(--accent, #4f6ef7)', queued: 'var(--muted, #9aa1b5)', paused: 'var(--bad, #d64545)',
+  ok: 'var(--good, #3c9d67)', failed: 'var(--bad, #d64545)', never: 'var(--muted, #9aa1b5)',
+};
+
+function LaneIcon({ kind }: { kind: LaneState['kind'] }) {
+  const c = KIND_COLOR[kind];
+  if (kind === 'running') return <span style={{ width: 10, height: 10, borderRadius: '50%', background: c, display: 'inline-block', animation: 'agents-pulse 1.2s ease-in-out infinite', flexShrink: 0 }} />;
+  if (kind === 'ok') return <CheckCircleIcon size={15} weight="fill" color={c} style={{ flexShrink: 0 }} />;
+  if (kind === 'queued' || kind === 'never') return <ClockIcon size={15} color={c} style={{ flexShrink: 0 }} />;
+  return <WarningIcon size={15} weight="fill" color={c} style={{ flexShrink: 0 }} />;
+}
+
+function AgentCards({ live, busy, post }: { live: Live; busy: boolean; post: (url: string, body?: unknown) => Promise<void> }) {
+  const [ov, setOv] = useState<ReviewsOverview | null>(null);
+  const [ovErr, setOvErr] = useState<string | null>(null);
+  const [collecting, setCollecting] = useState(false);
+  const loadOv = useCallback(async () => {
+    try { setOv(await reviewsApi.overview()); setOvErr(null); } catch (e: any) { setOvErr(e?.message || 'нет связи'); }
+  }, []);
+  useEffect(() => { void loadOv(); const t = setInterval(loadOv, 60_000); return () => clearInterval(t); }, [loadOv]);
+  const collectNow = async () => {
+    setCollecting(true);
+    try { await reviewsApi.collect(); } catch (e: any) { setOvErr(`сбор не удался: ${e?.message}`); }
+    setCollecting(false); void loadOv();
+  };
+  const hostOnline = live.hosts.some(h => h.name !== 'dev-sim' && h.online && !h.paused);
+
+  return (
+    <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
+      {AGENTS.map(a => {
+        const states = a.lanes.map(l => laneState(l, live));
+        const running = states.some(x => x.kind === 'running');
+        const bad = states.some(x => x.kind === 'failed' || x.kind === 'paused');
+        const head = running ? 'работает' : bad ? 'есть ошибка' : 'в порядке';
+        const headColor = running ? KIND_COLOR.running : bad ? KIND_COLOR.failed : KIND_COLOR.ok;
+        return (
+          <div key={a.num} className="card" style={{ padding: '12px 14px', borderTop: `3px solid ${headColor}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <RobotIcon size={18} />
+              <strong>Агент {a.num} · {a.title}</strong>
+              <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: headColor }}>{head}</span>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{a.about}</div>
+
+            {a.lanes.map((l, i) => {
+              const st = states[i];
+              const blocked = st.kind === 'running' || st.kind === 'queued' || st.kind === 'paused';
+              return (
+                <div key={l.type + l.mp} style={{ borderTop: '1px solid var(--border, #edeff5)', marginTop: 8, paddingTop: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                    <LaneIcon kind={st.kind} />
+                    <span style={{ fontWeight: 600 }}>{l.label}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>агент на ПК</span>
+                    <button className="btn" disabled={busy || blocked || !hostOnline}
+                      title={!hostOnline ? 'Нет хоста онлайн — запустите агента на ПК' : blocked ? 'Уже выполняется или в очереди' : 'Поставить задание в очередь сейчас'}
+                      onClick={() => post('/api/agents/tasks', { type: l.type, marketplace: l.mp })}
+                      style={{ marginLeft: 'auto', fontSize: 12, padding: '3px 10px' }}>
+                      <PlayIcon size={12} style={{ verticalAlign: -2 }} /> Запустить
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 12, marginTop: 3, color: st.kind === 'failed' || st.kind === 'paused' ? 'var(--bad, #d64545)' : 'inherit' }}>{st.text}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>{st.sub}</div>
+                </div>
+              );
+            })}
+
+            {a.server && (
+              <div style={{ borderTop: '1px solid var(--border, #edeff5)', marginTop: 8, paddingTop: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                  <span style={{ fontWeight: 600 }}>Сбор на сервере</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>каждые 10 мин</span>
+                  <button className="btn" disabled={collecting} onClick={collectNow}
+                    style={{ marginLeft: 'auto', fontSize: 12, padding: '3px 10px' }}>
+                    {collecting ? <ArrowsClockwiseIcon size={12} className="spin" style={{ verticalAlign: -2 }} /> : <ArrowsClockwiseIcon size={12} style={{ verticalAlign: -2 }} />} Собрать сейчас
+                  </button>
+                </div>
+                {ovErr && <div style={{ fontSize: 12, color: 'var(--bad, #d64545)', marginTop: 3 }}>{ovErr}</div>}
+                {ov && SERVER_DIRS.map(d => {
+                  const cs = ov.collect.find(x => x.direction === d.key);
+                  const c = ov.counters[d.key];
+                  const ok = !!cs?.ok;
+                  return (
+                    <div key={d.key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginTop: 4 }}>
+                      {ok ? <CheckCircleIcon size={14} weight="fill" color={KIND_COLOR.ok} /> : <WarningIcon size={14} weight="fill" color={KIND_COLOR.failed} />}
+                      <span style={{ minWidth: 92 }}>{d.label}</span>
+                      <span style={{ color: 'var(--muted)' }}>
+                        {cs?.at ? `сбор ${fmtAgo(cs.at, Date.now())} назад` : 'ещё не собиралось'}
+                        {c ? ` · без ответа ${c.unanswered}` : ''}
+                        {!ok && cs?.error ? <span style={{ color: 'var(--bad, #d64545)' }}> · {cs.error}</span> : null}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Страница ────────────────────────────────────────────────────────────────
 
 export function AgentHosts() {
@@ -321,6 +481,9 @@ export function AgentHosts() {
         )}
       </div>
 
+      {/* Агенты: статус и запуск */}
+      <AgentCards live={live} busy={busy} post={post} />
+
       {/* Карточки текущих заданий */}
       {live.tasks.length > 0 && (
         <div style={{ display: 'grid', gap: 10 }}>
@@ -337,12 +500,6 @@ export function AgentHosts() {
               : 'Расписания выключены — запустите вручную.'}
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12, flexWrap: 'wrap' }}>
-            <button className="btn" disabled={busy} onClick={() => post('/api/agents/tasks', { type: 'showcase_prices', marketplace: 'wb' })}>
-              <PlayIcon size={13} style={{ verticalAlign: -2 }} /> Цены WB сейчас
-            </button>
-            <button className="btn" disabled={busy} onClick={() => post('/api/agents/tasks', { type: 'showcase_prices', marketplace: 'ozon' })}>
-              <PlayIcon size={13} style={{ verticalAlign: -2 }} /> Цены Ozon сейчас
-            </button>
             <button className="btn" disabled={busy} onClick={() => post('/api/agents/dev/fake-task', { marketplace: 'wb' })}
               title="Фиктивное задание: прогресс двигает сам сервер — проверка экрана без хоста">
               Демо-задание

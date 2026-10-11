@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  GaugeIcon, TagIcon, ChatCircleTextIcon, ChartLineIcon, PaperPlaneTiltIcon,
+  GaugeIcon, TagIcon, ChatCircleTextIcon, PaperPlaneTiltIcon,
   GearIcon, GraphIcon, SquaresFourIcon,
   CaretRightIcon, MegaphoneIcon,
   ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon
@@ -11,7 +11,6 @@ import { Dashboard } from './pages/Dashboard';
 import { Prices } from './pages/Prices';
 import { Reviews } from './pages/Reviews';
 import { Chats } from './pages/Chats';
-import { Analytics } from './pages/Analytics';
 import { Settings } from './pages/Settings';
 import { Agents } from './pages/Agents';
 import { Modules } from './pages/Modules';
@@ -23,7 +22,7 @@ import { prefetchAll } from './api/prefetch';
 import { setUnauthorizedHandler } from './api/http';
 import { noteSwallowed } from './utils/log';
 
-type Page = 'dashboard' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'analytics' | 'modules' | 'ads' | 'agents' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | 'ads' | 'agents' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -32,6 +31,8 @@ type Page = 'dashboard' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'analytics' |
 // берётся из листа «Склад» таблицы клиента: сборщик раз в 2 часа
 // синхронизирует её в справочник (api/_lib/costs.ts, таблица главнее), и из
 // него её читают «Цены» и экономика товара.
+// 11.10.2026: раздел «Аналитика» удалён по просьбе клиента (страница и её
+// компоненты LiveOzonAnalytics/LiveWbAnalytics убраны; данные — в «РНП»).
 
 const NAV_TOP: { key: Page; Icon: any; label: string }[] = [
   { key: 'dashboard',   Icon: GaugeIcon,           label: 'Дашборд' },
@@ -40,7 +41,6 @@ const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   { key: 'prices',      Icon: TagIcon,             label: 'Цены' },
   { key: 'reviews',     Icon: ChatCircleTextIcon,  label: 'Отзывы и вопросы' },
   { key: 'chats',       Icon: ChatsCircleIcon,     label: 'Чаты с покупателями' },
-  { key: 'analytics',   Icon: ChartLineIcon,       label: 'Аналитика' },
   // «Рука на пульсе» — по дням и товарам из API площадок (11.10.2026), замена РнП «Культуры Аналитики».
   { key: 'rnp',         Icon: PulseIcon,           label: 'РНП' },
   { key: 'ads',         Icon: MegaphoneIcon,       label: 'Реклама' },
@@ -61,7 +61,6 @@ const TITLES: Record<Page, string> = {
   prices: 'Модуль «Цены»',
   reviews: 'Отзывы и вопросы',
   chats: 'Чаты с покупателями',
-  analytics: 'Модуль «Аналитика»',
   rnp: 'Рука на пульсе (РНП)',
   ads: 'Реклама',
   modules: 'Модули · акции, аудит карточек',
@@ -173,7 +172,6 @@ export function App() {
           {page === 'prices' && <Prices />}
           {page === 'reviews' && <Reviews />}
           {page === 'chats' && <Chats />}
-          {page === 'analytics' && <Analytics />}
           {page === 'rnp' && <Rnp />}
           {page === 'ads' && <Ads />}
           {page === 'settings' && <Settings />}

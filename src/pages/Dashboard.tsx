@@ -55,7 +55,6 @@ export function Dashboard({ onNav }: { onNav: (k: string) => void }) {
   const totalAvg = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
   const prevRevenue = (showOzon ? ozon.prevRevenue : 0) + (showWb ? wb.prevRevenue : 0);
   const prevOrders = (showOzon ? ozon.prevOrders : 0) + (showWb ? wb.prevOrders : 0);
-  const totalSpark = showOzon ? ozon.daily : [];
   const anyLoading = ozon.loading || wb.loading;
 
   return (
@@ -246,7 +245,7 @@ export function Dashboard({ onNav }: { onNav: (k: string) => void }) {
         </div>
       )}
 
-      <div className="grid grid-3">
+      <div className="grid grid-2">
         <div className="card">
           <div className="flex-between">
             <h2>Цены</h2>
@@ -266,21 +265,6 @@ export function Dashboard({ onNav }: { onNav: (k: string) => void }) {
           <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>Неотвеченные отзывы WB + черновики ответов от Claude.</div>
           <div style={{ marginTop: 12 }}>
             <button className="btn btn-sm" onClick={() => onNav('reviews')}>Открыть очередь →</button>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="flex-between">
-            <h2>Аналитика</h2>
-            <span className="chip info">{PERIOD_LABEL[period]} ({periodRange(period)})</span>
-          </div>
-          <div style={{ marginTop: 4 }}>
-            {totalSpark.length > 0
-              ? <Sparkline data={totalSpark} width={240} height={56} color="#005bff" />
-              : <span className="muted">—</span>}
-          </div>
-          <div style={{ marginTop: 6 }}>
-            <button className="btn btn-sm" onClick={() => onNav('analytics')}>Полный отчёт →</button>
           </div>
         </div>
       </div>

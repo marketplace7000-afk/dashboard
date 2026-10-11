@@ -197,7 +197,7 @@ function ruleTitle(r: Rule): string {
 // ─── Мини-график ────────────────────────────────────────────────────────────
 
 function Spark({ values, metric }: { values: Array<number | null>; metric: RnpMetric }) {
-  const W = 76, H = 24;
+  const W = 88, H = 28;
   const nums = values.filter((v): v is number => v !== null);
   if (nums.length < 2) return <span className="rnp-spark-empty" />;
   const max = Math.max(...nums), min = Math.min(0, ...nums);

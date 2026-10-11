@@ -548,7 +548,7 @@ export function LiveWbPricing() {
               <option value="roi">по ROI ↓</option>
               <option value="name">по названию</option>
             </select>
-            <span className="muted" style={{ fontSize: 13, flexBasis: '100%', textAlign: 'right', whiteSpace: 'normal' }} title="Когда агент на ПК последний раз снимал цены покупателя с витрины. Обход идёт по расписанию (06:00, 13:00, 20:00 МСК); внеплановый — раздел «Сборщики», кнопки «Цены WB сейчас» / «Цены Ozon сейчас». Между обходами цена покупателя = текущая цена ЛК × (1 − СПП последнего обхода).">
+            <span className="muted" style={{ fontSize: 13, flexBasis: '100%', textAlign: 'right', whiteSpace: 'normal' }} title="Когда агент на ПК последний раз снимал цены покупателя с витрины. Обход идёт по расписанию (06:00, 13:00, 20:00 МСК); внеплановый — раздел «Сборщики», карточка «Агент 1 · Цены покупателя», кнопка «Запустить». Между обходами цена покупателя = текущая цена ЛК × (1 − СПП последнего обхода).">
               {`цена на витрине проверена: ${fmtDateClock(showcaseLastAt ?? showcaseRes.data?.fetchedAt ?? buyerRes.fetchedAt)}`}
             </span>
           </div>

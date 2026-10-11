@@ -429,7 +429,7 @@ export function maintainQueue(): void {
 export function liveState() {
   const d = getDb();
   const s = getSettings();
-  if (!d) return { ok: true, disabled: true, hosts: [], tasks: [], queued: [], finished_today: [], pauses: [], runs: [], stages: SCENARIO_STAGES, titles: TASK_TYPE_TITLES, settings: s, now: now() };
+  if (!d) return { ok: true, disabled: true, hosts: [], tasks: [], queued: [], finished_today: [], last_runs: {}, pauses: [], runs: [], stages: SCENARIO_STAGES, titles: TASK_TYPE_TITLES, settings: s, now: now() };
   maintainQueue();
   const t = now();
   const hosts = d.prepare('SELECT * FROM agents ORDER BY name').all().map((r: any) => ({
@@ -448,7 +448,15 @@ export function liveState() {
       .all(...activeIds).map((r: any) => ({ task_id: Number(r.task_id), level: r.level, message: r.message, data: P(r.data, null), created_at: Number(r.created_at) }))
     : [];
   const schedules = listSchedules();
-  return { ok: true, hosts, tasks: active, queued, finished_today: finished, pauses: activePauses(), runs, schedules, stages: SCENARIO_STAGES, titles: TASK_TYPE_TITLES, settings: s, now: t };
+  // Последний завершённый прогон по каждому направлению (тип + площадка) —
+  // для карточек агентов: «последний раз … · итог / ошибка».
+  const lastRuns: Record<string, ReturnType<typeof rowToTask>> = {};
+  for (const r of d.prepare(`SELECT * FROM agent_tasks WHERE status IN ('done','failed') ORDER BY finished_at DESC LIMIT 300`).all()) {
+    const tk = rowToTask(r);
+    const key = `${tk.type}:${tk.params?.marketplace ?? ''}`;
+    if (!lastRuns[key]) lastRuns[key] = tk;
+  }
+  return { ok: true, hosts, tasks: active, queued, finished_today: finished, last_runs: lastRuns, pauses: activePauses(), runs, schedules, stages: SCENARIO_STAGES, titles: TASK_TYPE_TITLES, settings: s, now: t };
 }
 
 export function taskTimeline(taskId: number) {

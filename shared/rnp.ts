@@ -57,8 +57,8 @@ export const RNP_METRICS: RnpMetric[] = [
   { key: 'pct_cart_to_order', label: '% заказов из корзины', group: 'Воронка', unit: 'pct', kind: 'ratio', num: 'ordered_cnt', den: 'hits_tocart', scale: 100, better: 'up', mps: ['ozon'] },
   { key: 'pct_session_to_order', label: 'CR в заказ, %', group: 'Воронка', unit: 'pct', kind: 'ratio', num: 'ordered_cnt', den: 'session_view', scale: 100, better: 'up', mps: ['ozon'],
     hint: 'Заказы ÷ посетители' },
-  { key: 'avg_position', label: 'Средняя позиция в поиске', short: 'Позиция', group: 'Воронка', unit: 'num', kind: 'ratio', num: 'pos_wsum', den: 'pos_weight', better: 'down', mps: ['ozon'],
-    hint: 'Ozon «Позиция в поиске и каталоге»; за несколько дней и по группе товаров — среднее, взвешенное по показам в поиске. Чем меньше, тем выше товар. У WB по API позиция есть только с подпиской «Джем»' },
+  { key: 'avg_position', label: 'Средняя позиция в поиске', short: 'Позиция', group: 'Воронка', unit: 'num', kind: 'ratio', num: 'pos_wsum', den: 'pos_weight', better: 'down', mps: BOTH,
+    hint: 'Чем меньше, тем выше товар. Ozon — «Позиция в поиске и каталоге», за несколько дней и по группе товаров среднее взвешено по показам в поиске. WB — «Средняя позиция» из «Поисковые запросы: ваши товары» (подписка «Джем»), взвешено по переходам из поиска' },
   // Служебные слагаемые средней позиции: не показываются (mps пустой), нужны только для свёртки.
   { key: 'pos_wsum', label: 'Позиция × показы', group: 'Воронка', unit: 'num', kind: 'sum', mps: [] },
   { key: 'pos_weight', label: 'Показы с позицией', group: 'Воронка', unit: 'num', kind: 'sum', mps: [] },

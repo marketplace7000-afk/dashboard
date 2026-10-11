@@ -13,6 +13,7 @@
  *   WB   заказы и продажи      — кэш statistics supplier/orders|sales (30 дн)
  *        реклама по дням       — кэш adv/v3/fullstats (days[].apps[].nms[])
  *        остатки               — getWbStock() (снимок на сегодня)
+ *        средняя позиция       — search-report/table/details за сутки (подписка «Джем»)
  *   Ozon заказы и воронка      — v1/analytics/data, dimension sku×day (НОВЫЙ запрос)
  *        реклама по дням       — отчёт Performance за одни сутки (getOzonSkuAdsRange(d, d))
  *        остатки               — getOzonStock() (снимок на сегодня)
@@ -294,6 +295,88 @@ async function wbCatalog(items: Map<string, RnpItem>): Promise<void> {
   }
 }
 
+/**
+ * Средняя позиция WB в поиске по дням — отчёт «Поисковые запросы: ваши товары»
+ * (seller-analytics search-report/table/details, нужна подписка «Джем», без неё 402).
+ * includeSearchTexts обязательно true: при false WB считает только подменные
+ * артикулы, и у всех товаров выходят нули.
+ *
+ * Отчёт за одни сутки = позиция за день. Каждый проход — сегодня и вчера (WB
+ * пересчитывает отчёт раз в 2 часа), плюс до WB_POS_BACKFILL ещё не собранных
+ * дней из последних 30. Лимит метода — 3 запроса в минуту, отсюда пауза.
+ * Вес для свёртки — переходы в карточку из поиска + 1 (показов WB не отдаёт,
+ * а +1 не даёт пропасть товарам без переходов).
+ */
+const WB_POS_PAUSE_MS = 21_000;
+const WB_POS_BACKFILL = 10;
+
+async function wbPosDay(date: string): Promise<Array<{ nm: string; pos: number; opens: number }>> {
+  const token = (process.env.WB_TOKEN_ANALYTICS || process.env.WB_TOKEN || '').trim();
+  const out: Array<{ nm: string; pos: number; opens: number }> = [];
+  for (let offset = 0, page = 0; page < 10; page++, offset += 1000) {
+    if (page) await sleep(WB_POS_PAUSE_MS);
+    const r = await fetchWithRetry('https://seller-analytics-api.wildberries.ru/api/v2/search-report/table/details', {
+      method: 'POST',
+      headers: { Authorization: token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        currentPeriod: { start: date, end: date }, nmIds: [], subjectIds: [], brandNames: [], tagIds: [],
+        positionCluster: 'all', orderBy: { field: 'openCard', mode: 'desc' },
+        includeSubstitutedSKUs: true, includeSearchTexts: true, limit: 1000, offset,
+      }),
+    }, { maxRetries: 3, backoff429Ms: 21_000, timeoutMs: 60_000 });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      const err = new Error(`search-report ${date} → ${r.status}${r.status === 402 ? ' (нет подписки «Джем»)' : ''} ${t.slice(0, 150)}`) as Error & { status?: number };
+      err.status = r.status;
+      throw err;
+    }
+    const products: any[] = (await r.json())?.data?.products ?? [];
+    for (const p of products) {
+      const nm = String(p?.nmId ?? '');
+      if (nm) out.push({ nm, pos: num(p?.avgPosition?.current), opens: num(p?.openCard?.current) });
+    }
+    if (products.length < 1000) break;
+  }
+  return out;
+}
+
+async function collectWbPositions(): Promise<string> {
+  const backs = [0, 1];
+  for (let b = 2; b <= 29 && backs.length < 2 + WB_POS_BACKFILL; b++) {
+    if (metaGet(`wb:pos-day:${mskDate(b)}`) !== '1') backs.push(b);
+  }
+  const parts: string[] = [];
+  for (const [i, b] of backs.entries()) {
+    if (i) await sleep(WB_POS_PAUSE_MS);
+    const date = mskDate(b);
+    let rows: Array<{ nm: string; pos: number; opens: number }>;
+    try {
+      rows = await wbPosDay(date);
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      // Без подписки дальше спрашивать бессмысленно; слишком старый день — помечаем, чтобы не крутить.
+      if (status === 402) return `позиции WB: ${(e as Error).message}`;
+      if (status === 400 && b >= 2) metaSet(`wb:pos-day:${date}`, '1');
+      parts.push(`${date}: сбой ${status ?? ''}`);
+      continue;
+    }
+    const facts: DayFacts = new Map();
+    let n = 0;
+    for (const r of rows) {
+      if (r.pos <= 0) continue;
+      const w = r.opens + 1;
+      bump(facts, date, r.nm, 'pos_wsum', r.pos * w);
+      bump(facts, date, r.nm, 'pos_weight', w);
+      n++;
+    }
+    writeDays('wb', [date], ['pos_wsum', 'pos_weight'], facts);
+    if (b >= 2) metaSet(`wb:pos-day:${date}`, '1');
+    parts.push(`${date}: ${n}`);
+  }
+  markCollected('wb:positions');
+  return `позиции WB: ${parts.join(', ')}`;
+}
+
 // ─── Ozon ──────────────────────────────────────────────────────────────────
 
 const OZ_BASE = 'https://api-seller.ozon.ru';
@@ -562,6 +645,7 @@ export function collectRnp(only?: RnpMp): Promise<string[]> {
       await step('заказы WB', () => collectWbSales(items));
       await step('реклама WB', () => collectWbAds());
       await step('остатки WB', () => collectWbStock());
+      await step('позиции WB', () => collectWbPositions());
       await step('каталог WB', async () => { await wbCatalog(items); await fillSheetCategories(items); upsertItems('wb', [...items.values()]); return `каталог WB: ${items.size} товаров`; });
     }
     if (!only || only === 'ozon') {

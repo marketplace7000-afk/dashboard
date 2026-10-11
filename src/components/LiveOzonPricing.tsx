@@ -24,6 +24,8 @@ import { activeKnobs, pruneKnobs, type KnobBase, type AutoValues } from '../util
 import { useEffect as useEffectM } from 'react';
 import type { RnpPriceView as PriceView } from '../../shared/rnp';
 let marginsPushedAt = 0;
+let marginsSavedAt = 0;
+let marginsPushedJson = '';
 
 // Поля глобальной панели Ozon. «СПП по умолч.» заполняет вторую цену там,
 // где нет факта (Ozon соинвест в API не отдаёт) — buyer = ЛК × (1 − соинвест%).
@@ -430,7 +432,10 @@ export function LiveOzonPricing() {
   // Снимок маржи для «Управления рекламой» (17.09.2026): те же цифры, что в таблице,
   // уходят в общую память UI (prices-ozon:margins); сервер берёт их для «маржи после рекламы».
   useEffectM(() => {
-    if (!rows.length || Date.now() - marginsPushedAt < 60_000) return;
+    // 11.10.2026: снимок пишем только когда все данные листа пришли (раньше первый
+    // снимок уходил до загрузки себестоимости — у всех WB-товаров маржа была пустой,
+    // а повторно не писался из-за паузы). Пишем снова, как только цифры изменились.
+    if (!ozDataReady || Date.now() - marginsPushedAt < 15_000) return;
     const items: Record<string, { marginPct: number | null; marginRub: number | null; view: PriceView }> = {};
     for (const r of rows) {
       const m = computeOzonRow(r, {});
@@ -440,7 +445,10 @@ export function LiveOzonPricing() {
       if (k) items[k] = { marginPct: m.marginPct ?? null, marginRub: m.marginRub ?? null,
         view: { price: v.buyerPrice > 0 ? v.buyerPrice : null, marginPct: v.marginPct, marginRub: v.marginRub, roi: v.roi, roiStatus: v.roiInfo?.status ?? null } };
     }
+    const json = JSON.stringify(items);
     marginsPushedAt = Date.now();
+    if (json === marginsPushedJson && marginsPushedAt - marginsSavedAt < 10 * 60_000) return;
+    marginsPushedJson = json; marginsSavedAt = marginsPushedAt;
     safeSetItem('prices-ozon:margins', JSON.stringify({ at: marginsPushedAt, items }));
   });
   const adviceContext = {

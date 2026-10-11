@@ -41,6 +41,8 @@ import { adsAdvice } from '../utils/adsAdvice';
 import { useEffect as useEffectM } from 'react';
 import type { RnpPriceView as PriceView } from '../../shared/rnp';
 let marginsPushedAt = 0;
+let marginsSavedAt = 0;
+let marginsPushedJson = '';
 
 // До скольких дней сделка считается «свежей» и её finishedPrice можно показывать
 // как текущую цену покупателя. Дальше вернее взять живой клубный ценник из API.
@@ -407,7 +409,10 @@ export function LiveWbPricing() {
   // холодном кэше первый рендер уходил в «Загрузка…», после загрузки хуков становилось
   // больше — React #310, белая страница у клиента.
   useEffectM(() => {
-    if (!allRows.length || Date.now() - marginsPushedAt < 60_000) return;
+    // 11.10.2026: снимок пишем только когда все данные листа пришли (раньше первый
+    // снимок уходил до загрузки себестоимости — у всех WB-товаров маржа была пустой,
+    // а повторно не писался из-за паузы). Пишем снова, как только цифры изменились.
+    if (!wbDataReady || Date.now() - marginsPushedAt < 15_000) return;
     const items: Record<string, { marginPct: number | null; marginRub: number | null; view: PriceView }> = {};
     for (const r of allRows) {
       const m = computeWbRow(r, {});
@@ -417,7 +422,10 @@ export function LiveWbPricing() {
       if (k) items[k] = { marginPct: m.marginPct ?? null, marginRub: m.marginRub ?? null,
         view: { price: v.buyerPrice > 0 ? v.buyerPrice : null, marginPct: v.marginPct, marginRub: v.marginRub, roi: v.roi, roiStatus: v.roiInfo?.status ?? null } };
     }
+    const json = JSON.stringify(items);
     marginsPushedAt = Date.now();
+    if (json === marginsPushedJson && marginsPushedAt - marginsSavedAt < 10 * 60_000) return;
+    marginsPushedJson = json; marginsSavedAt = marginsPushedAt;
     safeSetItem('prices-wb:margins', JSON.stringify({ at: marginsPushedAt, items }));
   });
 

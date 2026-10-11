@@ -110,4 +110,16 @@ export type RnpResponse = {
   present: string[];
   collectedAt: Record<string, number>;               // источник → когда собирали
   notes: string[];
+  /** Текущая цена и маржа с листа «Цены»: артикул (UPPER) → значения. */
+  prices?: Record<string, RnpPriceView>;
+  pricesAt?: number | null;                          // когда лист «Цены» последний раз прислал снимок
+};
+
+/** То, что стоит в строке листа «Цены»: цена покупателя, маржа, ROI. */
+export type RnpPriceView = {
+  price: number | null;
+  marginPct: number | null;
+  marginRub: number | null;
+  roi: number | null;
+  roiStatus: 'ok' | 'warn' | 'danger' | 'stop' | 'none' | null;
 };

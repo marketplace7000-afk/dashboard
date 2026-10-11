@@ -29,6 +29,7 @@ import { mkdirSync } from 'node:fs';
 import { cacheGet, cacheSet, isFresh, cacheGetNewestByPrefix, makeUpstreamCachePrefix } from './cache';
 import { mskDate } from './mskDate';
 import { fetchWithRetry } from './fetchRetry';
+import { getUiState } from './uiState';
 import type { RnpMp, RnpItem, RnpResponse } from '../../shared/rnp';
 
 let DatabaseSync: any = null;
@@ -638,6 +639,17 @@ export function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): RnpResponse {
     const v = metaGet(`collected:${mp}:${src}`);
     if (v) res.collectedAt[src] = Number(v);
   }
+  // Текущая цена, маржа и ROI — снимок листа «Цены» (его шлёт браузер, пока лист
+  // открыт; тот же снимок берёт «Управление рекламой»). Цифры совпадают с таблицей цен.
+  try {
+    const raw = getUiState().state[`prices-${mp}:margins`];
+    const j = raw ? JSON.parse(raw) : null;
+    if (j?.items) {
+      res.prices = {};
+      for (const [k, v] of Object.entries<any>(j.items)) if (v?.view) res.prices[k] = v.view;
+      res.pricesAt = Number(j.at) || null;
+    }
+  } catch { /* снимка нет — блок цены просто не показываем */ }
   if (!rows.length) notes.push('За выбранный период данных ещё нет: сбор идёт раз в 2 часа, первый проход после запуска сервера — в течение 10–30 минут.');
   if (present.has('stocks') && salesStart && from < salesStart) notes.push(`История собирается с ${salesStart.split('-').reverse().join('.')}: раньше этой даты данных нет.`);
   return res;

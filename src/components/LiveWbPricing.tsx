@@ -39,6 +39,7 @@ import { activeKnobs, pruneKnobs, type KnobBase, type AutoValues } from '../util
 import { noteSwallowed } from '../utils/log';
 import { adsAdvice } from '../utils/adsAdvice';
 import { useEffect as useEffectM } from 'react';
+import type { RnpPriceView as PriceView } from '../../shared/rnp';
 let marginsPushedAt = 0;
 
 // До скольких дней сделка считается «свежей» и её finishedPrice можно показывать
@@ -407,11 +408,14 @@ export function LiveWbPricing() {
   // больше — React #310, белая страница у клиента.
   useEffectM(() => {
     if (!allRows.length || Date.now() - marginsPushedAt < 60_000) return;
-    const items: Record<string, { marginPct: number | null; marginRub: number | null }> = {};
+    const items: Record<string, { marginPct: number | null; marginRub: number | null; view: PriceView }> = {};
     for (const r of allRows) {
       const m = computeWbRow(r, {});
       const k = String(r.vendorCode ?? '').trim().toUpperCase();
-      if (k) items[k] = { marginPct: m.marginPct ?? null, marginRub: m.marginRub ?? null };
+      // view — ровно то, что стоит в строке таблицы (с ручными значениями): его показывает РНП.
+      const v = knobs[r.nmId] ? computeWbRow(r, activeKnobs(r.nmId, knobs as any, knobsBase, wbAuto(r))) : m;
+      if (k) items[k] = { marginPct: m.marginPct ?? null, marginRub: m.marginRub ?? null,
+        view: { price: v.buyerPrice > 0 ? v.buyerPrice : null, marginPct: v.marginPct, marginRub: v.marginRub, roi: v.roi, roiStatus: v.roiInfo?.status ?? null } };
     }
     marginsPushedAt = Date.now();
     safeSetItem('prices-wb:margins', JSON.stringify({ at: marginsPushedAt, items }));

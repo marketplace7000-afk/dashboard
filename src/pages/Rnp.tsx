@@ -19,7 +19,7 @@ import {
   CaretDownIcon, CaretUpIcon, ArrowSquareOutIcon,
 } from '@phosphor-icons/react';
 import { apiGet, apiPost, errText } from '../api/http';
-import { RNP_METRICS, RNP_METRIC, type RnpMetric, type RnpMp, type RnpResponse, type RnpItem } from '../../shared/rnp';
+import { RNP_METRICS, RNP_METRIC, type RnpMetric, type RnpMp, type RnpResponse, type RnpItem, type RnpPriceView } from '../../shared/rnp';
 
 // ─── Настройки (localStorage, на каждую площадку свои) ──────────────────────
 
@@ -124,7 +124,13 @@ function fmt(v: number | null, m: RnpMetric): string {
 
 // ─── Свёртка ────────────────────────────────────────────────────────────────
 
-type Entity = { key: string; title: string; sub: string; photo: string; link: string; skus: string[]; item?: RnpItem };
+type Entity = { key: string; title: string; sub: string; photo: string; link: string; skus: string[]; item?: RnpItem; price?: RnpPriceView };
+
+// Сортировка по цене и марже с листа «Цены» (не метрики РНП, поэтому со своим префиксом).
+const ECON_SORT: Array<[string, string, keyof RnpPriceView]> = [
+  ['econ:price', 'Цена сейчас, ₽', 'price'], ['econ:marginPct', 'Маржа, %', 'marginPct'],
+  ['econ:marginRub', 'Маржа, ₽', 'marginRub'], ['econ:roi', 'ROI, %', 'roi'],
+];
 type Base = Record<string, number | null>;
 
 /** Базовые метрики группы товаров на наборе дней. */
@@ -355,7 +361,7 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
     let entities: Entity[];
     if (s.rowGroup === 'product') {
       entities = items.map(it => ({
-        key: it.sku, title: it.article, sub: it.name, photo: it.photo, skus: [it.sku], item: it,
+        key: it.sku, title: it.article, sub: it.name, photo: it.photo, skus: [it.sku], item: it, price: data.prices?.[it.article.toUpperCase()],
         link: mp === 'wb' ? `https://www.wildberries.ru/catalog/${it.sku}/detail.aspx` : it.extId ? `https://www.ozon.ru/product/${it.extId}/` : '',
       }));
     } else {
@@ -386,8 +392,12 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
       });
       return { rows, hits: [...hits], sortVal: derive(s.sortMetric, tot) };
     };
+    const econKey = ECON_SORT.find(e => e[0] === s.sortMetric)?.[2];
 
-    let blocks = entities.map(e => ({ e, ...build(e.skus) }));
+    let blocks = entities.map(e => {
+      const b = build(e.skus);
+      return { e, ...b, sortVal: econKey ? ((e.price?.[econKey] as number | null | undefined) ?? null) : b.sortVal };
+    });
     if (s.onlyFlagged) blocks = blocks.filter(b => b.hits.length);
     const dir = s.sortDir === 'desc' ? -1 : 1;
     blocks.sort((a, b) => {
@@ -404,11 +414,12 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
 
   const exportCsv = () => {
     if (!view) return;
-    const head = ['Товар', 'Название', 'Метрика', ...view.buckets.map(b => b.label), 'Итого'];
+    const head = ['Товар', 'Название', 'Цена, ₽', 'Маржа, %', 'Маржа, ₽', 'ROI, %', 'Метрика', ...view.buckets.map(b => b.label), 'Итого'];
     const lines = [head];
-    const push = (title: string, sub: string, rows: typeof view.total.rows) => rows.forEach(r => lines.push([title, sub, r.metric.label, ...r.cells.map(v => v === null ? '' : String(Math.round(v * 100) / 100).replace('.', ',')), r.total === null ? '' : String(Math.round(r.total * 100) / 100).replace('.', ',')]));
-    push('Итого', '', view.total.rows);
-    for (const b of view.blocks) push(b.e.title, b.e.sub, b.rows);
+    const n = (v: number | null | undefined) => v === null || v === undefined ? '' : String(Math.round(v * 100) / 100).replace('.', ',');
+    const push = (title: string, sub: string, p: RnpPriceView | undefined, rows: typeof view.total.rows) => rows.forEach(r => lines.push([title, sub, n(p?.price), n(p?.marginPct), n(p?.marginRub), n(p?.roi), r.metric.label, ...r.cells.map(n), n(r.total)]));
+    push('Итого', '', undefined, view.total.rows);
+    for (const b of view.blocks) push(b.e.title, b.e.sub, b.e.price, b.rows);
     const csv = '﻿' + lines.map(l => l.map(c => /[;"\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c).join(';')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -462,6 +473,11 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
             <span className="muted">Сортировка</span>
             <select className="select" value={s.sortMetric} onChange={e => set({ sortMetric: e.target.value })} aria-label="Сортировать по">
               {RNP_METRICS.filter(m => m.mps.includes(mp)).map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+              {s.rowGroup === 'product' && data?.prices && (
+                <optgroup label="С листа «Цены»">
+                  {ECON_SORT.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </optgroup>
+              )}
             </select>
             <button className="btn btn-sm" onClick={() => set({ sortDir: s.sortDir === 'desc' ? 'asc' : 'desc' })} title={s.sortDir === 'desc' ? 'По убыванию' : 'По возрастанию'}>
               {s.sortDir === 'desc' ? <CaretDownIcon size={13} /> : <CaretUpIcon size={13} />}
@@ -517,8 +533,9 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
                 <tbody>
                   <Block title="Итого по площадке" sub={`${view.itemsCount} товаров в выборке`} photo="" link="" rows={view.total.rows} hits={[]} heat={s.heatmap} total />
                   {view.blocks.slice(0, shown).map(b => (
-                    <Block key={b.e.key} title={b.e.title} sub={b.e.sub} photo={b.e.photo} link={b.e.link} rows={b.rows} hits={b.hits} heat={s.heatmap}
-                      cat={s.rowGroup === 'product' ? b.e.item?.category : undefined} />
+                    <Block key={b.e.key} title={b.e.title} sub={s.rowGroup === 'product' ? '' : b.e.sub} hint={b.e.sub} photo={b.e.photo} link={b.e.link} rows={b.rows} hits={b.hits} heat={s.heatmap}
+                      cat={s.rowGroup === 'product' ? b.e.item?.category : undefined}
+                      price={s.rowGroup === 'product' && data?.prices ? (b.e.price ?? null) : undefined} />
                   ))}
                 </tbody>
               </table>
@@ -550,8 +567,27 @@ function heatClass(v: number | null, cells: Array<number | null>, m: RnpMetric):
   return lvl >= 3 ? `rnp-h-up${lvl - 2}` : lvl <= 1 ? `rnp-h-down${2 - lvl}` : '';
 }
 
-function Block({ title, sub, photo, link, rows, hits, heat, total, cat }: {
-  title: string; sub: string; photo: string; link: string; rows: BlockRow[]; hits: Rule[]; heat: boolean; total?: boolean; cat?: string;
+/** Цена, маржа и ROI товара — те же цифры и цвета, что в строке листа «Цены». */
+function PriceFacts({ p }: { p: RnpPriceView | null }) {
+  if (!p) return <div className="rnp-econ rnp-econ-none">нет на листе «Цены»</div>;
+  const mCls = p.marginPct === null ? '' : p.marginPct >= 30 ? 'good' : p.marginPct >= 15 ? 'warn' : 'bad';
+  return (
+    <dl className="rnp-econ">
+      <div title="Цена покупателя сейчас — как в столбце цены на листе «Цены»"><dt>Цена</dt><dd>{p.price === null ? '–' : `${nf0.format(p.price)} ₽`}</dd></div>
+      <div title="Маржа с одной продажи по живому расчёту листа «Цены»"><dt>Маржа</dt><dd>
+        {p.marginPct === null ? <span className="muted">нет себестоимости</span>
+          : <><b className={`rnp-m-${mCls}`}>{nf0.format(p.marginPct)}%</b>{p.marginRub !== null && <span> · {nf0.format(p.marginRub)} ₽</span>}</>}
+      </dd></div>
+      <div title="ROI = прибыль / себестоимость. Цвет — статус из ROI-таблицы, как на листе «Цены»"><dt>ROI</dt><dd>
+        {p.roi === null ? '–' : <span className={`rnp-roi rnp-roi-${p.roiStatus ?? 'none'}`}>{nf0.format(p.roi)}%</span>}
+      </dd></div>
+    </dl>
+  );
+}
+
+function Block({ title, sub, hint, photo, link, rows, hits, heat, total, cat, price }: {
+  title: string; sub: string; hint?: string; photo: string; link: string; rows: BlockRow[]; hits: Rule[]; heat: boolean; total?: boolean; cat?: string;
+  price?: RnpPriceView | null;
 }) {
   return (
     <>
@@ -563,12 +599,13 @@ function Block({ title, sub, photo, link, rows, hits, heat, total, cat }: {
                 {photo ? <img src={photo} alt="" loading="lazy" className="rnp-photo" />
                   : cat !== undefined ? <span className="rnp-photo rnp-photo-empty" /> : null}
                 <div className="rnp-item-text">
-                  <div className="rnp-item-title" title={title}>
+                  <div className="rnp-item-title" title={hint || title}>
                     {title}
                     {link && <a href={link} target="_blank" rel="noreferrer" title="Открыть на площадке" className="rnp-ext"><ArrowSquareOutIcon size={12} /></a>}
                   </div>
                   {sub && <div className="rnp-item-sub" title={sub}>{sub}</div>}
                   {cat && <div className="rnp-item-cat">{cat}</div>}
+                  {price !== undefined && <PriceFacts p={price} />}
                   {hits.length > 0 && (
                     <div className="rnp-item-hits">
                       {hits.map(h => <span key={h.id} className={`rnp-dot rnp-c-${h.color}`} title={ruleTitle(h)} />)}

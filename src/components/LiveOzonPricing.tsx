@@ -22,6 +22,7 @@ import { lastSweep, decideInSale, type SweepRow } from '../utils/inSale';
 import { mskDate } from '../utils/mskDate';
 import { activeKnobs, pruneKnobs, type KnobBase, type AutoValues } from '../utils/knobs';
 import { useEffect as useEffectM } from 'react';
+import type { RnpPriceView as PriceView } from '../../shared/rnp';
 let marginsPushedAt = 0;
 
 // Поля глобальной панели Ozon. «СПП по умолч.» заполняет вторую цену там,
@@ -430,11 +431,14 @@ export function LiveOzonPricing() {
   // уходят в общую память UI (prices-ozon:margins); сервер берёт их для «маржи после рекламы».
   useEffectM(() => {
     if (!rows.length || Date.now() - marginsPushedAt < 60_000) return;
-    const items: Record<string, { marginPct: number | null; marginRub: number | null }> = {};
+    const items: Record<string, { marginPct: number | null; marginRub: number | null; view: PriceView }> = {};
     for (const r of rows) {
       const m = computeOzonRow(r, {});
       const k = String(r.offer_id ?? '').trim().toUpperCase();
-      if (k) items[k] = { marginPct: m.marginPct ?? null, marginRub: m.marginRub ?? null };
+      // view — ровно то, что стоит в строке таблицы (с ручными значениями): его показывает РНП.
+      const v = ozKnobs[r.product_id] ? computeOzonRow(r, activeKnobs(r.product_id, ozKnobs as any, ozBase, ozAuto(r))) : m;
+      if (k) items[k] = { marginPct: m.marginPct ?? null, marginRub: m.marginRub ?? null,
+        view: { price: v.buyerPrice > 0 ? v.buyerPrice : null, marginPct: v.marginPct, marginRub: v.marginRub, roi: v.roi, roiStatus: v.roiInfo?.status ?? null } };
     }
     marginsPushedAt = Date.now();
     safeSetItem('prices-ozon:margins', JSON.stringify({ at: marginsPushedAt, items }));

@@ -320,6 +320,9 @@ const OZ_FULL: Array<[string, string]> = [
   ['session_view', 'session_view'], ['session_view_pdp', 'session_view_pdp'],
   ['hits_tocart', 'hits_tocart'], ['returns', 'return_cnt'], ['cancellations', 'cancel_cnt'],
   ['delivered_units', 'delivered_cnt'],
+  // Средняя позиция за день. Средние не складываются, поэтому храним позицию ×
+  // показы в поиске и сами показы (pos_wsum / pos_weight) — см. writeOzRow.
+  ['position_category', 'pos_raw'],
 ];
 const OZ_BASIC: Array<[string, string]> = [['ordered_units', 'ordered_cnt'], ['revenue', 'ordered_amount']];
 /** Пауза между страницами: у v1/analytics/data жёсткий лимит частоты на кабинет. */
@@ -339,9 +342,12 @@ async function fetchOzAnalytics(from: string, to: string, set: Array<[string, st
   return out;
 }
 
+// v2 — после добавления средней позиции (11.10): один раз перезабираем 30 дней, чтобы была история.
+const BACKFILL_KEY = 'ozon:analytics:backfill:v2';
+
 /** Заказы и воронка Ozon по дням и SKU. Первый раз — 30 дней, дальше — последние 4. */
 async function collectOzonAnalytics(items: Map<string, RnpItem>): Promise<string> {
-  const backfilled = metaGet('ozon:analytics:backfill') === '1';
+  const backfilled = metaGet(BACKFILL_KEY) === '1';
   const from = mskDate(backfilled ? 3 : 29);
   const to = mskDate(0);
   let set = metaGet('ozon:analytics:basic') === '1' ? OZ_BASIC : OZ_FULL;
@@ -371,12 +377,23 @@ async function collectOzonAnalytics(items: Map<string, RnpItem>): Promise<string
     if (!offer) { unmapped++; continue; }
     if (!items.has(offer)) items.set(offer, { sku: offer, article: offer, name: String(r.dimensions[0].name ?? ''), category: '', brand: '', photo: '', extId: sku });
     const ms: number[] = r.metrics ?? [];
-    set.forEach(([, key], i) => bump(facts, date, offer, key, num(ms[i])));
+    const val: Record<string, number> = {};
+    set.forEach(([, key], i) => { val[key] = num(ms[i]); });
+    for (const [key, v] of Object.entries(val)) if (key !== 'pos_raw') bump(facts, date, offer, key, v);
+    // Позиция без показов в поиске ничего не значит — такой день не учитываем.
+    const pos = val.pos_raw ?? 0;
+    const w = val.hits_view_search ?? 0;
+    if (pos > 0 && w > 0) {
+      bump(facts, date, offer, 'pos_wsum', pos * w);
+      bump(facts, date, offer, 'pos_weight', w);
+    }
   }
   const days: string[] = [];
   for (let d = from; d <= to; d = addDays(d, 1)) days.push(d);
-  const written = writeDays('ozon', days, set.map(m => m[1]), facts);
-  if (!backfilled) metaSet('ozon:analytics:backfill', '1');
+  const keys = set.map(m => m[1]).filter(k => k !== 'pos_raw');
+  if (set.some(m => m[1] === 'pos_raw')) keys.push('pos_wsum', 'pos_weight');
+  const written = writeDays('ozon', days, keys, facts);
+  if (!backfilled) metaSet(BACKFILL_KEY, '1');
   markCollected('ozon:analytics');
   return `аналитика Ozon ${from}…${to}: строк ${rows.length}${unmapped ? `, без артикула ${unmapped}` : ''} → ${written} значений${set === OZ_BASIC ? ' (только заказы и выручка)' : ''}`;
 }

@@ -52,6 +52,9 @@ const PRESETS: Array<Omit<Rule, 'id' | 'on'> & { title: string }> = [
   { title: 'Нет заказов', metric: 'ordered_cnt', op: 'eq', value: 0, color: 'blue' },
   { title: 'CTR рекламы ниже 1%', metric: 'adv_ctr', op: 'lt', value: 1, color: 'amber' },
   { title: 'Заказы выросли на 30%+', metric: 'ordered_cnt', op: 'rise', value: 30, color: 'green' },
+  // Позиция: число больше — товар ниже в выдаче.
+  { title: 'Позиция ниже 100-й', metric: 'avg_position', op: 'gt', value: 100, color: 'amber' },
+  { title: 'Позиция упала на 30%+', metric: 'avg_position', op: 'rise', value: 30, color: 'red' },
 ];
 
 const DEFAULTS: Settings = {

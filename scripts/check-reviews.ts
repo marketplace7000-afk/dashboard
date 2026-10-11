@@ -9,10 +9,10 @@ import { deflateRawSync } from 'node:zlib';
 process.env.REVIEWS_DB = join(tmpdir(), `reviews-check-${Date.now()}.sqlite`);
 
 const { suggestOffers, stripPii, docxText, importTgPairs, tgStats, productKeyOf, cleanKnowledge } = await import('../api/_lib/reviews/kb');
-const { codeEscalation, extractJson, FORBIDDEN } = await import('../api/_lib/reviews/drafts');
+const { codeEscalation, extractJson, FORBIDDEN, thanksFromBank } = await import('../api/_lib/reviews/drafts');
 const { pairsFromChat, wbCardText } = await import('../api/_lib/reviews/sources');
-const { chunksOf, productKnowledge, confirmFolder, imageMime } = await import('../api/_lib/reviews/kb');
-const { upsertItem, markAnsweredExcept, getDb } = await import('../api/_lib/reviews/db');
+const { chunksOf, productKnowledge, productCard, confirmFolder, imageMime } = await import('../api/_lib/reviews/kb');
+const { upsertItem, markAnsweredExcept, getDb, kvSet } = await import('../api/_lib/reviews/db');
 
 let fails = 0;
 function eq(name: string, got: unknown, want: unknown) {
@@ -116,6 +116,21 @@ d.prepare("INSERT INTO kb_folders (path, offer_ids, suggested, confirmed, files,
 const pk = productKnowledge('TEST-1', 'как сделать сопряжение bluetooth', 900);
 eq('карточка в знаниях', pk.text.includes('Тестовый адаптер'), true);
 eq('нужный кусок инструкции найден', pk.text.includes('удерживайте кнопку 5 секунд'), true);
+const pkApart = productKnowledge('TEST-1', 'как сделать сопряжение bluetooth', 900, { cardApart: true });
+eq('карточка отдельным блоком — не дублируется', pkApart.text.includes('Тестовый адаптер'), false);
+eq('карточка отдельным блоком — материалы те же', pkApart.text.includes('удерживайте кнопку 5 секунд'), true);
+eq('карточка отдельным блоком — общий объём в лимите', pkApart.text.length + productCard('TEST-1').length <= 900, true);
+
+// 9б. Банк благодарностей: берётся только банк ЭТОГО товара и оценки, по очереди.
+kvSet('thanks:wb:TEST-1:5', { productName: 'Тестовый адаптер', variants: ['Спасибо за пятёрку адаптеру!', 'Рады, что адаптер понравился!', 'Благодарим за оценку адаптера!'], next: 0, model: 'm', cost: 0.03, at: 1 });
+kvSet('thanks:wb:SHKAF-1:5', { productName: 'Шкаф', variants: ['Спасибо за шкаф!', 'Шкаф рад!', 'Шкаф!'], next: 0, model: 'm', cost: 0.03, at: 1 });
+const emptyItem: any = { id: 1, marketplace: 'wb', kind: 'review', offerId: 'test-1', productName: 'Тестовый адаптер', rating: 5, text: '' };
+const b1 = await thanksFromBank(emptyItem);
+const b2 = await thanksFromBank(emptyItem);
+eq('банк: свой товар', b1?.answer, 'Спасибо за пятёрку адаптеру!');
+eq('банк: по очереди', b2?.answer, 'Рады, что адаптер понравился!');
+eq('банк: цена — доля вызова', b1?.cost, 0.01);
+eq('банк: чужой товар не подставляется', [b1, b2].some(b => /шкаф/i.test(b?.answer || '')), false);
 eq('куски по файлам', chunksOf('### a.docx\nраз\n\nдва').map(c => c.file), ['a.docx']);
 void confirmFolder;
 // 10. Компоненты набора без артикула идут в знания артикула-набора (папка-родитель с именем артикула).

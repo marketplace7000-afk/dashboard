@@ -104,12 +104,14 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
   const style = getStyleProfile();
   const fmt = (t: number) => new Date(t + 3 * 3600_000).toISOString().slice(0, 16).replace('T', ' ');
   const chatName = (src: string) => src === 'wb_chat' ? 'чат WB' : src === 'ozon_chat' ? 'чат Ozon' : 'Telegram';
+  const shorten = (t: string, n: number) => t.length > n ? `${t.slice(0, n).trimEnd()}…` : t;
 
   const dynamic = [
     `# Диалог в чате ${mp === 'wb' ? 'Wildberries' : 'Ozon'}`,
     `Покупатель: ${th.clientName || '—'}; товар: ${th.productName || '—'}; артикул: ${th.offerId || '—'}${th.sku ? `; ${mp === 'wb' ? 'nmID' : 'SKU'} ${th.sku}` : ''}`,
     `\n# Переписка (старые сверху, время МСК)`,
-    ...msgs.map(m => `[${fmt(m.at)}] ${m.fromBuyer ? 'Покупатель' : 'Магазин'}: ${m.text.slice(0, 1200)}`),
+    // Последние 15 сообщений — целиком, более ранние — коротко: нить разговора остаётся, а запрос легче.
+    ...msgs.map((m, i) => `[${fmt(m.at)}] ${m.fromBuyer ? 'Покупатель' : 'Магазин'}: ${i >= msgs.length - 15 ? m.text.slice(0, 1200) : shorten(m.text, 200)}`),
     `\n# Что известно о товаре\n${know.text || '(ни карточки, ни материалов — опирайся только на прошлые ответы, факты не придумывай)'}`,
     past.length ? `\n# Наши ответы на похожие вопросы по этому товару\n${past.map(p => `[history:${p.id}] «${p.text || '(без текста)'}» → «${p.answer}»`).join('\n')}` : '',
     chats.length ? `\n# Как магазин отвечал в похожих переписках\n${chats.map(p => `[chat:${p.id}] (${chatName(p.source)}) «${p.question}» → «${p.answer}»`).join('\n')}` : '',
@@ -119,10 +121,11 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
   let res;
   try {
     res = await askClaude('chat-draft', {
-      model: s.draftModel, max_tokens: 4000, temperature: 0.5,
+      // В чате бывают разборы неисправностей по шагам — размышления средние, а не минимальные.
+      model: s.draftModel, max_tokens: 2500, temperature: 0.5, effort: 'medium',
       system: [
         { type: 'text', text: CHAT_PROMPT },
-        { type: 'text', text: styleBlock, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: styleBlock, cache_control: { type: 'ephemeral', ttl: '1h' } },
       ],
       messages: [{ role: 'user', content: dynamic }],
     });
@@ -199,6 +202,7 @@ export async function sendThread(mp: string, chatId: string, text: string, by: '
 
 // ─── Фон: синхронизация каждые 5 минут, черновики к новым сообщениям ─────────
 let busy: Promise<any> | null = null;
+const CHAT_PAUSE_MS = 3 * 60_000;
 export function chatTick(): Promise<any> {
   if (busy) return busy;
   busy = (async () => {
@@ -208,8 +212,11 @@ export function chatTick(): Promise<any> {
     const s = getSettings();
     if (!s.chatAutoDraft) return out;
     const d = chatDb();
+    // Пауза 3 минуты после последнего сообщения покупателя: часто пишут несколькими сообщениями
+    // подряд, и без паузы черновик переписывался заново на каждое.
     const rows = d.prepare(`SELECT marketplace, chat_id FROM chat_threads WHERE status = 'new' AND last_from_buyer = 1
-      AND last_at >= ? AND draft_attempts < 3 ORDER BY last_at DESC LIMIT 15`).all(Date.now() - 48 * 3600_000) as any[];
+      AND last_at >= ? AND last_at <= ? AND draft_attempts < 3 ORDER BY last_at DESC LIMIT 15`)
+      .all(Date.now() - 48 * 3600_000, Date.now() - CHAT_PAUSE_MS) as any[];
     let drafted = 0; let sent = 0;
     for (const r of rows) {
       if (budgetState().ratio >= 0.9) { out.stopped = 'budget'; break; }

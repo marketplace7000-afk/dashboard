@@ -1,13 +1,14 @@
 /**
  * Черновики ответов агента 2 «Отзывы и вопросы» и автопубликация.
- * Ответ всегда собирается под конкретный отзыв/вопрос и товар — шаблонов нет.
+ * Ответ всегда собирается под конкретный отзыв/вопрос и товар. Исключение — отзывы 4–5★ без текста:
+ * им достаётся благодарность из банка, который модель пишет пачкой под этот же товар и оценку.
  * Опора: профиль стиля (выжимка из наших реальных ответов), карточка товара с площадок,
  * материалы с Яндекс.Диска, похожие прошлые ответы и переписка с покупателями.
  * Эскалация решается моделью И перепроверяется кодом.
  */
-import { getDb, getItem, patchItem, getSettings, rlog, rowToItem } from './db';
+import { getDb, getItem, patchItem, getSettings, rlog, rowToItem, kvGet, kvSet } from './db';
 import { askClaude, BudgetExceeded, budgetState } from './claude';
-import { productKnowledge, similarPastAnswers, similarTgPairs, recentAnswers } from './kb';
+import { productKnowledge, productCard, similarPastAnswers, similarTgPairs, recentAnswers } from './kb';
 import { getStyleProfile } from './sources';
 import { publishAnswer } from './publish';
 import { directionOf, type ReviewItem } from '../../../shared/reviews';
@@ -73,6 +74,79 @@ export function extractJson(text: string): any {
   };
 }
 
+// ─── Отзывы 4–5★ без текста: банк благодарностей товара ─────────────────────
+// Раньше на каждый такой отзыв уходил отдельный вызов модели. Теперь модель за один вызов
+// пишет пачку разных благодарностей под ОДИН товар и оценку, а отзывы берут их по очереди.
+// Ключ банка — площадка + артикул + оценка, поэтому ответ про другой товар подставиться
+// не может; название товара модель сама пишет в нужном падеже (в готовые фразы ничего не
+// вклеивается). Сменилось название товара — банк пишется заново.
+const BANK_SIZE = 12;
+type ThanksBank = { productName: string; variants: string[]; next: number; model: string; cost: number; at: number };
+const bankKey = (it: ReviewItem) => `thanks:${it.marketplace}:${String(it.offerId).toUpperCase()}:${it.rating}`;
+
+const BANK_PROMPT = `Ты — сотрудник поддержки интернет-магазина автотоваров и электроники «avto-vibe» (Wildberries и Ozon). Покупатели ставят товару оценку БЕЗ текста отзыва, магазин публично благодарит. Напиши заранее несколько таких ответов под конкретный товар и оценку.
+
+ПРАВИЛА:
+- Каждый ответ — 1–2 коротких предложения, на «вы», живо и по-человечески, как в профиле стиля магазина.
+- Все ответы разные по построению и словам, не начинай их одинаково.
+- Товар называй коротко и понятно (не полным названием карточки), в правильном падеже и роде; в части ответов можно обойтись без названия.
+- Не обращайся по имени, не упоминай детали, которых покупатель не писал (ни машину, ни сценарий).
+- Оценка 4★ — благодарность без заискивания, можно пожелание, чтобы товар радовал дальше; 5★ — искренняя радость.
+- Без ссылок, телефонов, мессенджеров, названий других площадок, обещаний подарков и скидок.
+- Не повторяй формулировки из списка «уже было».
+
+ВЕРНИ СТРОГО JSON без пояснений вокруг: {"variants": ["ответ 1", "ответ 2", ...]}`;
+
+async function buildThanksBank(it: ReviewItem, old: string[]): Promise<ThanksBank | null> {
+  const s = getSettings();
+  const know = productKnowledge(it.offerId, it.productName || '', 1500);
+  const past = similarPastAnswers(it, 3);
+  const already = [...old, ...recentAnswers('review', it.rating, 8)].slice(-20);
+  const style = getStyleProfile();
+  const user = [
+    `Площадка: ${it.marketplace === 'wb' ? 'Wildberries' : 'Ozon'}; оценка: ${it.rating} из 5; отзыв без текста.`,
+    `Товар: ${it.productName || '—'}; артикул: ${it.offerId}`,
+    know.text ? `\n# Что это за товар\n${know.text}` : '',
+    past.length ? `\n# Наши прошлые ответы по этому товару\n${past.map(p => `«${p.text || '(без текста)'}» → «${p.answer}»`).join('\n')}` : '',
+    already.length ? `\n# Уже было (не повторяй)\n${already.map(t => `— ${t}`).join('\n')}` : '',
+    `\nНапиши ${BANK_SIZE} ответов.`,
+  ].filter(Boolean).join('\n');
+  const res = await askClaude('draft-bank', {
+    model: s.draftModel, max_tokens: 3000,
+    system: [
+      { type: 'text', text: BANK_PROMPT },
+      { type: 'text', text: `# Профиль стиля магазина\n${style?.text || '(профиль ещё не составлен)'}` },
+    ],
+    messages: [{ role: 'user', content: user }],
+  });
+  let list: unknown[] = [];
+  try { list = extractJson(res.text)?.variants || []; } catch { /* ниже — пусто */ }
+  const seen = new Set<string>();
+  const variants = (Array.isArray(list) ? list : [])
+    .map(v => String(v || '').trim())
+    .filter(v => v.length >= 10 && v.length <= 400 && !FORBIDDEN.test(v) && !RUDE.test(v))
+    .filter(v => { const k = v.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  if (variants.length < 3) {
+    rlog('warn', `Банк благодарностей не собран (${it.offerId}, ${it.rating}★)`, { got: variants.length, stop: res.stop });
+    return null;
+  }
+  return { productName: it.productName || '', variants, next: 0, model: s.draftModel, cost: res.cost, at: Date.now() };
+}
+
+/** Следующая благодарность из банка товара; null — банк не подходит/не собрался, тогда обычный черновик. */
+export async function thanksFromBank(it: ReviewItem): Promise<{ answer: string; model: string; cost: number } | null> {
+  const key = bankKey(it);
+  let bank = kvGet<ThanksBank | null>(key, null);
+  if (bank && bank.productName !== (it.productName || '')) bank = null;
+  if (!bank || bank.next >= bank.variants.length) {
+    bank = await buildThanksBank(it, bank?.variants || []);
+    if (!bank) return null;
+  }
+  const answer = bank.variants[bank.next];
+  kvSet(key, { ...bank, next: bank.next + 1 });
+  return { answer, model: bank.model, cost: bank.cost / bank.variants.length };
+}
+
 export async function draftOne(id: number, opts: { force?: boolean } = {}): Promise<ReviewItem | null> {
   const item = getItem(id);
   if (!item) return null;
@@ -82,8 +156,26 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
   const isEmptyReview = item.kind === 'review' && !`${item.text}${item.pros || ''}${item.cons || ''}`.trim();
   const codeReason = codeEscalation(item, s.escalateRatingMax);
 
+  if (isEmptyReview && !codeReason && item.offerId && (item.rating ?? 0) >= 4) {
+    const t = await thanksFromBank(item);
+    if (t) {
+      patchItem(id, {
+        draft_answer: t.answer, draft_model: `${t.model} · банк`, draft_cost: t.cost,
+        confidence: 'high', category: 'positive', escalation_reason: null, status: 'drafted',
+        sources_used: JSON.stringify(['style', `card:${item.offerId}`]), draft_attempts: 0,
+      });
+      return getItem(id);
+    }
+  }
+
   const query = `${item.text} ${item.pros || ''} ${item.cons || ''} ${item.productName || ''}`;
-  const know = productKnowledge(item.offerId, query, isEmptyReview ? 1500 : 7000);
+  // Карточку товара кладём отдельным блоком перед отзывом: у отзывов одного товара он одинаковый
+  // и при пачке отзывов по товару читается из кэша (×0,1 к цене входа).
+  const card = isEmptyReview ? '' : productCard(item.offerId);
+  // Запись в кэш дороже обычного входа (×1,25) — помечаем карточку, только если её прочтут ещё раз.
+  const cardReused = !!card && !!(getDb().prepare(`SELECT 1 FROM items WHERE offer_id = ? AND id <> ? AND answered_on_mp = 0
+    AND status = 'new' AND draft_attempts < 3 LIMIT 1`).get(item.offerId, id));
+  const know = productKnowledge(item.offerId, query, isEmptyReview ? 1500 : 7000, { cardApart: !!card });
   const past = similarPastAnswers(item, isEmptyReview ? 3 : 8);
   const chats = isEmptyReview ? [] : similarTgPairs(item, 5);
   const already = isEmptyReview ? recentAnswers('review', item.rating, 8) : [];
@@ -98,25 +190,36 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
     item.pros ? `Достоинства: ${item.pros}` : '',
     item.cons ? `Недостатки: ${item.cons}` : '',
     `Текст: ${item.text || '(без текста)'}`,
-    `\n# Что известно о товаре\n${know.text || '(ни карточки, ни материалов — опирайся только на прошлые ответы, факты не придумывай)'}`,
+    card ? (know.text ? `\n# Ещё о товаре (кроме карточки выше)\n${know.text}` : '')
+      : `\n# Что известно о товаре\n${know.text || '(ни карточки, ни материалов — опирайся только на прошлые ответы, факты не придумывай)'}`,
     `\n# Наши прошлые ответы на похожие ${item.kind === 'review' ? 'отзывы' : 'вопросы'} (сначала — по этому товару)\n${past.length ? past.map(p => `[history:${p.id}] ${p.rating ? p.rating + '★ ' : ''}«${p.text || '(без текста)'}» → «${p.answer}»`).join('\n') : '(нет)'}`,
     chats.length ? `\n# Похожая переписка с покупателями\n${chats.map(p => `[chat:${p.id}] (${chatName(p.source)}) «${p.question}» → «${p.answer}»`).join('\n')}` : '',
     already.length ? `\n# Уже написано недавно (не повторяй эти формулировки)\n${already.map(t => `— ${t}`).join('\n')}` : '',
   ].filter(Boolean).join('\n');
 
   const styleBlock = `# Профиль стиля магазина (выжимка из наших реальных ответов)\n${style?.text || '(профиль ещё не составлен — ориентируйся на прошлые ответы ниже)'}`;
-  // Отзыв без текста — короткий ответ, хватает модели подешевле.
+  // Отзыв без текста (не попавший в банк) — короткий ответ, хватает модели подешевле.
   const model = isEmptyReview ? s.indexModel : s.draftModel;
 
   let res;
   try {
     res = await askClaude(isEmptyReview ? 'draft-short' : 'draft', {
-      model, max_tokens: isEmptyReview ? 1200 : 4000, temperature: 0.6,
+      // Размышления: на отзыв хватает минимума, на вопрос (факты, совместимость) — средне.
+      // По умолчанию у Sonnet 5.5 effort high, и размышления оплачиваются как ответ.
+      model, max_tokens: isEmptyReview ? 1200 : 2500, temperature: 0.6,
+      effort: item.kind === 'question' ? 'medium' : 'low',
       system: [
         { type: 'text', text: SYSTEM_PROMPT },
-        { type: 'text', text: styleBlock, cache_control: { type: 'ephemeral' } },
+        // Инструкция и профиль стиля одинаковы для всех черновиков: держим в кэше час
+        // (черновики идут каждые 10 минут, 5-минутный кэш между проходами остывал).
+        { type: 'text', text: styleBlock, cache_control: { type: 'ephemeral', ttl: '1h' } },
       ],
-      messages: [{ role: 'user', content: dynamic }],
+      messages: [{ role: 'user', content: card
+        ? [
+          { type: 'text', text: `# Товар: ${item.productName || '—'}; артикул: ${item.offerId}\n${card}`, ...(cardReused ? { cache_control: { type: 'ephemeral' } } : {}) },
+          { type: 'text', text: dynamic },
+        ]
+        : dynamic }],
     });
   } catch (e) {
     if (e instanceof BudgetExceeded) throw e;
@@ -159,8 +262,12 @@ export function draftPending(limit = 40): Promise<{ drafted: number; published: 
     const s = getSettings();
     let drafted = 0; let published = 0; let stopped: string | undefined;
     if (s.autoDraft) {
-      const rows = getDb().prepare(`SELECT id, kind, text, rating FROM items WHERE answered_on_mp = 0 AND status = 'new'
+      const rows = getDb().prepare(`SELECT id, kind, text, rating, offer_id FROM items WHERE answered_on_mp = 0 AND status = 'new'
         AND draft_attempts < 3 ORDER BY created_at DESC LIMIT ?`).all(limit) as any[];
+      // Отзывы одного товара подряд — карточка товара читается из кэша (кэш живёт 5 минут).
+      const firstSeen = new Map<string, number>();
+      rows.forEach((r, i) => { const k = String(r.offer_id ?? `#${r.id}`); if (!firstSeen.has(k)) firstSeen.set(k, i); });
+      rows.sort((a, b) => firstSeen.get(String(a.offer_id ?? `#${a.id}`))! - firstSeen.get(String(b.offer_id ?? `#${b.id}`))!);
       const economy = budgetState().ratio >= 0.8;
       for (const r of rows) {
         // Экономный режим на 80%: только вопросы и отзывы с текстом длиннее 50 символов.

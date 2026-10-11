@@ -34,6 +34,11 @@ export function supportsTemperature(model: string): boolean {
   return !/claude-(sonnet|opus)-5|fable|mythos/i.test(model);
 }
 
+/** Модели с параметром effort (поколение 5; Haiku 4.5 его не принимает). */
+export function supportsEffort(model: string): boolean {
+  return /claude-(sonnet|opus|haiku)-5|fable|mythos/i.test(model);
+}
+
 /**
  * Запрос к Anthropic/релею с повтором при СЕТЕВОЙ ошибке (не при ответе 4xx/5xx).
  * 04.10.2026: с сервера Timeweb до IP Vercel часть соединений не устанавливается
@@ -59,7 +64,7 @@ export type ImageBlock = {
   source: { type: 'base64'; media_type: string; data: string }
         | { type: 'url'; url: string };
 };
-export type TextBlock = { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } };
+export type TextBlock = { type: 'text'; text: string; cache_control?: { type: 'ephemeral'; ttl?: '5m' | '1h' } };
 export type ContentBlock = TextBlock | ImageBlock;
 
 export type Message = {
@@ -73,6 +78,12 @@ export type AnthropicOptions = {
   messages: Message[];
   max_tokens?: number;
   temperature?: number;
+  /**
+   * Сколько модель «думает» перед ответом (output_config.effort). У поколения 5 размышления
+   * включены по умолчанию (effort high) и оплачиваются как выходные токены, даже когда текст
+   * размышлений не возвращается. Модели без поддержки (Haiku 4.5 и старше) — параметр не шлём.
+   */
+  effort?: 'low' | 'medium' | 'high';
   /** Метка агента для учёта трат (card-audit, insights, chat, и т.д.). */
   agent?: string;
 };
@@ -99,6 +110,7 @@ export async function callAnthropic(opts: AnthropicOptions): Promise<{ text: str
     // снят: Anthropic отвечает 400 «temperature is deprecated for this model».
     ...(supportsTemperature(model) ? { temperature: opts.temperature ?? 0.4 } : {}),
     ...(opts.system ? { system: opts.system } : {}),
+    ...(opts.effort && supportsEffort(model) ? { output_config: { effort: opts.effort } } : {}),
     messages: opts.messages,
   };
 
@@ -112,13 +124,26 @@ export async function callAnthropic(opts: AnthropicOptions): Promise<{ text: str
   if (ANTHROPIC_PROXY_URL) headers['x-relay-secret'] = (process.env.RELAY_SECRET || '').trim();
   else headers['x-api-key'] = apiKey;
 
-  const r = await fetchRelay(ANTHROPIC_URL, {
+  let r = await fetchRelay(ANTHROPIC_URL, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
   });
 
-  const text = await r.text();
+  let text = await r.text();
+  // Страховка: если модель не приняла effort или часовой кэш — повторяем без них,
+  // чтобы экономия не обернулась остановкой черновиков.
+  if (r.status === 400 && /output_config|effort|ttl/i.test(text)) {
+    const plain: any = { ...body };
+    delete plain.output_config;
+    const noTtl = (blocks: any) => Array.isArray(blocks)
+      ? blocks.map((b: any) => b?.cache_control ? { ...b, cache_control: { type: 'ephemeral' } } : b) : blocks;
+    plain.system = noTtl(plain.system);
+    plain.messages = plain.messages.map((m: any) => ({ ...m, content: noTtl(m.content) }));
+    console.warn(`[anthropic] 400 на effort/ttl (${modelUsed}), повтор без них: ${text.slice(0, 200)}`);
+    r = await fetchRelay(ANTHROPIC_URL, { method: 'POST', headers, body: JSON.stringify(plain) });
+    text = await r.text();
+  }
   if (!r.ok) {
     // Логируем неудачный вызов с нулевыми токенами (для отслеживания ошибок).
     logAiUsage({

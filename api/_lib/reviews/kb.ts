@@ -523,19 +523,33 @@ export function chunksOf(text: string): { file: string; text: string }[] {
  *  1) карточка товара с площадок (название, характеристики, описание — по API);
  *  2) из материалов Диска — начало файла характеристик и куски, где есть слова из вопроса.
  */
-export function productKnowledge(offerId: string | null, query = '', limit = 7000): { text: string; sources: string[] } {
+/** Карточка товара с площадок — одинакова для всех отзывов товара (поэтому её можно кэшировать). */
+export function productCard(offerId: string | null): string {
+  if (!offerId) return '';
+  const cards = getDb().prepare('SELECT marketplace, name, text FROM kb_cards WHERE UPPER(offer_id) = ?').all(offerId.toUpperCase()) as any[];
+  if (!cards.length) return '';
+  // Обе площадки обычно описывают товар одинаково — берём более полную карточку и добавляем вторую, если влезает.
+  cards.sort((a, b) => String(b.text).length - String(a.text).length);
+  let cardText = `## Карточка товара (${cards[0].marketplace === 'wb' ? 'WB' : 'Ozon'})\n${String(cards[0].text).slice(0, 3000)}`;
+  if (cards[1] && cardText.length < 2000) cardText += `\n## Карточка (${cards[1].marketplace === 'wb' ? 'WB' : 'Ozon'})\n${String(cards[1].text).slice(0, 1200)}`;
+  return cardText;
+}
+
+/**
+ * opts.cardApart — карточку не включать в text (вызывающий кладёт её отдельным кэшируемым блоком),
+ * но место под неё в limit всё равно учитывается: материалов в запросе ровно столько же, сколько было.
+ */
+export function productKnowledge(offerId: string | null, query = '', limit = 7000, opts: { cardApart?: boolean } = {}): { text: string; sources: string[] } {
   if (!offerId) return { text: '', sources: [] };
   const up = offerId.toUpperCase();
   const sources: string[] = [];
   const parts: string[] = [];
 
-  const cards = getDb().prepare('SELECT marketplace, name, text FROM kb_cards WHERE UPPER(offer_id) = ?').all(up) as any[];
-  if (cards.length) {
-    // Обе площадки обычно описывают товар одинаково — берём более полную карточку и добавляем вторую, если влезает.
-    cards.sort((a, b) => String(b.text).length - String(a.text).length);
-    let cardText = `## Карточка товара (${cards[0].marketplace === 'wb' ? 'WB' : 'Ozon'})\n${String(cards[0].text).slice(0, 3000)}`;
-    if (cards[1] && cardText.length < 2000) cardText += `\n## Карточка (${cards[1].marketplace === 'wb' ? 'WB' : 'Ozon'})\n${String(cards[1].text).slice(0, 1200)}`;
-    parts.push(cardText);
+  const cardText = productCard(offerId);
+  let cardRoom = 0;
+  if (cardText) {
+    if (opts.cardApart) cardRoom = cardText.length + 2;
+    else parts.push(cardText);
     sources.push(`card:${offerId}`);
   }
 
@@ -554,7 +568,7 @@ export function productKnowledge(offerId: string | null, query = '', limit = 700
     const ranked = chunks
       .map((c, i) => ({ c, i, s: score(q, c.text) * 3 + (isSpec(c) ? 2 : 0) + (/инструкц|руков/i.test(c.file) ? 1 : 0) }))
       .sort((a, b) => b.s - a.s || a.i - b.i);
-    let room = limit - parts.join('\n\n').length - 200;
+    let room = limit - cardRoom - parts.join('\n\n').length - 200;
     const picked: typeof ranked = [];
     for (const x of ranked) {
       if (room <= 200) break;
@@ -568,7 +582,7 @@ export function productKnowledge(offerId: string | null, query = '', limit = 700
       sources.push(`product:${offerId}`);
     }
   }
-  return { text: parts.join('\n\n').slice(0, limit), sources };
+  return { text: parts.join('\n\n').slice(0, limit - cardRoom), sources };
 }
 
 /** Наши артикулы с отзывами/вопросами, по которым нет папки на Диске (отвечаем по карточке и истории). */

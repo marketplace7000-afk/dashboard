@@ -681,6 +681,11 @@ export async function handleCron(req: VercelRequest, res: VercelResponse) {
             r ? `строк ${r.items.length} (WB ${r.items.filter(i => i.platform === 'wb').length}, Ozon ${r.items.filter(i => i.platform === 'ozon').length}) · ${r.diagnostics}` : 'не удалось'
           }`);
         }
+        // «Рука на пульсе» — после рекламы: читает уже прогретые заказы, fullstats
+        // и отчёты Ozon, сверху добавляет аналитику Ozon по дням и отчёты рекламы за сутки.
+        const { collectRnp } = await import('./rnp');
+        await collectRnp().catch(e => console.warn('[warm-extras] РНП не собрана:', (e as Error)?.message));
+
         // Цены закреплённых конкурентов — раз в проход. Идёт последним: WB
         // лимитирует по IP, и эта задача не должна мешать прогреву кабинета.
         // Витрина WB по своим товарам — тем же батчем, что и конкуренты.

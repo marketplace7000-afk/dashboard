@@ -381,6 +381,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
     }
   }
+  // ─── /api/rnp — «Рука на пульсе»: метрики по дням и товарам (api/_lib/rnp.ts).
+  //   GET  /api/rnp?mp=wb|ozon&from=YYYY-MM-DD&to=YYYY-MM-DD
+  //   POST /api/rnp/collect?mp=wb|ozon — внеочередной сбор (фоном)
+  if (section === 'rnp') {
+    try {
+      const rnp = await import('./_lib/rnp');
+      const mp = String(req.query.mp ?? 'wb') === 'ozon' ? 'ozon' : 'wb';
+      if (parts[1] === 'collect') {
+        const already = rnp.rnpCollecting();
+        void rnp.collectRnp(mp).catch(() => {});
+        return res.status(200).json({ ok: true, started: !already });
+      }
+      return res.status(200).json({ ...rnp.getRnp(mp, String(req.query.from ?? ''), String(req.query.to ?? '')), collecting: rnp.rnpCollecting() });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
+    }
+  }
   if (section === 'product-econ') {
     try {
       const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);

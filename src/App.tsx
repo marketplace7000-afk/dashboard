@@ -3,7 +3,7 @@ import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, ChartLineIcon, PaperPlaneTiltIcon,
   GearIcon, GraphIcon, SquaresFourIcon,
   CaretRightIcon, MegaphoneIcon,
-  ListIcon, RobotIcon, ChatsCircleIcon
+  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon
 } from '@phosphor-icons/react';
 import { AgentHosts } from './pages/AgentHosts';
 import { Login } from './pages/Login';
@@ -16,13 +16,14 @@ import { Settings } from './pages/Settings';
 import { Agents } from './pages/Agents';
 import { Modules } from './pages/Modules';
 import { Ads } from './pages/Ads';
+import { Rnp } from './pages/Rnp';
 import { NotificationsBell } from './components/NotificationsBell';
 import { AiChatBubble } from './components/AiChat';
 import { prefetchAll } from './api/prefetch';
 import { setUnauthorizedHandler } from './api/http';
 import { noteSwallowed } from './utils/log';
 
-type Page = 'dashboard' | 'prices' | 'reviews' | 'chats' | 'analytics' | 'modules' | 'ads' | 'agents' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'analytics' | 'modules' | 'ads' | 'agents' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -40,6 +41,8 @@ const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   { key: 'reviews',     Icon: ChatCircleTextIcon,  label: 'Отзывы и вопросы' },
   { key: 'chats',       Icon: ChatsCircleIcon,     label: 'Чаты с покупателями' },
   { key: 'analytics',   Icon: ChartLineIcon,       label: 'Аналитика' },
+  // «Рука на пульсе» — по дням и товарам из API площадок (11.10.2026), замена РнП «Культуры Аналитики».
+  { key: 'rnp',         Icon: PulseIcon,           label: 'РНП' },
   { key: 'ads',         Icon: MegaphoneIcon,       label: 'Реклама' },
   // «Модули» скрыт из меню по просьбе клиента (28.07) — роут и страница живы,
   // вернуть = раскомментировать строку ниже.
@@ -59,6 +62,7 @@ const TITLES: Record<Page, string> = {
   reviews: 'Отзывы и вопросы',
   chats: 'Чаты с покупателями',
   analytics: 'Модуль «Аналитика»',
+  rnp: 'Рука на пульсе (РНП)',
   ads: 'Реклама',
   modules: 'Модули · акции, аудит карточек',
   agents: 'ИИ-агенты',
@@ -170,6 +174,7 @@ export function App() {
           {page === 'reviews' && <Reviews />}
           {page === 'chats' && <Chats />}
           {page === 'analytics' && <Analytics />}
+          {page === 'rnp' && <Rnp />}
           {page === 'ads' && <Ads />}
           {page === 'settings' && <Settings />}
           {page === 'modules' && <Modules />}

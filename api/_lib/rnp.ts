@@ -26,7 +26,7 @@
  */
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
-import { cacheGet, cacheSet, isFresh, cacheGetNewestByPrefix, makeUpstreamCachePrefix } from './cache';
+import { cacheGet, cacheSet, isFresh, cacheGetNewestByPrefix, makeUpstreamCachePrefix, makeUpstreamCacheKey } from './cache';
 import { mskDate } from './mskDate';
 import { fetchWithRetry } from './fetchRetry';
 import { getUiState } from './uiState';
@@ -568,7 +568,40 @@ export function rnpCollecting(): boolean {
 
 const MAX_DAYS = 120;
 
-export function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): RnpResponse {
+/**
+ * Цена в кабинете продавца (со скидкой продавца, до СПП/соинвеста площадки) —
+ * та же база, что у «Среднего чека» в РНП и у «Цены ЛК» на листе «Цены».
+ * Берём из прогретого кэша ценовых API (cron обновляет их сам), ключ — артикул UPPER.
+ */
+async function sellerPrices(mp: RnpMp): Promise<Record<string, number>> {
+  const map: Record<string, number> = {};
+  const key = mp === 'wb'
+    ? makeUpstreamCacheKey('wb:discounts', 'GET', 'api/v2/list/goods/filter', '?limit=1000', undefined)
+    : makeUpstreamCacheKey('ozon-seller', 'POST', 'v5/product/info/prices', '', JSON.stringify({ filter: { visibility: 'ALL' }, limit: 100 }));
+  const cached = await cacheGet<{ text: string }>(key);
+  if (!cached?.data?.text) return map;
+  try {
+    const j = JSON.parse(cached.data.text);
+    if (mp === 'wb') {
+      for (const g of j?.data?.listGoods ?? []) {
+        const art = up(g?.vendorCode);
+        const s = g?.sizes?.[0] ?? {};
+        const p = num(s.discountedPrice) || num(s.price) * (1 - num(g?.discount) / 100);
+        if (art && p > 0) map[art] = Math.round(p);
+      }
+    } else {
+      for (const it of j?.items ?? []) {
+        const art = up(it?.offer_id);
+        // Как «Цена ЛК» на листе «Цены»: marketing_seller_price, иначе price.price.
+        const p = num(it?.price?.marketing_seller_price) || num(it?.price?.price);
+        if (art && p > 0) map[art] = Math.round(p);
+      }
+    }
+  } catch { /* кэш не разобран — цены просто не покажем */ }
+  return map;
+}
+
+export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise<RnpResponse> {
   const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
   let to = isDate(toIn) ? toIn! : mskDate(0);
   let from = isDate(fromIn) ? fromIn! : addDays(to, -13);
@@ -650,6 +683,7 @@ export function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): RnpResponse {
       res.pricesAt = Number(j.at) || null;
     }
   } catch { /* снимка нет — блок цены просто не показываем */ }
+  res.sellerPrices = await sellerPrices(mp);
   if (!rows.length) notes.push('За выбранный период данных ещё нет: сбор идёт раз в 2 часа, первый проход после запуска сервера — в течение 10–30 минут.');
   if (present.has('stocks') && salesStart && from < salesStart) notes.push(`История собирается с ${salesStart.split('-').reverse().join('.')}: раньше этой даты данных нет.`);
   return res;

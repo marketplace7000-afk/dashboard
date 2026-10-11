@@ -124,11 +124,13 @@ function fmt(v: number | null, m: RnpMetric): string {
 
 // ─── Свёртка ────────────────────────────────────────────────────────────────
 
-type Entity = { key: string; title: string; sub: string; photo: string; link: string; skus: string[]; item?: RnpItem; price?: RnpPriceView };
+type Entity = { key: string; title: string; sub: string; photo: string; link: string; skus: string[]; item?: RnpItem; price?: ItemPrice };
+/** Цена кабинета (из API площадки) + маржа и ROI с листа «Цены»; onSheet — товар есть на листе. */
+type ItemPrice = RnpPriceView & { onSheet: boolean };
 
 // Сортировка по цене и марже с листа «Цены» (не метрики РНП, поэтому со своим префиксом).
 const ECON_SORT: Array<[string, string, keyof RnpPriceView]> = [
-  ['econ:price', 'Цена сейчас, ₽', 'price'], ['econ:marginPct', 'Маржа, %', 'marginPct'],
+  ['econ:price', 'Цена в кабинете, ₽', 'price'], ['econ:marginPct', 'Маржа, %', 'marginPct'],
   ['econ:marginRub', 'Маржа, ₽', 'marginRub'], ['econ:roi', 'ROI, %', 'roi'],
 ];
 type Base = Record<string, number | null>;
@@ -361,7 +363,7 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
     let entities: Entity[];
     if (s.rowGroup === 'product') {
       entities = items.map(it => ({
-        key: it.sku, title: it.article, sub: it.name, photo: it.photo, skus: [it.sku], item: it, price: data.prices?.[it.article.toUpperCase()],
+        key: it.sku, title: it.article, sub: it.name, photo: it.photo, skus: [it.sku], item: it, price: itemPrice(data, it.article),
         link: mp === 'wb' ? `https://www.wildberries.ru/catalog/${it.sku}/detail.aspx` : it.extId ? `https://www.ozon.ru/product/${it.extId}/` : '',
       }));
     } else {
@@ -473,7 +475,7 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
             <span className="muted">Сортировка</span>
             <select className="select" value={s.sortMetric} onChange={e => set({ sortMetric: e.target.value })} aria-label="Сортировать по">
               {RNP_METRICS.filter(m => m.mps.includes(mp)).map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
-              {s.rowGroup === 'product' && data?.prices && (
+              {s.rowGroup === 'product' && (data?.prices || data?.sellerPrices) && (
                 <optgroup label="С листа «Цены»">
                   {ECON_SORT.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                 </optgroup>
@@ -535,7 +537,7 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
                   {view.blocks.slice(0, shown).map(b => (
                     <Block key={b.e.key} title={b.e.title} sub={s.rowGroup === 'product' ? '' : b.e.sub} hint={b.e.sub} photo={b.e.photo} link={b.e.link} rows={b.rows} hits={b.hits} heat={s.heatmap}
                       cat={s.rowGroup === 'product' ? b.e.item?.category : undefined}
-                      price={s.rowGroup === 'product' && data?.prices ? (b.e.price ?? null) : undefined} />
+                      price={s.rowGroup === 'product' && (data?.prices || data?.sellerPrices) ? (b.e.price ?? null) : undefined} />
                   ))}
                 </tbody>
               </table>
@@ -568,14 +570,23 @@ function heatClass(v: number | null, cells: Array<number | null>, m: RnpMetric):
 }
 
 /** Цена, маржа и ROI товара — те же цифры и цвета, что в строке листа «Цены». */
-function PriceFacts({ p }: { p: RnpPriceView | null }) {
-  if (!p) return <div className="rnp-econ rnp-econ-none">нет на листе «Цены»</div>;
+function itemPrice(data: RnpResponse, article: string): ItemPrice | undefined {
+  const art = article.toUpperCase();
+  const pv = data.prices?.[art];
+  const lk = data.sellerPrices?.[art] ?? null;
+  if (!pv && lk === null) return undefined;
+  return { price: lk, marginPct: pv?.marginPct ?? null, marginRub: pv?.marginRub ?? null, roi: pv?.roi ?? null, roiStatus: pv?.roiStatus ?? null, onSheet: !!pv };
+}
+
+function PriceFacts({ p }: { p: ItemPrice | null }) {
+  if (!p) return <div className="rnp-econ rnp-econ-none">нет цены и строки на листе «Цены»</div>;
   const mCls = p.marginPct === null ? '' : p.marginPct >= 30 ? 'good' : p.marginPct >= 15 ? 'warn' : 'bad';
   return (
     <dl className="rnp-econ">
-      <div title="Цена покупателя сейчас — как в столбце цены на листе «Цены»"><dt>Цена</dt><dd>{p.price === null ? '–' : `${nf0.format(p.price)} ₽`}</dd></div>
+      <div title="Цена в личном кабинете площадки — со скидкой продавца, до СПП (та же база, что у «Среднего чека»). Берётся из API цен, обновляется автоматически"><dt>Цена</dt><dd>{p.price === null ? '–' : `${nf0.format(p.price)} ₽`}</dd></div>
       <div title="Маржа с одной продажи по живому расчёту листа «Цены»"><dt>Маржа</dt><dd>
-        {p.marginPct === null ? <span className="muted">нет себестоимости</span>
+        {!p.onSheet ? <span className="muted">нет на листе «Цены»</span>
+          : p.marginPct === null ? <span className="muted">нет себестоимости</span>
           : <><b className={`rnp-m-${mCls}`}>{nf0.format(p.marginPct)}%</b>{p.marginRub !== null && <span> · {nf0.format(p.marginRub)} ₽</span>}</>}
       </dd></div>
       <div title="ROI = прибыль / себестоимость. Цвет — статус из ROI-таблицы, как на листе «Цены»"><dt>ROI</dt><dd>
@@ -587,7 +598,7 @@ function PriceFacts({ p }: { p: RnpPriceView | null }) {
 
 function Block({ title, sub, hint, photo, link, rows, hits, heat, total, cat, price }: {
   title: string; sub: string; hint?: string; photo: string; link: string; rows: BlockRow[]; hits: Rule[]; heat: boolean; total?: boolean; cat?: string;
-  price?: RnpPriceView | null;
+  price?: ItemPrice | null;
 }) {
   return (
     <>

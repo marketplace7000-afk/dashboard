@@ -393,7 +393,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         void rnp.collectRnp(mp).catch(() => {});
         return res.status(200).json({ ok: true, started: !already });
       }
-      return res.status(200).json({ ...rnp.getRnp(mp, String(req.query.from ?? ''), String(req.query.to ?? '')), collecting: rnp.rnpCollecting() });
+      return res.status(200).json({ ...(await rnp.getRnp(mp, String(req.query.from ?? ''), String(req.query.to ?? ''))), collecting: rnp.rnpCollecting() });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
     }

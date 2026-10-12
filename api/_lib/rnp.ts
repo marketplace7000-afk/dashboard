@@ -780,10 +780,20 @@ export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise
     const j = raw ? JSON.parse(raw) : null;
     if (j?.items) {
       res.prices = {};
-      for (const [k, v] of Object.entries<any>(j.items)) if (v?.view) res.prices[k] = v.view;
+      for (const [k, v] of Object.entries<any>(j.items)) {
+        if (v?.view) res.prices[k] = v.view;
+        // Снимок старого формата (без view, его пишет вкладка со старой версией сайта):
+        // маржу берём из него, ROI в нём нет.
+        else if (v) res.prices[k] = { price: null, marginPct: v.marginPct ?? null, marginRub: v.marginRub ?? null, roi: null, roiStatus: null };
+      }
       res.pricesAt = Number(j.at) || null;
     }
   } catch { /* снимка нет — блок цены просто не показываем */ }
+  // Маржа и ROI живут только в снимке листа «Цены»: если он пуст или старый — говорим, как обновить.
+  const sheet = `«Цены» → ${mp === 'wb' ? 'Wildberries' : 'Ozon'}`;
+  const withMargin = Object.values(res.prices ?? {}).filter(p => p.marginPct !== null).length;
+  if (!res.prices || !withMargin) notes.push(`Маржа и ROI берутся с листа ${sheet}, а свежего расчёта оттуда ещё нет. Откройте этот лист и дождитесь загрузки — цифры появятся здесь после обновления страницы.`);
+  else if (res.pricesAt && Date.now() - res.pricesAt > 2 * DAY_MS) notes.push(`Маржа и ROI — по расчёту листа ${sheet} от ${new Date(res.pricesAt + 3 * 3_600_000).toISOString().slice(0, 10).split('-').reverse().join('.')}. Откройте лист, чтобы обновить.`);
   res.sellerPrices = await sellerPrices(mp);
   if (!rows.length) notes.push('За выбранный период данных ещё нет: сбор идёт раз в 2 часа, первый проход после запуска сервера — в течение 10–30 минут.');
   if (present.has('stocks') && salesStart && from < salesStart) notes.push(`История собирается с ${salesStart.split('-').reverse().join('.')}: раньше этой даты данных нет.`);

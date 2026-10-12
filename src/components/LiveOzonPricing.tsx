@@ -400,6 +400,12 @@ export function LiveOzonPricing() {
   // Все данные, от которых зависят поля, пришли — можно судить, устарели ли ручные значения.
   const ozDataReady = rows.length > 0 && !!pEconRes.fetchedAt && !!showcaseRes.fetchedAt && !!buyerRes.fetchedAt
     && !!procurement.loadedAt && !pEconRes.loading && !showcaseRes.loading && !buyerRes.loading && !procurement.loading;
+  // Для снимка маржи хватает себестоимости и экономики: витрина и цены покупателя
+  // могут ответить ошибкой — тогда ждём не вечно, а считаем без них (12.10.2026:
+  // снимок Ozon не обновлялся, и РНП показывал пустые маржу и ROI).
+  const ozSnapReady = rows.length > 0 && !!pEconRes.fetchedAt && !!procurement.loadedAt
+    && (!!showcaseRes.fetchedAt || !!showcaseRes.error) && (!!buyerRes.fetchedAt || !!buyerRes.error)
+    && !pEconRes.loading && !showcaseRes.loading && !buyerRes.loading && !procurement.loading;
   // Чистка: устаревшие ручные значения убираем из общей памяти, чтобы они не
   // всплывали у других пользователей и после перезагрузки.
   useEffectM(() => {
@@ -435,7 +441,7 @@ export function LiveOzonPricing() {
     // 11.10.2026: снимок пишем только когда все данные листа пришли (раньше первый
     // снимок уходил до загрузки себестоимости — у всех WB-товаров маржа была пустой,
     // а повторно не писался из-за паузы). Пишем снова, как только цифры изменились.
-    if (!ozDataReady || Date.now() - marginsPushedAt < 15_000) return;
+    if (!ozSnapReady || Date.now() - marginsPushedAt < 15_000) return;
     const items: Record<string, { marginPct: number | null; marginRub: number | null; view: PriceView }> = {};
     for (const r of rows) {
       const m = computeOzonRow(r, {});

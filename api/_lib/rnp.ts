@@ -14,7 +14,9 @@
  *        реклама по дням       — кэш adv/v3/fullstats (days[].apps[].nms[])
  *        остатки               — getWbStock() (снимок на сегодня)
  *        средняя позиция       — search-report/table/details за сутки (подписка «Джем»)
+ *        СПП                   — поле spp тех же заказов
  *   Ozon заказы и воронка      — v1/analytics/data, dimension sku×day (НОВЫЙ запрос)
+ *        соинвест              — отправления FBS (список) и FBO (деталь): price vs customer_price
  *        реклама по дням       — отчёт Performance за одни сутки (getOzonSkuAdsRange(d, d))
  *        остатки               — getOzonStock() (снимок на сегодня)
  *
@@ -197,6 +199,12 @@ function collectWbSales(items: Map<string, RnpItem>): string {
     bump(facts, date, nm, 'ordered_cnt', 1);
     bump(facts, date, nm, 'ordered_amount', num(o.priceWithDisc));
     if (o.isCancel) bump(facts, date, nm, 'cancel_cnt', 1);
+    // СПП: доля скидки WB от цены продавца. Храним рубли скидки и базу, процент
+    // считает экран — так он верно сворачивается по дням и товарам.
+    if (num(o.priceWithDisc) > 0) {
+      bump(facts, date, nm, 'spp_base', num(o.priceWithDisc));
+      bump(facts, date, nm, 'spp_disc', num(o.priceWithDisc) * num(o.spp) / 100);
+    }
   }
   for (const s of sales) {
     const nm = String(s?.nmId ?? '');
@@ -210,7 +218,7 @@ function collectWbSales(items: Map<string, RnpItem>): string {
     }
   }
   if (!orders.length) return 'заказы WB: кэш пуст, пропуск';
-  const salesMetrics = ['ordered_cnt', 'ordered_amount', 'cancel_cnt'];
+  const salesMetrics = ['ordered_cnt', 'ordered_amount', 'cancel_cnt', 'spp_base', 'spp_disc'];
   if (sales.length) salesMetrics.push('bought_cnt', 'bought_amount', 'return_cnt');
   const rows = writeDays('wb', touched, salesMetrics, facts);
   markCollected('wb:sales');
@@ -535,6 +543,102 @@ async function collectOzonStock(): Promise<string> {
   return `остатки Ozon: ${rows} значений на ${today}`;
 }
 
+/**
+ * Соинвест Ozon по заказам: цена продавца (financial_data.products[].price) против
+ * того, что заплатил покупатель (customer_price). Как и у WB, считаем по дате заказа.
+ *
+ * Проверено 12.10: у FBS customer_price приходит прямо в списке (86 из 86 за
+ * сутки), у FBO — только в детали v2/posting/fbo/get (в списке его нет), поэтому
+ * FBO разворачиваем по одному — их немного (~13 в сутки). Список FBO отдаёт
+ * limit ≤ 100 и курсор, поле dir игнорирует (см. ozonBuyerPrices.ts).
+ *
+ * Первый проход — 30 дней, дальше — последние 3 (заказ дня может приехать позже).
+ */
+const OZ_SPP_BACKFILL_KEY = 'ozon:spp:backfill:v1';
+/** Строже этого — выброс (компенсации, служебные позиции), см. ozonBuyerPrices.ts. */
+const OZ_MAX_PLAUSIBLE_SPP = 0.85;
+
+async function collectOzonSpp(): Promise<string> {
+  const backfilled = metaGet(OZ_SPP_BACKFILL_KEY) === '1';
+  const from = mskDate(backfilled ? 2 : 29);
+  const to = mskDate(0);
+  // Границы — МСК-сутки в UTC.
+  const sinceIso = new Date(Date.parse(from + 'T00:00:00Z') - MSK_OFFSET_MS).toISOString();
+  const toIso = new Date(Date.parse(to + 'T23:59:59Z') - MSK_OFFSET_MS).toISOString();
+
+  const { getSkuMap } = await import('./ozonShowcase');
+  const skuToOffer = await getSkuMap();
+  const facts: DayFacts = new Map();
+  let lines = 0, skipped = 0;
+  const take = (p: any) => {
+    const t = Date.parse(p?.in_process_at ?? p?.created_at ?? '');
+    if (!Number.isFinite(t)) return;
+    const date = mskDateOf(t);
+    if (date < from || date > to) return;
+    const offerBySku = new Map<string, string>();
+    for (const it of (p?.products ?? [])) {
+      const sku = String(it?.sku ?? '');
+      offerBySku.set(sku, skuToOffer[sku] || String(it?.offer_id ?? '').trim());
+    }
+    for (const fin of (p?.financial_data?.products ?? [])) {
+      const offer = offerBySku.get(String(fin?.product_id ?? ''));
+      const seller = num(fin?.price);
+      const buyer = num(String(fin?.customer_price ?? '').replace(',', '.'));
+      const q = num(fin?.quantity) || 1;
+      if (!offer || seller <= 0 || buyer <= 0) { skipped++; continue; }
+      if (buyer < seller * (1 - OZ_MAX_PLAUSIBLE_SPP)) { skipped++; continue; }
+      bump(facts, date, offer, 'spp_base', seller * q);
+      bump(facts, date, offer, 'spp_disc', Math.max(0, seller - buyer) * q);
+      lines++;
+    }
+  };
+
+  // FBS: цена покупателя сразу в списке.
+  let fbs = 0;
+  for (let offset = 0; offset < 20_000; offset += 1000) {
+    const j = await ozPost('v3/posting/fbs/list', {
+      dir: 'ASC', filter: { since: sinceIso, to: toIso }, limit: 1000, offset, with: { financial_data: true },
+    });
+    const batch: any[] = j?.result?.postings ?? [];
+    batch.forEach(take);
+    fbs += batch.length;
+    if (!j?.result?.has_next || batch.length < 1000) break;
+  }
+
+  // FBO: список без цены покупателя → деталь по каждому отправлению.
+  const fboList: any[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 50; page++) {
+    const j = await ozPost('v3/posting/fbo/list', {
+      dir: 'ASC', filter: { since: sinceIso, to: toIso }, limit: 100, with: { financial_data: true },
+      ...(cursor ? { cursor } : { offset: 0 }),
+    });
+    const batch: any[] = j?.postings ?? j?.result?.postings ?? [];
+    fboList.push(...batch);
+    cursor = j?.cursor;
+    if (!j?.has_next || !cursor || !batch.length) break;
+  }
+  let fboFailed = 0;
+  for (const p of fboList) {
+    try {
+      const j = await ozPost('v2/posting/fbo/get', { posting_number: p?.posting_number, with: { financial_data: true } });
+      take(j?.result ?? j);
+    } catch { fboFailed++; }
+    await sleep(120);
+  }
+  // Сбой части деталей FBO занизил бы базу дня — такой проход не записываем.
+  if (fboFailed > Math.max(2, fboList.length * 0.1)) {
+    return `соинвест Ozon: не открылись ${fboFailed} из ${fboList.length} FBO, пропуск`;
+  }
+
+  const days: string[] = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) days.push(d);
+  const written = writeDays('ozon', days, ['spp_base', 'spp_disc'], facts);
+  if (!backfilled) metaSet(OZ_SPP_BACKFILL_KEY, '1');
+  markCollected('ozon:spp');
+  return `соинвест Ozon ${from}…${to}: FBS ${fbs}, FBO ${fboList.length}, позиций ${lines}${skipped ? `, без цены ${skipped}` : ''} → ${written} значений`;
+}
+
 const OZ_CATALOG_KEY = 'rnp:ozon-catalog:v1';
 const OZ_TREE_KEY = 'rnp:ozon-type-names:v1';
 
@@ -651,6 +755,7 @@ export function collectRnp(only?: RnpMp): Promise<string[]> {
     if (!only || only === 'ozon') {
       const items = new Map<string, RnpItem>();
       await step('аналитика Ozon', () => collectOzonAnalytics(items));
+      await step('соинвест Ozon', () => collectOzonSpp());
       await step('остатки Ozon', () => collectOzonStock());
       await step('каталог Ozon', async () => { await ozonCatalog(items); await fillSheetCategories(items); upsertItems('ozon', [...items.values()]); return `каталог Ozon: ${items.size} товаров`; });
       await step('реклама Ozon', () => collectOzonAds());

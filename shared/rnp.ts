@@ -45,6 +45,11 @@ export const RNP_METRICS: RnpMetric[] = [
   { key: 'bought_amount', label: 'Выкуплено, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', better: 'up', mps: ['wb'] },
   { key: 'delivered_cnt', label: 'Доставлено, шт', group: 'Продажи', unit: 'pcs', kind: 'sum', better: 'up', mps: ['ozon'] },
   { key: 'return_cnt', label: 'Возвраты, шт', group: 'Продажи', unit: 'pcs', kind: 'sum', better: 'down', mps: BOTH },
+  { key: 'spp_pct', label: 'СПП / соинвест, %', short: 'СПП', group: 'Продажи', unit: 'pct', kind: 'ratio', num: 'spp_disc', den: 'spp_base', scale: 100, better: 'up', mps: BOTH,
+    hint: 'Скидка за счёт площадки по заказам, % от цены продавца. WB — СПП из заказов; Ozon — соинвест: цена продавца против цены, которую заплатил покупатель. За несколько дней и по группе товаров среднее взвешено по сумме заказов' },
+  // Служебные слагаемые СПП: не показываются, нужны для свёртки.
+  { key: 'spp_disc', label: 'СПП, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', mps: [] },
+  { key: 'spp_base', label: 'Цена продавца по заказам, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', mps: [] },
 
   // ── Воронка (Ozon отдаёт по дням и товарам; у WB по дням — только рекламная часть) ──
   { key: 'hits_view', label: 'Показы', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: ['ozon'] },

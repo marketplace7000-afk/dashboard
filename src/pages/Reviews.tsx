@@ -1,16 +1,16 @@
 // Раздел «Отзывы и вопросы» — агент 2 (ТЗ-агент-отзывы v0.5, раздел 14).
 // Сбор, черновики и публикация — на сервере (/api/reviews/*); здесь только экран.
+// Вид: стили .rv- в styles.css, общие детали — components/InboxUi.tsx (13.10.2026).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   StarIcon, ArrowsClockwiseIcon, WarningIcon, SpinnerIcon, PaperPlaneRightIcon, SparkleIcon, ArrowSquareOutIcon,
+  MagnifyingGlassIcon, XIcon,
 } from '@phosphor-icons/react';
 import { reviewsApi, parseTelegramExport } from '../api/reviews';
 import {
   DIRECTIONS, type ReviewItem, type ReviewView, type ReviewsOverview, type ReviewDirection, type KbFolder,
 } from '../../shared/reviews';
-
-const MP_COLOR = { wb: '#cb11ab', ozon: '#005bff' } as const;
-const MP_NAME = { wb: 'WB', ozon: 'Ozon' } as const;
+import { MP_NAME, MpTag, Switch, Badge, mpVar, useAutoGrow, sourcesText } from '../components/InboxUi';
 
 function fmtDate(ms: number | null): string {
   if (!ms) return '—';
@@ -27,15 +27,16 @@ function usd(n: number): string { return `$${n.toFixed(2)}`; }
 
 function Stars({ n }: { n: number }) {
   return (
-    <span className="row" style={{ gap: 1, display: 'inline-flex' }}>
+    <span className="rv-stars" aria-label={`Оценка ${n} из 5`}>
       {[1, 2, 3, 4, 5].map(i => (
-        <StarIcon key={i} size={13} weight={i <= n ? 'fill' : 'regular'} style={{ color: i <= n ? '#f59e0b' : 'var(--border)' }} />
+        <StarIcon key={i} size={17} weight={i <= n ? 'fill' : 'regular'} className={i <= n ? 'on' : ''} />
       ))}
     </span>
   );
 }
 
 type Tab = 'inbox' | 'kb' | 'log' | 'settings';
+const TABS: [Tab, string][] = [['inbox', 'Отзывы и вопросы'], ['kb', 'База знаний'], ['log', 'Журнал'], ['settings', 'Настройки']];
 
 export function Reviews() {
   const [tab, setTab] = useState<Tab>('inbox');
@@ -67,57 +68,83 @@ export function Reviews() {
 
   const totalUn = ov ? Object.values(ov.counters).reduce((s, c) => s + c.unanswered, 0) : 0;
   const totalPend = ov ? Object.values(ov.counters).reduce((s, c) => s + c.pending, 0) : 0;
+  const budget = ov?.settings.monthlyBudgetUsd ?? 0;
+  const spend = ov?.spendMonthUsd ?? 0;
+  const spendPct = budget > 0 ? Math.min(100, (spend / budget) * 100) : 0;
 
   return (
-    <div className="grid" style={{ gap: 16 }}>
-      {/* Шапка: счётчики, тумблеры, сбор, расход */}
-      <div className="card" style={{ background: 'var(--bg-3)' }}>
-        <div className="flex-between" style={{ flexWrap: 'wrap', gap: 12 }}>
-          <div className="row gap-12" style={{ flexWrap: 'wrap' }}>
-            <span><b>{totalUn}</b> <span className="muted">неотвеченных</span></span>
-            <span><b>{totalPend}</b> <span className="muted">ждут решения</span></span>
-            {ov && <span className="muted">Claude за месяц: {usd(ov.spendMonthUsd)} из {usd(ov.settings.monthlyBudgetUsd)} (ключ — до {usd(ov.settings.keyBudgetUsd)})</span>}
-            {ov && ov.settings.monthlyBudgetUsd > 0 && ov.spendMonthUsd >= ov.settings.monthlyBudgetUsd * 0.8 && (
-              <span className="chip warn"><WarningIcon size={12} /> {ov.spendMonthUsd >= ov.settings.monthlyBudgetUsd ? 'подлимит исчерпан — черновики остановлены' : 'экономный режим (80% подлимита)'}</span>
-            )}
+    <div className="rv-page">
+      <section className="rv-hero">
+        <div className="rv-stats">
+          <div className="rv-stat">
+            <span className="rv-stat-num">{ov ? totalUn : '…'}</span>
+            <span className="rv-stat-label">без ответа</span>
           </div>
-          <button className="btn btn-sm" onClick={collectNow} disabled={collecting}>
-            {collecting ? <SpinnerIcon size={14} className="spin" /> : <ArrowsClockwiseIcon size={14} />} Собрать сейчас
-          </button>
+          <div className="rv-stat">
+            <span className={`rv-stat-num${totalPend ? ' rv-stat-num--accent' : ''}`}>{ov ? totalPend : '…'}</span>
+            <span className="rv-stat-label">ждут вашего решения</span>
+          </div>
+          {ov && (
+            <div className="rv-stat rv-stat--budget" title={`Общий лимит ключа — до ${usd(ov.settings.keyBudgetUsd)} в месяц`}>
+              <span className="rv-stat-label">Claude в этом месяце</span>
+              <span className="rv-budget"><b>{usd(spend)}</b> из {usd(budget)}</span>
+              <span className={`rv-meter${spendPct >= 100 ? ' is-bad' : spendPct >= 80 ? ' is-warn' : ''}`}><span style={{ width: `${spendPct}%` }} /></span>
+            </div>
+          )}
         </div>
-        {ovErr && <div className="chip bad" style={{ marginTop: 8 }}>{ovErr}</div>}
-        {ov && (
-          <div className="row gap-8" style={{ flexWrap: 'wrap', marginTop: 10 }}>
-            {DIRECTIONS.map(d => {
-              const c = ov.counters[d.key];
-              const st = ov.collect.find(x => x.direction === d.key);
-              const auto = ov.settings.autoPublish[d.key];
-              const disabled = d.key === 'ozon_reviews';
-              return (
-                <div key={d.key} className="card" style={{ padding: '8px 10px', minWidth: 210, flex: '1 1 210px' }}>
-                  <div className="flex-between">
-                    <span className="row gap-8"><span className="mp-tab-dot" style={{ background: MP_COLOR[d.mp], width: 8, height: 8 }} /><b>{d.title}</b></span>
-                    <label className="row" style={{ gap: 4, fontSize: 12, opacity: disabled ? 0.5 : 1 }} title={disabled ? 'Ozon не даёт отвечать на отзывы по API — ответ вставляется в кабинете' : 'Автопубликация ответов без эскалации'}>
-                      <input type="checkbox" checked={auto} disabled={disabled} onChange={e => toggleAuto(d.key, e.target.checked)} /> авто
-                    </label>
-                  </div>
-                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                    {disabled && !st?.ok
-                      ? (st?.note || 'Нет доступа по API')
-                      : <>без ответа {c.unanswered} · ждут {c.pending} · сбор {ago(st?.at ?? null)}{disabled ? ' (агент на ПК)' : ''}{st && !st.ok && st.error ? <span style={{ color: 'var(--bad)' }}> · ошибка</span> : null}</>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+        <button className="btn btn-primary" onClick={collectNow} disabled={collecting}>
+          {collecting ? <SpinnerIcon size={17} className="spin" /> : <ArrowsClockwiseIcon size={17} />} Собрать сейчас
+        </button>
+      </section>
 
-      <div className="period-switch" style={{ alignSelf: 'start' }}>
-        {([['inbox', 'Отзывы и вопросы'], ['kb', 'База знаний'], ['log', 'Журнал'], ['settings', 'Настройки']] as [Tab, string][]).map(([k, t]) => (
-          <button key={k} className={`period-btn ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{t}</button>
+      {ov && budget > 0 && spend >= budget * 0.8 && (
+        <div className="rv-callout rv-callout--warn">
+          <WarningIcon size={18} />
+          <span>{spend >= budget ? 'Подлимит на Claude исчерпан — новые черновики не готовятся до следующего месяца или до увеличения лимита в «Настройках».' : 'Израсходовано 80% подлимита на Claude — включён экономный режим.'}</span>
+        </div>
+      )}
+      {ovErr && <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span>Не удалось загрузить сводку: {ovErr}</span></div>}
+
+      {ov && (
+        <div className="rv-dirs">
+          {DIRECTIONS.map(d => {
+            const c = ov.counters[d.key];
+            const st = ov.collect.find(x => x.direction === d.key);
+            const noApi = d.key === 'ozon_reviews';
+            return (
+              <div key={d.key} className="rv-dir" style={mpVar(d.mp)}>
+                <div className="rv-dir-title"><span className="rv-dot" />{MP_NAME[d.mp]} — {d.kind === 'review' ? 'отзывы' : 'вопросы'}</div>
+                {noApi && !st?.ok
+                  ? <div className="rv-dir-note">{st?.note || 'Нет доступа по API'}</div>
+                  : (
+                    <div className="rv-dir-nums">
+                      <span><b>{c.unanswered}</b> без ответа</span>
+                      <span><b>{c.pending}</b> ждут</span>
+                    </div>
+                  )}
+                <div className="rv-dir-foot">
+                  <span className={st && !st.ok && st.error ? 'rv-text-bad' : ''} title={st?.error || undefined}>
+                    {st && !st.ok && st.error ? 'Ошибка сбора' : `Сбор ${ago(st?.at ?? null)}`}
+                  </span>
+                  {noApi
+                    ? <span title="Ozon не даёт отвечать на отзывы по API — ответ вставляется в кабинете">Ответ — в кабинете Ozon</span>
+                    : (
+                      <Switch checked={ov.settings.autoPublish[d.key]} onChange={v => toggleAuto(d.key, v)} title="Публиковать ответы без эскалации автоматически">
+                        Автоответ
+                      </Switch>
+                    )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <nav className="rv-tabs" role="tablist">
+        {TABS.map(([k, t]) => (
+          <button key={k} role="tab" aria-selected={tab === k} className={`rv-tab${tab === k ? ' is-active' : ''}`} onClick={() => setTab(k)}>{t}</button>
         ))}
-      </div>
+      </nav>
 
       {tab === 'inbox' && <Inbox key={reloadKey} counts={{ un: totalUn, pend: totalPend }} onChanged={loadOv} />}
       {tab === 'kb' && <KnowledgeBase />}
@@ -130,9 +157,10 @@ export function Reviews() {
 // ─── Список ────────────────────────────────────────────────────────────────
 type Filters = { mp: string; kind: string; rating: string; q: string; days: string };
 const FILTERS_KEY = 'av-reviews-filters';
+const NO_FILTERS: Filters = { mp: '', kind: '', rating: '', q: '', days: '' };
 function loadFilters(): Filters {
-  try { return { mp: '', kind: '', rating: '', q: '', days: '', ...JSON.parse(localStorage.getItem(FILTERS_KEY) || '{}') }; }
-  catch { return { mp: '', kind: '', rating: '', q: '', days: '' }; }
+  try { return { ...NO_FILTERS, ...JSON.parse(localStorage.getItem(FILTERS_KEY) || '{}') }; }
+  catch { return { ...NO_FILTERS }; }
 }
 
 function Inbox({ counts, onChanged }: { counts: { un: number; pend: number }; onChanged: () => void }) {
@@ -181,61 +209,79 @@ function Inbox({ counts, onChanged }: { counts: { un: number; pend: number }; on
     s.has(String(n)) ? s.delete(String(n)) : s.add(String(n));
     setFilter({ rating: [...s].sort().join(',') });
   };
+  const filtered = !!(f.mp || f.kind || f.rating || f.q.trim() || f.days);
+  const views: [ReviewView, string, number | null][] = [
+    ['unanswered', 'Без ответа', counts.un], ['pending', 'Ждут решения', counts.pend], ['answered', 'Отвеченные', null], ['all', 'Все', null],
+  ];
 
   return (
-    <div className="grid" style={{ gap: 12 }}>
-      <div className="flex-between" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <div className="period-switch">
-          {([['unanswered', `Неотвеченные (${counts.un})`], ['pending', `Ждут решения (${counts.pend})`], ['answered', 'Отвеченные'], ['all', 'Все']] as [ReviewView, string][]).map(([k, t]) => (
-            <button key={k} className={`period-btn ${view === k ? 'active' : ''}`} onClick={() => setView(k)}>{t}</button>
+    <div className="rv-inbox">
+      <div className="rv-seg" role="tablist">
+        {views.map(([k, t, n]) => (
+          <button key={k} role="tab" aria-selected={view === k} className={`rv-seg-btn${view === k ? ' is-active' : ''}`} onClick={() => setView(k)}>
+            {t}{n != null && <span className="rv-count">{n}</span>}
+          </button>
+        ))}
+      </div>
+
+      <div className="rv-filters">
+        <label className="rv-search">
+          <MagnifyingGlassIcon size={17} />
+          <input className="input" placeholder="Артикул, товар или текст" value={f.q} onChange={e => setFilter({ q: e.target.value })} />
+        </label>
+        <select className="select" value={f.mp} onChange={e => setFilter({ mp: e.target.value })} aria-label="Площадка">
+          <option value="">WB и Ozon</option><option value="wb">Только WB</option><option value="ozon">Только Ozon</option>
+        </select>
+        <select className="select" value={f.kind} onChange={e => setFilter({ kind: e.target.value })} aria-label="Тип">
+          <option value="">Отзывы и вопросы</option><option value="review">Только отзывы</option><option value="question">Только вопросы</option>
+        </select>
+        <select className="select" value={f.days} onChange={e => setFilter({ days: e.target.value })} aria-label="Период">
+          <option value="">За всё время</option><option value="1">За сутки</option><option value="7">За 7 дней</option><option value="30">За 30 дней</option>
+        </select>
+        <div className="rv-rating" role="group" aria-label="Оценка">
+          {[1, 2, 3, 4, 5].map(n => (
+            <button key={n} aria-pressed={ratingSet.has(String(n))} className={`rv-rating-btn${ratingSet.has(String(n)) ? ' is-on' : ''}`} onClick={() => toggleRating(n)}>
+              {n}<StarIcon size={13} weight="fill" />
+            </button>
           ))}
         </div>
-        <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
-          <select className="select" value={f.mp} onChange={e => setFilter({ mp: e.target.value })} style={{ width: 'auto' }}>
-            <option value="">WB и Ozon</option><option value="wb">WB</option><option value="ozon">Ozon</option>
-          </select>
-          <select className="select" value={f.kind} onChange={e => setFilter({ kind: e.target.value })} style={{ width: 'auto' }}>
-            <option value="">Отзывы и вопросы</option><option value="review">Отзывы</option><option value="question">Вопросы</option>
-          </select>
-          <div className="period-switch">
-            {[1, 2, 3, 4, 5].map(n => (
-              <button key={n} className={`period-btn ${ratingSet.has(String(n)) ? 'active' : ''}`} onClick={() => toggleRating(n)}>{n}★</button>
-            ))}
-          </div>
-          <select className="select" value={f.days} onChange={e => setFilter({ days: e.target.value })} style={{ width: 'auto' }}>
-            <option value="">За всё время</option><option value="1">Сутки</option><option value="7">7 дней</option><option value="30">30 дней</option>
-          </select>
-          <input className="input" placeholder="Артикул, товар, текст" value={f.q} onChange={e => setFilter({ q: e.target.value })} style={{ width: 200 }} />
-        </div>
+        {filtered && <button className="rv-link" onClick={() => setF({ ...NO_FILTERS })}><XIcon size={14} /> Сбросить</button>}
       </div>
 
       {(sel.size > 0 || bulk) && (
-        <div className="row gap-8">
-          {sel.size > 0 && <button className="btn btn-sm btn-primary" onClick={bulkPublish} disabled={!publishable.length}>
-            <PaperPlaneRightIcon size={14} /> Опубликовать выбранные ({publishable.length})
-          </button>}
-          {sel.size > 0 && publishable.length < sel.size && <span className="muted" style={{ fontSize: 12 }}>публикуются только готовые черновики без эскалации</span>}
-          {bulk && <span className="muted">{bulk}</span>}
+        <div className="rv-bulk">
+          {sel.size > 0 && <span>Выбрано: <b>{sel.size}</b>{publishable.length < sel.size ? ` · готовых к публикации ${publishable.length}` : ''}</span>}
+          {bulk && <span className="rv-muted">{bulk}</span>}
+          <span className="rv-spacer" />
+          {sel.size > 0 && <button className="btn" onClick={() => setSel(new Set())}>Снять выбор</button>}
+          {sel.size > 0 && (
+            <button className="btn btn-primary" onClick={bulkPublish} disabled={!publishable.length}
+              title="Публикуются только готовые черновики без пометки «на проверку»">
+              <PaperPlaneRightIcon size={17} /> Опубликовать {publishable.length || ''}
+            </button>
+          )}
         </div>
       )}
 
-      {err && <div className="chip bad">{err}</div>}
-      {loading && !items.length && <div className="muted"><SpinnerIcon size={14} className="spin" /> Загружаю…</div>}
+      {err && <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span>{err}</span></div>}
+      {loading && !items.length && <div className="rv-empty"><SpinnerIcon size={20} className="spin" /> Загружаю…</div>}
       {!loading && !items.length && !err && (
-        (f.mp || f.kind || f.rating || f.q.trim() || f.days)
-          ? <div className="card muted">
-              По выбранным фильтрам пусто{view === 'unanswered' && counts.un ? <> — а всего неотвеченных <b>{counts.un}</b></> : ''}.{' '}
-              <button className="btn btn-sm" onClick={() => setF({ mp: '', kind: '', rating: '', q: '', days: '' })}>Сбросить фильтры</button>
+        filtered
+          ? <div className="rv-empty">
+              <div>По выбранным фильтрам ничего нет{view === 'unanswered' && counts.un ? <>, а всего без ответа — <b>{counts.un}</b></> : ''}.</div>
+              <button className="btn" onClick={() => setF({ ...NO_FILTERS })}>Сбросить фильтры</button>
             </div>
-          : <div className="card muted">Здесь пусто. {view === 'unanswered' ? 'Все отзывы и вопросы отвечены.' : ''}</div>
+          : <div className="rv-empty">{view === 'unanswered' ? 'Все отзывы и вопросы отвечены.' : 'Здесь пока пусто.'}</div>
       )}
 
-      {items.map(it => (
-        <ItemCard key={it.id} it={it} selected={sel.has(it.id)}
-          onSelect={v => setSel(prev => { const s = new Set(prev); v ? s.add(it.id) : s.delete(it.id); return s; })}
-          onReplace={replace} onDrop={view === 'unanswered' || view === 'pending' ? drop : () => { load(); onChanged(); }} />
-      ))}
-      {items.length < total && <button className="btn btn-sm" onClick={() => setLimit(l => l + 50)}>Показать ещё ({total - items.length})</button>}
+      <div className="rv-list">
+        {items.map(it => (
+          <ItemCard key={it.id} it={it} selected={sel.has(it.id)}
+            onSelect={v => setSel(prev => { const s = new Set(prev); v ? s.add(it.id) : s.delete(it.id); return s; })}
+            onReplace={replace} onDrop={view === 'unanswered' || view === 'pending' ? drop : () => { load(); onChanged(); }} />
+        ))}
+      </div>
+      {items.length < total && <button className="btn rv-more" onClick={() => setLimit(l => l + 50)}>Показать ещё {Math.min(50, total - items.length)} из {total - items.length}</button>}
     </div>
   );
 }
@@ -248,11 +294,12 @@ function ItemCard({ it, selected, onSelect, onReplace, onDrop }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(it.publishError);
   const [open, setOpen] = useState(false);
+  const area = useAutoGrow(text);
   useEffect(() => { setText(it.draftAnswer || ''); }, [it.draftAnswer]);
 
   const answered = it.answeredOnMarketplace || it.status === 'published';
   const ozonReview = it.marketplace === 'ozon' && it.kind === 'review';
-  const long = (it.text || '').length > 280;
+  const long = (it.text || '').length > 320;
 
   const act = async (name: string, fn: () => Promise<any>) => {
     setBusy(name); setError(null);
@@ -268,81 +315,93 @@ function ItemCard({ it, selected, onSelect, onReplace, onDrop }: {
     onDrop(it.id);
   });
 
-  const badge = answered ? <span className="chip good">отвечено{it.publishedBy === 'auto' ? ' · авто' : ''}</span>
-    : it.status === 'escalated' ? <span className="chip bad">на проверку</span>
-    : it.status === 'drafted' ? <span className="chip info">черновик</span>
-    : it.status === 'skipped' ? <span className="chip">пропущено</span>
-    : <span className="chip">новый</span>;
+  const badge = answered ? <Badge tone="good">Отвечено{it.publishedBy === 'auto' ? ' автоматически' : ''}</Badge>
+    : it.status === 'escalated' ? <Badge tone="bad">На проверку</Badge>
+    : it.status === 'drafted' ? <Badge tone="info">Черновик готов</Badge>
+    : it.status === 'skipped' ? <Badge tone="neutral">Пропущено</Badge>
+    : <Badge tone="neutral">Новый</Badge>;
+  const product = it.productName || it.offerId || `SKU ${it.sku || '—'}`;
+  const hint = [sourcesText(it.sourcesUsed), it.draftAnswer && it.draftModel && it.draftModel !== 'template' && it.draftCostUsd ? usd(it.draftCostUsd) : '']
+    .filter(Boolean).join(' · ');
 
   return (
-    <div className="card" style={{ padding: 14, borderLeft: `3px solid ${MP_COLOR[it.marketplace]}` }}>
-      <div className="flex-between" style={{ gap: 8, flexWrap: 'wrap' }}>
-        <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
-          {!answered && <input type="checkbox" checked={selected} onChange={e => onSelect(e.target.checked)} />}
-          <b style={{ color: MP_COLOR[it.marketplace] }}>{MP_NAME[it.marketplace]}</b>
-          <span className="muted">{it.kind === 'review' ? 'отзыв' : 'вопрос'}</span>
-          {it.rating != null && <Stars n={it.rating} />}
-          <span>{it.productName || it.offerId || `SKU ${it.sku || '—'}`}</span>
-          {it.offerId && it.productName && <span className="muted" style={{ fontSize: 12 }}>{it.offerId}</span>}
-          {it.productUrl && <a href={it.productUrl} target="_blank" rel="noreferrer" title="Открыть на площадке"><ArrowSquareOutIcon size={13} /></a>}
+    <article className={`rv-item${selected ? ' is-selected' : ''}${it.status === 'escalated' && !answered ? ' is-escalated' : ''}`} style={mpVar(it.marketplace)}>
+      <header className="rv-item-head">
+        {!answered && (
+          <input type="checkbox" className="rv-check" checked={selected} onChange={e => onSelect(e.target.checked)} aria-label="Выбрать для публикации" />
+        )}
+        <div className="rv-item-title">
+          <div className="rv-item-product">
+            <span>{product}</span>
+            {it.productUrl && <a href={it.productUrl} target="_blank" rel="noreferrer" title="Открыть товар на площадке"><ArrowSquareOutIcon size={16} /></a>}
+          </div>
+          <div className="rv-item-meta">
+            <MpTag mp={it.marketplace} />
+            <span>{it.kind === 'review' ? 'Отзыв' : 'Вопрос'}</span>
+            {it.offerId && it.productName && <span>арт. {it.offerId}</span>}
+            <span>{fmtDate(it.createdAt)}</span>
+          </div>
         </div>
-        <div className="row gap-8"><span className="muted" style={{ fontSize: 12 }}>{fmtDate(it.createdAt)}</span>{badge}</div>
-      </div>
+        {badge}
+      </header>
 
-      <div style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
-        {it.text ? (long && !open ? <>{it.text.slice(0, 280)}… <a onClick={() => setOpen(true)} style={{ cursor: 'pointer' }}>ещё</a></> : it.text)
-          : <span className="muted">(без текста)</span>}
+      <div className="rv-item-body">
+        {it.rating != null && <Stars n={it.rating} />}
+        <p className="rv-item-text">
+          {it.text ? (long && !open ? <>{it.text.slice(0, 320)}… <button className="rv-link" onClick={() => setOpen(true)}>Читать целиком</button></> : it.text)
+            : <span className="rv-muted">Покупатель не оставил текста</span>}
+        </p>
+        {(it.pros || it.cons) && (
+          <dl className="rv-proscons">
+            {it.pros && <div><dt>Достоинства</dt><dd>{it.pros}</dd></div>}
+            {it.cons && <div><dt>Недостатки</dt><dd>{it.cons}</dd></div>}
+          </dl>
+        )}
       </div>
-      {(it.pros || it.cons) && (
-        <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
-          {it.pros && <div>+ {it.pros}</div>}{it.cons && <div>− {it.cons}</div>}
-        </div>
-      )}
 
       {answered ? (
-        it.marketplaceAnswer ? <div style={{ marginTop: 8, padding: 8, background: 'var(--bg-3)', borderRadius: 8, whiteSpace: 'pre-wrap', fontSize: 13 }}>
-          <span className="muted">Ответ магазина: </span>{it.marketplaceAnswer}</div> : null
+        it.marketplaceAnswer ? <div className="rv-answered"><div className="rv-label">Ответ магазина</div>{it.marketplaceAnswer}</div> : null
       ) : (
-        <>
-          {it.escalationReason && <div style={{ color: 'var(--bad)', fontSize: 13, marginTop: 8 }}><WarningIcon size={13} /> {it.escalationReason}</div>}
-          <textarea className="textarea" rows={3} style={{ marginTop: 8, width: '100%' }}
-            placeholder={it.status === 'new' ? 'Черновик готовится — или напишите ответ сами' : 'Ответ покупателю'}
+        <div className="rv-reply">
+          {it.escalationReason && (
+            <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span><b>Проверьте перед отправкой.</b> {it.escalationReason}</span></div>
+          )}
+          <label className="rv-label" htmlFor={`rv-ans-${it.id}`}>Ответ покупателю</label>
+          <textarea id={`rv-ans-${it.id}`} ref={area} className="textarea rv-textarea" rows={3}
+            placeholder={it.status === 'new' ? 'Черновик готовится — или напишите ответ сами' : 'Напишите ответ покупателю'}
             value={text} onChange={e => setText(e.target.value)} onBlur={saveIfChanged} disabled={it.status === 'skipped'} />
-          <div className="flex-between" style={{ marginTop: 6, flexWrap: 'wrap', gap: 8 }}>
-            <span className="muted" style={{ fontSize: 12 }}>
-              {it.sourcesUsed.length ? `Опора: ${it.sourcesUsed.map(s => s.split(':')[0]).filter((v, i, a) => a.indexOf(v) === i).map(s => ({ style: 'профиль стиля', card: 'карточка товара', product: 'материалы Диска', history: 'прошлые ответы', chat: 'переписка', telegram: 'Telegram' } as any)[s] || s).join(' · ')}` : ''}
-              {it.draftModel && it.draftModel !== 'template' ? ` · ${it.draftModel}${it.draftCostUsd ? ` · ${usd(it.draftCostUsd)}` : ''}` : ''}
-            </span>
-            <div className="row gap-8">
+          <div className="rv-reply-foot">
+            <span className="rv-hint">{busy === 'save' ? 'Сохраняю…' : hint}</span>
+            <div className="rv-actions">
               {it.status === 'skipped'
-                ? <button className="btn btn-sm" disabled={!!busy} onClick={() => act('unskip', async () => onReplace((await reviewsApi.unskip(it.id)).item))}>Вернуть</button>
+                ? <button className="btn" disabled={!!busy} onClick={() => act('unskip', async () => onReplace((await reviewsApi.unskip(it.id)).item))}>Вернуть в работу</button>
                 : <>
-                  <button className="btn btn-sm" disabled={!!busy} onClick={() => act('skip', async () => { await reviewsApi.skip(it.id); onDrop(it.id); })}>Пропустить</button>
-                  <button className="btn btn-sm" disabled={!!busy} onClick={() => act('draft', async () => onReplace((await reviewsApi.draft(it.id)).item))}>
-                    {busy === 'draft' ? <SpinnerIcon size={14} className="spin" /> : <SparkleIcon size={14} />} {it.draftAnswer ? 'Переписать' : 'Черновик'}
+                  <button className="btn btn-ghost" disabled={!!busy} onClick={() => act('skip', async () => { await reviewsApi.skip(it.id); onDrop(it.id); })}>Пропустить</button>
+                  <button className="btn" disabled={!!busy} onClick={() => act('draft', async () => onReplace((await reviewsApi.draft(it.id)).item))}>
+                    {busy === 'draft' ? <SpinnerIcon size={17} className="spin" /> : <SparkleIcon size={17} />} {it.draftAnswer ? 'Переписать' : 'Написать черновик'}
                   </button>
                   {ozonReview ? (
-                    <button className="btn btn-sm btn-primary" disabled={!text.trim()}
+                    <button className="btn btn-primary" disabled={!text.trim()}
                       title="Ozon не даёт отвечать на отзывы по API: ответ копируется, открывается кабинет — вставьте его в отзыв (Ctrl+V). После ответа отзыв сам уйдёт из списка при следующем сборе."
                       onClick={async () => {
                         try { await navigator.clipboard.writeText(text.trim()); } catch { /* без буфера — откроем кабинет всё равно */ }
                         if (text !== (it.draftAnswer || '')) saveIfChanged();
                         window.open('https://seller.ozon.ru/app/reviews', '_blank', 'noopener');
                       }}>
-                      <ArrowSquareOutIcon size={14} /> Скопировать и открыть Ozon
+                      <ArrowSquareOutIcon size={17} /> Скопировать и открыть Ozon
                     </button>
                   ) : (
-                    <button className="btn btn-sm btn-primary" disabled={!!busy || !text.trim()} onClick={publish}>
-                      {busy === 'publish' ? <SpinnerIcon size={14} className="spin" /> : <PaperPlaneRightIcon size={14} />} Опубликовать
+                    <button className="btn btn-primary" disabled={!!busy || !text.trim()} onClick={publish}>
+                      {busy === 'publish' ? <SpinnerIcon size={17} className="spin" /> : <PaperPlaneRightIcon size={17} />} Опубликовать
                     </button>
                   )}
                 </>}
             </div>
           </div>
-        </>
+        </div>
       )}
-      {error && <div className="chip bad" style={{ marginTop: 6 }}>{error}</div>}
-    </div>
+      {error && <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span>{error}</span></div>}
+    </article>
   );
 }
 
@@ -358,11 +417,11 @@ function KnowledgeBase() {
     return () => clearInterval(t);
   }, [kb?.index.running]);
 
-  if (err) return <div className="chip bad">{err}</div>;
-  if (!kb) return <div className="muted"><SpinnerIcon size={14} className="spin" /> Загружаю…</div>;
+  if (err) return <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span>{err}</span></div>;
+  if (!kb) return <div className="rv-empty"><SpinnerIcon size={20} className="spin" /> Загружаю…</div>;
 
   return (
-    <div className="grid" style={{ gap: 16 }}>
+    <div className="rv-stack">
       <LearningBlock kb={kb} reload={load} />
       <DiskBlock kb={kb} reload={load} />
       <TelegramBlock stats={kb.telegram} reload={load} />
@@ -383,47 +442,46 @@ function LearningBlock({ kb, reload }: { kb: Kb; reload: () => void }) {
   const ans = (mp: string, kind: string) => kb.history.answered.find(r => r.marketplace === mp && r.kind === kind)?.n || 0;
   const hd = kb.history.done;
   const st = (done: boolean) => done ? '' : ' · догружается';
+  const rows: [string, string][] = [
+    ['Наши ответы на отзывы WB', `${ans('wb', 'review')}${st(hd.wb_reviews)}`],
+    ['Наши ответы на вопросы WB', `${ans('wb', 'question')}${st(hd.wb_questions)}`],
+    ['Наши ответы на вопросы Ozon', `${ans('ozon', 'question')}${st(hd.ozon_questions)}`],
+    ['Переписка в чатах покупателей', `WB ${kb.chats.wb}, Ozon ${kb.chats.ozon} пар${kb.chats.at ? ` · обновлено ${ago(kb.chats.at)}` : ''}`],
+    ['Карточки товаров', `WB ${kb.cards.wb}, Ozon ${kb.cards.ozon}${kb.cards.at ? ` · обновлено ${ago(kb.cards.at)}` : ''}`],
+    ['Архив Telegram', `${kb.telegram.pairs} пар`],
+  ];
   return (
-    <div className="card">
-      <div className="card-title">На чём учится ИИ</div>
-      <div className="muted" style={{ fontSize: 13 }}>
+    <section className="rv-panel">
+      <h2>На чём учится ИИ</h2>
+      <p className="rv-sub">
         Шаблонов нет: под каждый отзыв и вопрос ИИ собирает ответ сам — по нашим прошлым ответам в кабинетах, переписке с покупателями,
         карточке товара и материалам с Диска. Всё обновляется само.
-      </div>
-      <table style={{ width: '100%', marginTop: 10, fontSize: 13, borderCollapse: 'collapse' }}>
-        <tbody>
-          <tr><td style={{ padding: '4px' }}>Наши ответы на отзывы WB</td><td>{ans('wb', 'review')}{st(hd.wb_reviews)}</td></tr>
-          <tr><td style={{ padding: '4px' }}>Наши ответы на вопросы WB</td><td>{ans('wb', 'question')}{st(hd.wb_questions)}</td></tr>
-          <tr><td style={{ padding: '4px' }}>Наши ответы на вопросы Ozon</td><td>{ans('ozon', 'question')}{st(hd.ozon_questions)}</td></tr>
-          <tr><td style={{ padding: '4px' }}>Переписка в чатах покупателей</td><td>WB {kb.chats.wb} · Ozon {kb.chats.ozon} пар{kb.chats.at ? ` · обновлено ${ago(kb.chats.at)}` : ''}</td></tr>
-          <tr><td style={{ padding: '4px' }}>Карточки товаров (описание, характеристики)</td><td>WB {kb.cards.wb} · Ozon {kb.cards.ozon}{kb.cards.at ? ` · обновлено ${ago(kb.cards.at)}` : ''}</td></tr>
-          <tr><td style={{ padding: '4px' }}>Telegram</td><td>{kb.telegram.pairs} пар</td></tr>
-        </tbody>
-      </table>
-      <div style={{ marginTop: 10 }}>
-        <div className="flex-between" style={{ flexWrap: 'wrap', gap: 8 }}>
-          <b style={{ fontSize: 13 }}>Профиль стиля {kb.style ? <span className="muted" style={{ fontWeight: 400 }}>· составлен {fmtDate(kb.style.at)}</span> : <span className="muted" style={{ fontWeight: 400 }}>· ещё не составлен</span>}</b>
-          <div className="row gap-8">
-            <button className="btn btn-sm" disabled={!!busy} onClick={() => run('src', reviewsApi.refreshSources, 'Карточки и чаты обновлены')}>
-              {busy === 'src' ? <SpinnerIcon size={14} className="spin" /> : <ArrowsClockwiseIcon size={14} />} Карточки и чаты
-            </button>
-            <button className="btn btn-sm" disabled={!!busy} onClick={() => run('style', reviewsApi.buildStyle, 'Профиль стиля пересоставлен')}>
-              {busy === 'style' ? <SpinnerIcon size={14} className="spin" /> : <ArrowsClockwiseIcon size={14} />} Пересоставить профиль
-            </button>
-          </div>
+      </p>
+      <dl className="rv-kv">
+        {rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
+      </dl>
+      <div className="rv-panel-row">
+        <div>
+          <b>Профиль стиля</b> <span className="rv-muted">{kb.style ? `составлен ${fmtDate(kb.style.at)}` : 'ещё не составлен'}</span>
+          <div className="rv-hint">ИИ сам читает наши реальные ответы и описывает, как магазин общается с покупателями. Обновляется раз в неделю (≈ $0,05).</div>
         </div>
-        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          ИИ сам читает наши реальные ответы и описывает, как магазин общается с покупателями. Обновляется раз в неделю (≈ $0,05).
+        <div className="rv-actions">
+          <button className="btn" disabled={!!busy} onClick={() => run('src', reviewsApi.refreshSources, 'Карточки и чаты обновлены')}>
+            {busy === 'src' ? <SpinnerIcon size={17} className="spin" /> : <ArrowsClockwiseIcon size={17} />} Обновить карточки и чаты
+          </button>
+          <button className="btn" disabled={!!busy} onClick={() => run('style', reviewsApi.buildStyle, 'Профиль стиля пересоставлен')}>
+            {busy === 'style' ? <SpinnerIcon size={17} className="spin" /> : <ArrowsClockwiseIcon size={17} />} Пересоставить профиль
+          </button>
         </div>
-        {kb.style && (
-          <details style={{ marginTop: 6, fontSize: 13 }}>
-            <summary>Показать профиль</summary>
-            <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 360, overflow: 'auto', fontSize: 12, background: 'var(--bg-3)', padding: 8, borderRadius: 8 }}>{kb.style.text}</pre>
-          </details>
-        )}
-        {msg && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{msg}</div>}
       </div>
-    </div>
+      {kb.style && (
+        <details className="rv-details">
+          <summary>Показать профиль стиля</summary>
+          <pre className="rv-pre">{kb.style.text}</pre>
+        </details>
+      )}
+      {msg && <div className="rv-hint">{msg}</div>}
+    </section>
   );
 }
 
@@ -437,44 +495,48 @@ function DiskBlock({ kb, reload }: { kb: Kb; reload: () => void }) {
     setPreview((await reviewsApi.folderText(p)).text || '(текста нет)');
   };
   const ix = kb.index;
+  const unconfirmed = kb.folders.filter(f => !f.confirmed && !f.shared).length;
   return (
-    <div className="card">
-      <div className="flex-between" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <div className="card-title" style={{ margin: 0 }}>Материалы по товарам (Яндекс.Диск)</div>
-        <button className="btn btn-sm" onClick={start} disabled={ix.running}>
-          {ix.running ? <><SpinnerIcon size={14} className="spin" /> {ix.done} из {ix.total || '…'}</> : <><ArrowsClockwiseIcon size={14} /> Обновить материалы</>}
+    <section className="rv-panel">
+      <div className="rv-panel-row">
+        <h2>Материалы по товарам (Яндекс.Диск)</h2>
+        <button className="btn" onClick={start} disabled={ix.running}>
+          {ix.running ? <><SpinnerIcon size={17} className="spin" /> {ix.done} из {ix.total || '…'}</> : <><ArrowsClockwiseIcon size={17} /> Обновить материалы</>}
         </button>
       </div>
-      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+      <p className="rv-sub">
         Папка проверяется сама каждые 6 часов (03, 09, 15, 21 МСК): новые папки и файлы добавляются, изменённые перечитываются, удалённые убираются.
         Word и PDF читаются на сервере бесплатно{kb.poppler ? '' : ' (PDF-модуль ещё не установлен — PDF до 3 МБ идут через Claude)'}; сканы и фото комплектации — через Claude один раз.
         {ix.current && <> Сейчас: {ix.current}</>}
-      </div>
+      </p>
       {kb.diskSync && (
-        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+        <div className="rv-hint">
           Последняя проверка {fmtDate(kb.diskSync.at)}: новых папок {kb.diskSync.added.length}, изменённых {kb.diskSync.changed.length}, удалённых {kb.diskSync.removed.length}.
         </div>
       )}
-      {kb.folders.some(f => !f.confirmed && !f.shared) && (
-        <div className="chip" style={{ marginTop: 6 }}>
-          Новые папки без подтверждения: {kb.folders.filter(f => !f.confirmed && !f.shared).length}. ИИ уже использует подобранные артикулы — проверьте и нажмите «Подтвердить».
+      {unconfirmed > 0 && (
+        <div className="rv-callout rv-callout--warn">
+          <WarningIcon size={18} />
+          <span>Новых папок без подтверждения: {unconfirmed}. ИИ уже использует подобранные артикулы — проверьте их и нажмите «Подтвердить».</span>
         </div>
       )}
-      {ix.error && <div className="chip bad" style={{ marginTop: 6 }}>{ix.error}</div>}
+      {ix.error && <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span>{ix.error}</span></div>}
       {kb.folders.length > 0 && (
-        <table style={{ width: '100%', marginTop: 10, fontSize: 13, borderCollapse: 'collapse' }}>
-          <thead><tr className="muted" style={{ textAlign: 'left' }}><th>Папка</th><th>Артикулы</th><th>Файлы</th><th /></tr></thead>
-          <tbody>
-            {kb.folders.map(fd => <FolderRow key={fd.path} fd={fd} onPreview={() => show(fd.path)} open={openPath === fd.path} preview={preview} reload={reload} />)}
-          </tbody>
-        </table>
+        <div className="rv-table-wrap">
+          <table className="rv-table">
+            <thead><tr><th>Папка</th><th>Артикулы</th><th>Файлы</th><th /></tr></thead>
+            <tbody>
+              {kb.folders.map(fd => <FolderRow key={fd.path} fd={fd} onPreview={() => show(fd.path)} open={openPath === fd.path} preview={preview} reload={reload} />)}
+            </tbody>
+          </table>
+        </div>
       )}
       {kb.withoutMaterials.length > 0 && (
-        <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+        <div className="rv-hint">
           Без папки на Диске ({kb.withoutMaterials.length}) — отвечаем по карточке товара и нашей истории: {kb.withoutMaterials.slice(0, 40).join(', ')}{kb.withoutMaterials.length > 40 ? '…' : ''}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -488,23 +550,23 @@ function FolderRow({ fd, onPreview, open, preview, reload }: { fd: KbFolder; onP
   };
   return (
     <>
-      <tr style={{ borderTop: '1px solid var(--border)', background: fd.confirmed || fd.shared ? undefined : 'var(--bg-3)' }}>
-        <td style={{ padding: '6px 4px' }}>{fd.path}{!fd.confirmed && !fd.shared && <span className="chip" style={{ marginLeft: 6 }}>новая</span>}</td>
-        <td style={{ padding: '6px 4px' }}>
-          {fd.shared && !fd.confirmed ? <span className="muted" title="Артикул не нужен: материалы этой папки ИИ берёт для вложенных папок товаров или для набора, в который она входит">общая папка — без артикула</span> : (
-          <div className="row gap-8">
-            <input className="input" style={{ width: 220, padding: '4px 8px' }} value={v} onChange={e => setV(e.target.value)} placeholder="артикулы через запятую" />
+      <tr className={fd.confirmed || fd.shared ? '' : 'is-new'}>
+        <td>{fd.path}{!fd.confirmed && !fd.shared && <> <Badge tone="warn">новая</Badge></>}</td>
+        <td>
+          {fd.shared && !fd.confirmed ? <span className="rv-muted" title="Артикул не нужен: материалы этой папки ИИ берёт для вложенных папок товаров или для набора, в который она входит">общая папка — без артикула</span> : (
+          <div className="rv-inline">
+            <input className="input" style={{ width: 220 }} value={v} onChange={e => setV(e.target.value)} placeholder="артикулы через запятую" />
             {fd.confirmed && v === fd.offerIds.join(', ')
-              ? <span className="chip good">подтверждено</span>
-              : <button className="btn btn-sm" onClick={confirmIt}>Подтвердить</button>}
+              ? <Badge tone="good">подтверждено</Badge>
+              : <button className="btn" onClick={confirmIt}>Подтвердить</button>}
           </div>)}
         </td>
-        <td style={{ padding: '6px 4px' }} className="muted">
-          прочитано {done} из {fd.files.length}{errs.length ? <span style={{ color: 'var(--bad)' }} title={errs.map(e => `${e.name}: ${e.note}`).join('\n')}> · ошибок {errs.length}</span> : null}
+        <td className="rv-muted">
+          прочитано {done} из {fd.files.length}{errs.length ? <span className="rv-text-bad" title={errs.map(e => `${e.name}: ${e.note}`).join('\n')}> · ошибок {errs.length}</span> : null}
         </td>
-        <td style={{ padding: '6px 4px' }}><button className="btn btn-sm" onClick={onPreview}>{open ? 'Скрыть' : 'Текст'}</button></td>
+        <td><button className="btn btn-ghost" onClick={onPreview}>{open ? 'Скрыть' : 'Текст'}</button></td>
       </tr>
-      {open && <tr><td colSpan={4}><pre style={{ whiteSpace: 'pre-wrap', maxHeight: 320, overflow: 'auto', fontSize: 12, background: 'var(--bg-3)', padding: 8, borderRadius: 8 }}>{preview}</pre></td></tr>}
+      {open && <tr><td colSpan={4}><pre className="rv-pre">{preview}</pre></td></tr>}
     </>
   );
 }
@@ -528,24 +590,26 @@ function TelegramBlock({ stats, reload }: { stats: { pairs: number; dialogs: num
     } catch (e: any) { setState(e?.message || 'Ошибка'); }
   };
   return (
-    <div className="card">
-      <div className="card-title">Архив Telegram</div>
-      <div className="muted" style={{ fontSize: 13 }}>
+    <section className="rv-panel">
+      <h2>Архив Telegram</h2>
+      <p className="rv-sub">
         В базе: {stats.pairs} пар «вопрос → ответ» из {stats.dialogs} диалогов{stats.lastDate ? `, последний ответ ${stats.lastDate}` : ''}.
         Файл разбирается здесь, в браузере: на сервер уходят только пары без имён; телефоны и @username вырезаются. В GitHub архив не попадает.
-      </div>
-      <details style={{ marginTop: 8, fontSize: 13 }}>
-        <summary>Как выгрузить</summary>
-        Telegram Desktop под аккаунтом, куда пишут покупатели → Настройки → Продвинутые → «Экспорт данных из Telegram» → только «Личные чаты» →
-        формат «Машиночитаемый JSON», медиа не включать → «Экспортировать». Файл result.json лежит в Загрузки\Telegram Desktop\ChatExport_ДАТА.
-        Копию удобно хранить в «Рабочий стол\Agents\Agent ответов на отзывы и вопросы\02 Telegram-архивы».
+      </p>
+      <details className="rv-details">
+        <summary>Как выгрузить архив</summary>
+        <p className="rv-sub">
+          Telegram Desktop под аккаунтом, куда пишут покупатели → Настройки → Продвинутые → «Экспорт данных из Telegram» → только «Личные чаты» →
+          формат «Машиночитаемый JSON», медиа не включать → «Экспортировать». Файл result.json лежит в Загрузки\Telegram Desktop\ChatExport_ДАТА.
+          Копию удобно хранить в «Рабочий стол\Agents\Agent ответов на отзывы и вопросы\02 Telegram-архивы».
+        </p>
       </details>
-      <div className="row gap-8" style={{ marginTop: 8 }}>
+      <div className="rv-inline">
         <input ref={input} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={e => e.target.files?.[0] && onFile(e.target.files[0])} />
-        <button className="btn btn-sm" onClick={() => input.current?.click()}>Загрузить result.json</button>
-        {state && <span className="muted" style={{ fontSize: 12 }}>{state}</span>}
+        <button className="btn" onClick={() => input.current?.click()}>Загрузить result.json</button>
+        {state && <span className="rv-hint">{state}</span>}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -558,24 +622,26 @@ function LogTab() {
     for (const u of d?.usage || []) { const x = m.get(u.day) || { cost: 0, calls: 0 }; x.cost += u.cost; x.calls += u.calls; m.set(u.day, x); }
     return [...m.entries()];
   }, [d]);
-  if (!d) return <div className="muted"><SpinnerIcon size={14} className="spin" /> Загружаю…</div>;
+  if (!d) return <div className="rv-empty"><SpinnerIcon size={20} className="spin" /> Загружаю…</div>;
   return (
-    <div className="grid grid-2" style={{ gap: 16, alignItems: 'start' }}>
-      <div className="card">
-        <div className="card-title">Расход Claude по дням</div>
-        {!byDay.length && <div className="muted">Вызовов ещё не было.</div>}
-        {byDay.map(([day, x]) => <div key={day} className="flex-between" style={{ fontSize: 13 }}><span>{day}</span><span>{usd(x.cost)} · {x.calls} выз.</span></div>)}
-      </div>
-      <div className="card">
-        <div className="card-title">События</div>
-        <div style={{ maxHeight: 520, overflow: 'auto', fontSize: 12 }}>
+    <div className="rv-log">
+      <section className="rv-panel">
+        <h2>Расход Claude по дням</h2>
+        {!byDay.length && <div className="rv-muted">Вызовов ещё не было.</div>}
+        <dl className="rv-kv">
+          {byDay.map(([day, x]) => <div key={day}><dt>{day}</dt><dd>{usd(x.cost)} · {x.calls} выз.</dd></div>)}
+        </dl>
+      </section>
+      <section className="rv-panel">
+        <h2>События</h2>
+        <ul className="rv-events">
           {d.log.map((l, i) => (
-            <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid var(--border)', color: l.level === 'error' ? 'var(--bad)' : l.level === 'warn' ? 'var(--warn)' : undefined }}>
-              <span className="muted">{fmtDate(l.at)}</span> {l.message}
-            </div>
+            <li key={i} className={l.level === 'error' ? 'rv-text-bad' : l.level === 'warn' ? 'rv-text-warn' : ''}>
+              <time>{fmtDate(l.at)}</time> {l.message}
+            </li>
           ))}
-        </div>
-      </div>
+        </ul>
+      </section>
     </div>
   );
 }
@@ -585,15 +651,15 @@ function SettingsTab({ ov, onSaved }: { ov: ReviewsOverview; onSaved: (s: Review
   const [s, setS] = useState(ov.settings);
   const [state, setState] = useState<string | null>(null);
   const save = async () => {
-    setState('сохраняю…');
-    try { const r = await reviewsApi.saveSettings(s); onSaved(r.settings); setState('сохранено'); } catch (e: any) { setState(e?.message || 'ошибка'); }
+    setState('Сохраняю…');
+    try { const r = await reviewsApi.saveSettings(s); onSaved(r.settings); setState('Сохранено'); } catch (e: any) { setState(e?.message || 'Ошибка'); }
   };
   const num = (k: keyof typeof s) => (e: any) => setS({ ...s, [k]: Number(e.target.value) });
   return (
-    <div className="card" style={{ maxWidth: 640 }}>
+    <section className="rv-panel rv-settings">
       <div className="field"><label className="field-label">Ссылка на папку Яндекс.Диска (доступ по ссылке)</label>
         <input className="input" value={s.yandexDiskUrl} onChange={e => setS({ ...s, yandexDiskUrl: e.target.value })} placeholder="https://disk.yandex.ru/d/…" /></div>
-      <div className="grid grid-2" style={{ gap: 12 }}>
+      <div className="rv-settings-grid">
         <div className="field"><label className="field-label">Подлимит раздела на Claude, $ в месяц</label>
           <input className="input" type="number" min={0} step={1} value={s.monthlyBudgetUsd} onChange={num('monthlyBudgetUsd')} /></div>
         <div className="field"><label className="field-label">Общий лимит ключа, $ в месяц (для подписи)</label>
@@ -601,13 +667,13 @@ function SettingsTab({ ov, onSaved }: { ov: ReviewsOverview; onSaved: (s: Review
         <div className="field"><label className="field-label">Отзывы с оценкой не выше — всегда на проверку</label>
           <input className="input" type="number" min={0} max={5} value={s.escalateRatingMax} onChange={num('escalateRatingMax')} /></div>
         <div className="field"><label className="field-label">Черновики после каждого сбора</label>
-          <label className="row gap-8"><input type="checkbox" checked={s.autoDraft} onChange={e => setS({ ...s, autoDraft: e.target.checked })} /> готовить автоматически</label></div>
+          <Switch checked={s.autoDraft} onChange={v => setS({ ...s, autoDraft: v })}>Готовить автоматически</Switch></div>
         <div className="field"><label className="field-label">Модель черновиков</label>
           <input className="input" value={s.draftModel} onChange={e => setS({ ...s, draftModel: e.target.value })} /></div>
         <div className="field"><label className="field-label">Модель чтения PDF и фото</label>
           <input className="input" value={s.indexModel} onChange={e => setS({ ...s, indexModel: e.target.value })} /></div>
       </div>
-      <div className="row gap-8"><button className="btn btn-primary" onClick={save}>Сохранить</button>{state && <span className="muted">{state}</span>}</div>
-    </div>
+      <div className="rv-inline"><button className="btn btn-primary" onClick={save}>Сохранить настройки</button>{state && <span className="rv-hint">{state}</span>}</div>
+    </section>
   );
 }

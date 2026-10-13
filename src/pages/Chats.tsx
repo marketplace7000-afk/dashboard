@@ -1,18 +1,16 @@
 // Раздел «Чаты с покупателями» (WB и Ozon). Диалоги собирает сервер каждые 5 минут,
 // ИИ готовит черновик к новому сообщению покупателя; отправка — кнопкой.
+// Вид: стили .rv- в styles.css, общие детали — components/InboxUi.tsx (13.10.2026).
 import { useEffect, useRef, useState } from 'react';
-import { ArrowsClockwiseIcon, WarningIcon, SpinnerIcon, PaperPlaneRightIcon, SparkleIcon, MagnifyingGlassIcon } from '@phosphor-icons/react';
+import {
+  ArrowsClockwiseIcon, WarningIcon, SpinnerIcon, PaperPlaneRightIcon, SparkleIcon, MagnifyingGlassIcon, ArrowLeftIcon, ChatsCircleIcon,
+} from '@phosphor-icons/react';
 import { chatsApi, type ChatThread, type ChatMsg, type ChatView, type ChatMp } from '../api/chats';
 import { reviewsApi } from '../api/reviews';
 import type { ReviewSettings } from '../../shared/reviews';
+import { MP_NAME, MpTag, Switch, Badge, mpVar, useAutoGrow, sourcesText } from '../components/InboxUi';
 
-const MP_COLOR = { wb: '#cb11ab', ozon: '#005bff' } as const;
-const MP_NAME = { wb: 'WB', ozon: 'Ozon' } as const;
 const key = (t: { marketplace: string; chatId: string }) => `${t.marketplace}|${t.chatId}`;
-
-function MpBadge({ mp }: { mp: 'wb' | 'ozon' }) {
-  return <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: MP_COLOR[mp], borderRadius: 4, padding: '1px 5px' }}>{MP_NAME[mp]}</span>;
-}
 
 function fmt(ms: number | null): string {
   if (!ms) return '—';
@@ -23,13 +21,18 @@ function fmt(ms: number | null): string {
     : d.toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
-function statusChip(t: ChatThread) {
-  if (t.status === 'escalated') return <span className="chip bad">на проверку</span>;
-  if (t.status === 'drafted') return <span className="chip info">черновик</span>;
-  if (t.status === 'sent') return <span className="chip good">отвечено</span>;
-  if (t.status === 'skipped') return <span className="chip">пропущен</span>;
-  if (t.lastFromBuyer) return <span className="chip">ждёт ответа</span>;
+function statusBadge(t: ChatThread) {
+  if (t.status === 'escalated') return <Badge tone="bad">На проверку</Badge>;
+  if (t.status === 'drafted') return <Badge tone="info">Черновик готов</Badge>;
+  if (t.status === 'sent') return <Badge tone="good">Отвечено</Badge>;
+  if (t.status === 'skipped') return <Badge tone="neutral">Пропущен</Badge>;
+  if (t.lastFromBuyer) return <Badge tone="warn">Ждёт ответа</Badge>;
   return null;
+}
+
+function Avatar({ t }: { t: ChatThread }) {
+  const letter = (t.clientName || 'П').trim().charAt(0).toUpperCase();
+  return <span className="rv-avatar" style={mpVar(t.marketplace)} aria-hidden="true">{letter}</span>;
 }
 
 export function Chats() {
@@ -64,96 +67,113 @@ export function Chats() {
 
   const replaceThread = (t: ChatThread) => setData(d => d ? { ...d, threads: d.threads.map(x => key(x) === key(t) ? t : x) } : d);
   const selThread = data?.threads.find(t => key(t) === sel);
+  const views: [ChatView, string, number | null][] = [
+    ['waiting', 'Ждут ответа', data?.counts.waiting ?? null], ['drafts', 'Черновики', data?.counts.drafts ?? null], ['all', 'Все', null],
+  ];
 
   return (
-    <div className="grid" style={{ gap: 12 }}>
-      <div className="card" style={{ padding: 12 }}>
-        <div className="flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
-          <div className="row gap-8" style={{ flexWrap: 'wrap', gap: 16 }}>
-            {(['wb', 'ozon'] as const).map(m => (
-              <div key={m} className="row gap-8" style={{ gap: 8 }}>
-                <MpBadge mp={m} />
-                <span className="muted" style={{ fontSize: 13 }}>ждут: <b>{data?.counts[m].waiting ?? '…'}</b> · черновиков: <b>{data?.counts[m].drafts ?? '…'}</b></span>
-                {settings && (
-                  <label className="row gap-8" style={{ fontSize: 13, cursor: 'pointer', gap: 4 }} title="Отправлять черновик без кнопки. Пометки «на проверку» никогда не отправляются сами.">
-                    <input type="checkbox" checked={m === 'wb' ? settings.chatAutoSendWb : settings.chatAutoSendOzon} onChange={() => toggle(m === 'wb' ? 'chatAutoSendWb' : 'chatAutoSendOzon')} />
-                    автоответ
-                  </label>
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
-            {settings && (
-              <label className="row gap-8" style={{ fontSize: 13, cursor: 'pointer' }} title="ИИ сам готовит черновик к каждому новому сообщению покупателя (за последние 48 ч)">
-                <input type="checkbox" checked={settings.chatAutoDraft} onChange={() => toggle('chatAutoDraft')} /> черновики сами
-              </label>
-            )}
-            <button className="btn btn-sm" onClick={syncNow} disabled={syncing}>
-              {syncing ? <SpinnerIcon size={14} className="spin" /> : <ArrowsClockwiseIcon size={14} />} Обновить
-            </button>
-          </div>
+    <div className="rv-page">
+      <section className="rv-hero">
+        <div className="rv-stats">
+          {(['wb', 'ozon'] as const).map(m => (
+            <div key={m} className="rv-stat rv-stat--mp" style={mpVar(m)}>
+              <span className="rv-stat-label"><span className="rv-dot" />Чаты {MP_NAME[m]}</span>
+              <span className="rv-stat-pair">
+                <span><b className="rv-stat-num">{data?.counts[m].waiting ?? '…'}</b> ждут</span>
+                <span><b className="rv-stat-num rv-stat-num--sm">{data?.counts[m].drafts ?? '…'}</b> черновиков</span>
+              </span>
+              {settings && (
+                <Switch checked={m === 'wb' ? settings.chatAutoSendWb : settings.chatAutoSendOzon}
+                  onChange={() => toggle(m === 'wb' ? 'chatAutoSendWb' : 'chatAutoSendOzon')}
+                  title="Отправлять черновик без кнопки. Пометки «на проверку» никогда не отправляются сами.">
+                  Автоответ
+                </Switch>
+              )}
+            </div>
+          ))}
         </div>
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-          Новые сообщения подтягиваются каждые 5 минут{data ? ` · в базе ${data.totals.wb} диалогов WB и ${data.totals.ozon} Ozon` : ''}.
-          Ответ ИИ строит по всей переписке, карточке и материалам товара, нашим прошлым ответам и архиву Telegram.
-          «Автоответ» включается отдельно для каждой площадки; без него — только кнопкой «Отправить».
+        <div className="rv-hero-side">
+          {settings && (
+            <Switch checked={settings.chatAutoDraft} onChange={() => toggle('chatAutoDraft')}
+              title="ИИ сам готовит черновик к каждому новому сообщению покупателя (за последние 48 ч)">
+              ИИ сам пишет черновики
+            </Switch>
+          )}
+          <button className="btn btn-primary" onClick={syncNow} disabled={syncing}>
+            {syncing ? <SpinnerIcon size={17} className="spin" /> : <ArrowsClockwiseIcon size={17} />} Обновить
+          </button>
         </div>
-      </div>
+      </section>
+      <p className="rv-sub rv-sub--page">
+        Новые сообщения приходят каждые 5 минут{data ? ` · в базе ${data.totals.wb} диалогов WB и ${data.totals.ozon} Ozon` : ''}.
+        Ответ ИИ строит по всей переписке, карточке и материалам товара, нашим прошлым ответам и архиву Telegram.
+        Без «Автоответа» сообщение уходит только по кнопке «Отправить».
+      </p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 360px) minmax(0, 1fr)', gap: 12, alignItems: 'start' }} className="chats-grid">
-        <div className="card" style={{ padding: 8 }}>
-          <div className="row gap-8" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
-            {([['waiting', 'Ждут ответа'], ['drafts', 'Черновики'], ['all', 'Все']] as [ChatView, string][]).map(([k, t]) => (
-              <button key={k} className={`period-btn ${view === k ? 'active' : ''}`} onClick={() => setView(k)}>{t}</button>
-            ))}
+      <div className={`rv-chat${sel && selThread ? ' has-thread' : ''}`}>
+        <aside className="rv-chat-list">
+          <div className="rv-chat-tools">
+            <div className="rv-seg rv-seg--full" role="tablist">
+              {views.map(([k, t, n]) => (
+                <button key={k} role="tab" aria-selected={view === k} className={`rv-seg-btn${view === k ? ' is-active' : ''}`} onClick={() => setView(k)}>
+                  {t}{n != null && <span className="rv-count">{n}</span>}
+                </button>
+              ))}
+            </div>
+            <div className="rv-pills" role="group" aria-label="Площадка">
+              {([['all', 'Все площадки'], ['wb', 'WB'], ['ozon', 'Ozon']] as [ChatMp, string][]).map(([k, t]) => (
+                <button key={k} aria-pressed={mp === k} className={`rv-pill${mp === k ? ' is-on' : ''}`} onClick={() => setMp(k)}
+                  style={k !== 'all' ? mpVar(k) : undefined}>
+                  {k !== 'all' && <span className="rv-dot" />}{t}
+                </button>
+              ))}
+            </div>
+            <form className="rv-search" onSubmit={e => { e.preventDefault(); load(); }}>
+              <MagnifyingGlassIcon size={17} />
+              <input className="input" placeholder="Товар, артикул, имя или текст" value={q} onChange={e => setQ(e.target.value)} />
+            </form>
           </div>
-          <div className="row gap-8" style={{ marginBottom: 8 }}>
-            {([['all', 'Все площадки'], ['wb', 'WB'], ['ozon', 'Ozon']] as [ChatMp, string][]).map(([k, t]) => (
-              <button key={k} className={`period-btn ${mp === k ? 'active' : ''}`} onClick={() => setMp(k)}
-                style={k !== 'all' && mp === k ? { borderColor: MP_COLOR[k], color: MP_COLOR[k] } : undefined}>{t}</button>
-            ))}
-          </div>
-          <form className="row gap-8" style={{ marginBottom: 8 }} onSubmit={e => { e.preventDefault(); load(); }}>
-            <input className="input" style={{ flex: 1, padding: '4px 8px' }} placeholder="товар, артикул, имя, текст" value={q} onChange={e => setQ(e.target.value)} />
-            <button className="btn btn-sm" type="submit"><MagnifyingGlassIcon size={14} /></button>
-          </form>
-          {err && <div className="chip bad">{err}</div>}
-          {!data && !err && <div className="muted"><SpinnerIcon size={14} className="spin" /> Загружаю…</div>}
-          {data && !data.threads.length && <div className="muted" style={{ padding: 8 }}>{view === 'waiting' ? 'Все покупатели получили ответ' : 'Пусто'}</div>}
-          <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
+          {err && <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span>{err}</span></div>}
+          {!data && !err && <div className="rv-empty"><SpinnerIcon size={20} className="spin" /> Загружаю…</div>}
+          {data && !data.threads.length && <div className="rv-empty">{view === 'waiting' ? 'Все покупатели получили ответ.' : 'Здесь пока пусто.'}</div>}
+          <div className="rv-threads">
             {data?.threads.map(t => (
-              <div key={key(t)} onClick={() => setSel(key(t))}
-                style={{ padding: '8px 6px', borderRadius: 8, cursor: 'pointer', background: sel === key(t) ? 'var(--bg-3)' : undefined, borderBottom: '1px solid var(--border)', borderLeft: `3px solid ${MP_COLOR[t.marketplace]}` }}>
-                <div className="flex-between" style={{ gap: 6 }}>
-                  <span className="row gap-8" style={{ gap: 6 }}><MpBadge mp={t.marketplace} /><b style={{ fontSize: 13 }}>{t.clientName || 'Покупатель'}</b></span>
-                  <span className="muted" style={{ fontSize: 11 }}>{fmt(t.lastAt)}</span>
-                </div>
-                <div className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.productName || t.offerId || '—'}</div>
-                <div style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {t.lastFromBuyer ? '' : 'Вы: '}{t.lastText}
-                </div>
-                <div style={{ marginTop: 2 }}>{statusChip(t)}</div>
-              </div>
+              <button key={key(t)} className={`rv-thread${sel === key(t) ? ' is-active' : ''}`} style={mpVar(t.marketplace)} onClick={() => setSel(key(t))}>
+                <Avatar t={t} />
+                <span className="rv-thread-body">
+                  <span className="rv-thread-top">
+                    <b>{t.clientName || 'Покупатель'}</b>
+                    <time>{fmt(t.lastAt)}</time>
+                  </span>
+                  <span className="rv-thread-product"><MpTag mp={t.marketplace} /> {t.productName || t.offerId || 'Товар не указан'}</span>
+                  <span className="rv-thread-last">{t.lastFromBuyer ? '' : <span className="rv-muted">Вы: </span>}{t.lastText}</span>
+                  {statusBadge(t) && <span className="rv-thread-status">{statusBadge(t)}</span>}
+                </span>
+              </button>
             ))}
           </div>
-        </div>
+        </aside>
 
-        {sel && selThread ? <ThreadPane key={sel} mp={selThread.marketplace} id={selThread.chatId} onChanged={t => { replaceThread(t); }} onSent={() => load()} />
-          : <div className="card muted" style={{ padding: 24 }}>Выберите диалог слева</div>}
+        <section className="rv-chat-pane">
+          {sel && selThread
+            ? <ThreadPane key={sel} mp={selThread.marketplace} id={selThread.chatId} onBack={() => setSel(null)} onChanged={replaceThread} onSent={() => load()} />
+            : <div className="rv-empty rv-empty--pane"><ChatsCircleIcon size={40} weight="light" /><div>Выберите диалог в списке слева</div></div>}
+        </section>
       </div>
-      <style>{`@media (max-width: 760px) { .chats-grid { grid-template-columns: minmax(0, 1fr) !important; } }`}</style>
     </div>
   );
 }
 
-function ThreadPane({ mp, id, onChanged, onSent }: { mp: 'wb' | 'ozon'; id: string; onChanged: (t: ChatThread) => void; onSent: () => void }) {
+function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
+  mp: 'wb' | 'ozon'; id: string; onBack: () => void; onChanged: (t: ChatThread) => void; onSent: () => void;
+}) {
   const [th, setTh] = useState<ChatThread | null>(null);
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const area = useAutoGrow(text);
 
   const load = async () => {
     try {
@@ -178,57 +198,59 @@ function ThreadPane({ mp, id, onChanged, onSent }: { mp: 'wb' | 'ozon'; id: stri
     await load(); onSent();
   });
 
-  if (!th) return <div className="card muted" style={{ padding: 24 }}>{error || <><SpinnerIcon size={14} className="spin" /> Загружаю…</>}</div>;
+  if (!th) return <div className="rv-empty rv-empty--pane">{error || <><SpinnerIcon size={20} className="spin" /> Загружаю…</>}</div>;
+
+  const hint = [sourcesText(th.sourcesUsed), th.draftCostUsd ? `$${th.draftCostUsd.toFixed(3)}` : ''].filter(Boolean).join(' · ');
 
   return (
-    <div className="card" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div className="flex-between" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <div className="row gap-8" style={{ gap: 8 }}>
-          <MpBadge mp={th.marketplace} />
+    <div className="rv-thread-pane" style={mpVar(th.marketplace)}>
+      <header className="rv-pane-head">
+        <button className="btn btn-ghost rv-back" onClick={onBack} aria-label="К списку диалогов"><ArrowLeftIcon size={18} /></button>
+        <Avatar t={th} />
+        <div className="rv-pane-title">
           <b>{th.clientName || 'Покупатель'}</b>
-          <span className="muted" style={{ marginLeft: 8, fontSize: 13 }}>{th.productName || '—'}{th.offerId ? ` · ${th.offerId}` : ''}</span>
+          <span className="rv-muted"><MpTag mp={th.marketplace} /> {th.productName || 'Товар не указан'}{th.offerId ? ` · арт. ${th.offerId}` : ''}</span>
         </div>
-        {statusChip(th)}
-      </div>
+        {statusBadge(th)}
+      </header>
 
-      <div style={{ maxHeight: '50vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6, padding: 4, background: 'var(--bg-2, transparent)' }}>
+      <div className="rv-messages">
         {msgs.map(m => (
-          <div key={m.id} style={{
-            alignSelf: m.fromBuyer ? 'flex-start' : 'flex-end', maxWidth: '82%', padding: '6px 10px', borderRadius: 10,
-            background: m.fromBuyer ? 'var(--bg-3)' : (mp === 'wb' ? 'rgba(203,17,171,0.12)' : 'rgba(0,91,255,0.12)'), whiteSpace: 'pre-wrap', fontSize: 14,
-          }}>
+          <div key={m.id} className={`rv-msg ${m.fromBuyer ? 'rv-msg--buyer' : 'rv-msg--shop'}`}>
             {m.text}
-            <div className="muted" style={{ fontSize: 11, textAlign: 'right', marginTop: 2 }}>{m.fromBuyer ? '' : 'магазин · '}{fmt(m.at)}</div>
+            <time>{m.fromBuyer ? '' : 'Магазин · '}{fmt(m.at)}</time>
           </div>
         ))}
         <div ref={bottom} />
       </div>
 
-      {th.escalationReason && th.status === 'escalated' && <div style={{ color: 'var(--bad)', fontSize: 13 }}><WarningIcon size={13} /> {th.escalationReason}</div>}
-      {!th.canReply && <div className="chip bad">Нет данных чата для ответа — нажмите «Обновить» вверху</div>}
-      <textarea className="textarea" rows={4} style={{ width: '100%' }}
-        placeholder={th.lastFromBuyer ? 'Черновик готовится — или напишите ответ сами' : 'Сообщение покупателю'}
-        value={text} onChange={e => setText(e.target.value)}
-        onBlur={() => { if (text !== (th.draftAnswer || '')) act('save', async () => apply((await chatsApi.save(mp, id, text)).thread)); }} />
-      <div className="flex-between" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <span className="muted" style={{ fontSize: 12 }}>
-          {text.length}/1000
-          {th.sourcesUsed.length ? ` · опора: ${[...new Set(th.sourcesUsed.map(s => s.split(':')[0]))].map(s => ({ style: 'профиль стиля', card: 'карточка', product: 'материалы Диска', history: 'прошлые ответы', chat: 'переписка' } as any)[s] || s).join(', ')}` : ''}
-          {th.draftCostUsd ? ` · $${th.draftCostUsd.toFixed(3)}` : ''}
-        </span>
-        <div className="row gap-8">
-          {th.status === 'skipped'
-            ? <button className="btn btn-sm" disabled={!!busy} onClick={() => act('unskip', async () => apply((await chatsApi.unskip(mp, id)).thread))}>Вернуть</button>
-            : <button className="btn btn-sm" disabled={!!busy} onClick={() => act('skip', async () => { apply((await chatsApi.skip(mp, id)).thread); onSent(); })}>Пропустить</button>}
-          <button className="btn btn-sm" disabled={!!busy} onClick={() => act('draft', async () => apply((await chatsApi.draft(mp, id)).thread))}>
-            {busy === 'draft' ? <SpinnerIcon size={14} className="spin" /> : <SparkleIcon size={14} />} {th.draftAnswer ? 'Переписать' : 'Черновик'}
-          </button>
-          <button className="btn btn-sm btn-primary" disabled={!!busy || !th.canReply} onClick={send}>
-            {busy === 'send' ? <SpinnerIcon size={14} className="spin" /> : <PaperPlaneRightIcon size={14} />} Отправить
-          </button>
+      <div className="rv-composer">
+        {th.escalationReason && th.status === 'escalated' && (
+          <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span><b>Проверьте перед отправкой.</b> {th.escalationReason}</span></div>
+        )}
+        {!th.canReply && <div className="rv-callout rv-callout--warn"><WarningIcon size={18} /><span>Нет данных чата для ответа — нажмите «Обновить» вверху страницы.</span></div>}
+        <textarea ref={area} className="textarea rv-textarea" rows={3} aria-label="Сообщение покупателю"
+          placeholder={th.lastFromBuyer ? 'Черновик готовится — или напишите ответ сами' : 'Сообщение покупателю'}
+          value={text} onChange={e => setText(e.target.value)}
+          onBlur={() => { if (text !== (th.draftAnswer || '')) act('save', async () => apply((await chatsApi.save(mp, id, text)).thread)); }} />
+        <div className="rv-reply-foot">
+          <span className="rv-hint">
+            <span className={text.length > 1000 ? 'rv-text-bad' : ''}>{text.length} из 1000</span>{hint ? ` · ${hint}` : ''}
+          </span>
+          <div className="rv-actions">
+            {th.status === 'skipped'
+              ? <button className="btn" disabled={!!busy} onClick={() => act('unskip', async () => apply((await chatsApi.unskip(mp, id)).thread))}>Вернуть в работу</button>
+              : <button className="btn btn-ghost" disabled={!!busy} onClick={() => act('skip', async () => { apply((await chatsApi.skip(mp, id)).thread); onSent(); })}>Пропустить</button>}
+            <button className="btn" disabled={!!busy} onClick={() => act('draft', async () => apply((await chatsApi.draft(mp, id)).thread))}>
+              {busy === 'draft' ? <SpinnerIcon size={17} className="spin" /> : <SparkleIcon size={17} />} {th.draftAnswer ? 'Переписать' : 'Написать черновик'}
+            </button>
+            <button className="btn btn-primary" disabled={!!busy || !th.canReply} onClick={send}>
+              {busy === 'send' ? <SpinnerIcon size={17} className="spin" /> : <PaperPlaneRightIcon size={17} />} Отправить
+            </button>
+          </div>
         </div>
+        {error && <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span>{error}</span></div>}
       </div>
-      {error && <div className="chip bad">{error}</div>}
     </div>
   );
 }

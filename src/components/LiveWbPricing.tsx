@@ -17,10 +17,8 @@ import {
   CaretUpIcon,
   SpinnerIcon,
   ImageIcon,
-  TagIcon,
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
-  EyeIcon,
 } from '@phosphor-icons/react';
 import { useLiveWbBundle, wbCardIndex } from '../api/useLiveWbCache';
 import type { WbPriceRow, WbCard } from '../api/marketplaces';
@@ -31,6 +29,7 @@ import { archiveSKU, unarchiveSKU, getArchivedSKUs } from '../utils/procurementL
 import { calcWbProfit, WB_DEFAULTS, type WbCalcInput } from '../utils/wbProfit';
 import { AiAdvice } from './AiAdvice';
 import { PricingGlobalParams, type GParamField } from './PricingGlobalParams';
+import { PriceToolbar, PriceKpis, type ListMode } from './PriceToolbar';
 import { wbBuyerPricesRes, wbCardEconRes, wbBoxTariffsRes, adsBySkuRes, productEconRes, wbShowcaseRes, wbStockRes, LIVE_POLL_MS } from '../api/pricingResources';
 import { fmtClock, fmtDateClock } from '../api/sideResource';
 import { wbImageUrl } from '../utils/wbBasket';
@@ -158,10 +157,13 @@ export function LiveWbPricing() {
   const [inStockOnly, setInStockOnly] = useState<boolean>(() => {
     try { return localStorage.getItem('prices-wb:inStockOnly') !== '0'; } catch { return true; }
   });
-  const toggleInStock = () => setInStockOnly(v => {
-    try { localStorage.setItem('prices-wb:inStockOnly', v ? '0' : '1'); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); }
-    return !v;
-  });
+  // Переключатель «В продаже / Все / Архив» (13.10.2026); выбор «в продаже» запоминается, как раньше.
+  const setListMode = (m: ListMode) => {
+    setShowArchive(m === 'archive');
+    if (m === 'archive') return;
+    setInStockOnly(m === 'sale');
+    try { localStorage.setItem('prices-wb:inStockOnly', m === 'sale' ? '1' : '0'); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); }
+  };
 
   // Глобальные параметры расчёта (панель сверху): draft — что в полях, applied — что
   // реально применено. Пусто → берётся факт по товару. Крутилка строки главнее.
@@ -386,7 +388,8 @@ export function LiveWbPricing() {
   };
   const inStockCount = allRows.filter(r => !archivedSet.has(archivedKey(r)) && isInStock(r)).length;
   const filteredRows = allRows.filter(r => {
-    if (searchQ && !(String(r.vendorCode ?? '').toLowerCase().includes(searchQ) || String(r.nmId).includes(searchQ))) return false;
+    if (searchQ && !(String(r.vendorCode ?? '').toLowerCase().includes(searchQ) || String(r.nmId).includes(searchQ)
+      || String(r.card?.title ?? '').toLowerCase().includes(searchQ))) return false;
     if (showArchive) return archivedSet.has(archivedKey(r));
     if (archivedSet.has(archivedKey(r))) return false;
     return inStockOnly ? isInStock(r) : true;
@@ -514,78 +517,30 @@ export function LiveWbPricing() {
     <div className="grid" style={{ gap: 16 }}>
       <AiAdvice module="prices" context={adviceContext} disabled={rows.length === 0} />
       <PricingGlobalParams fields={WB_GPARAMS} draft={gpDraft} onChange={gpChange} onApply={gpApply} onReset={gpReset} color="#cb11ab" />
-      {/* ─── Сводка ─── */}
-      <div className="card">
-        <div className="flex-between" style={{ marginBottom: 14 }}>
-          <h2 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 10, whiteSpace: 'nowrap' }}>
-            <span className="mp-tab-dot" style={{ background: '#cb11ab' }} />
-            Управление ценами WB
-          </h2>
-          <div className="row gap-8" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {!showArchive && (
-              <button
-                className="btn btn-sm"
-                onClick={toggleInStock}
-                title="Показывать только товары с остатком (склады WB + склады продавца FBS) или продажами за 7 дней"
-                style={inStockOnly ? { background: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' } : undefined}
-              >
-                <TagIcon size={13} weight="bold" /> В продаже ({inStockCount})
-              </button>
-            )}
-            <button
-              className="btn btn-sm"
-              onClick={() => setShowArchive(s => !s)}
-              title={showArchive ? 'Показать активные' : 'Показать архив'}
-            >
-              {showArchive ? <EyeIcon size={13} weight="bold" /> : <ArchiveIcon size={13} weight="bold" />}
-              {showArchive ? 'Активные' : `Архив (${archivedCount})`}
-            </button>
-            <input
-              className="input"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Поиск по артикулу…"
-              title="Фильтр таблицы по артикулу (любая часть)"
-              style={{ width: 210, padding: '6px 10px', fontSize: 14 }}
-            />
-            <select
-              className="input"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-              style={{ width: 'auto', padding: '6px 8px', fontSize: 14 }}
-              title="Сортировка"
-            >
-              <option value="price">по цене ↓</option>
-              <option value="margin">по марже ↓</option>
-              <option value="roi">по ROI ↓</option>
-              <option value="name">по названию</option>
-            </select>
-            <span className="muted" style={{ fontSize: 13, flexBasis: '100%', textAlign: 'right', whiteSpace: 'normal' }} title="Когда агент на ПК последний раз снимал цены покупателя с витрины. Обход идёт по расписанию (06:00, 13:00, 20:00 МСК); внеплановый — раздел «Сборщики», карточка «Агент 1 · Цены покупателя», кнопка «Запустить». Между обходами цена покупателя = текущая цена ЛК × (1 − СПП последнего обхода).">
-              {`цена на витрине проверена: ${fmtDateClock(showcaseLastAt ?? showcaseRes.data?.fetchedAt ?? buyerRes.fetchedAt)}`}
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-3" style={{ gap: 12 }}>
-          <div className="kpi">
-            <div className="card-title">Товаров</div>
-            <div className="v">{rows.length}</div>
-          </div>
-          <div className="kpi" title="Средний СПП по всем видимым товарам на момент просмотра: реальная скидка площадки (цена покупателя ниже цены продавца)">
-            <div className="card-title">Средний СПП</div>
-            <div className="v">{avgSpp}%</div>
-          </div>
-          <div className="kpi" title="Средний ДРР магазина WB за последние 7 дней: расходы на рекламу / выручка по всем кампаниям (из рекламного API)">
-            <div className="card-title">ДРР магазина · 7 дн</div>
-            <div className="v">{storeDrr7 == null ? '—' : `${storeDrr7}%`}</div>
-          </div>
-        </div>
-      </div>
+      {/* ─── Фильтры и сводка (как на «РНП», 13.10.2026) ─── */}
+      <PriceToolbar
+        mode={showArchive ? 'archive' : inStockOnly ? 'sale' : 'all'}
+        onMode={setListMode}
+        counts={{ sale: inStockCount, all: allRows.length - archivedCount, archive: archivedCount }}
+        saleHint="Только товары с остатком (склады WB + склады продавца FBS) или продажами за 7 дней"
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Артикул, название или nmID"
+        sortBy={sortBy}
+        onSort={setSortBy}
+        checkedAt={fmtDateClock(showcaseLastAt ?? showcaseRes.data?.fetchedAt ?? buyerRes.fetchedAt)}
+        checkedHint="Когда агент на ПК последний раз снимал цены покупателя с витрины. Обход идёт по расписанию (06:00, 13:00, 20:00 МСК); внеплановый — раздел «Сборщики», карточка «Агент 1 · Цены покупателя», кнопка «Запустить». Между обходами цена покупателя = текущая цена ЛК × (1 − СПП последнего обхода)."
+      />
+      <PriceKpis items={[
+        { label: 'Товаров в списке', value: rows.length },
+        { label: 'Средний СПП', value: `${avgSpp}%`, hint: 'Средний СПП по всем видимым товарам на момент просмотра: реальная скидка площадки (цена покупателя ниже цены продавца)' },
+        { label: 'ДРР магазина · 7 дн', value: storeDrr7 == null ? '—' : `${storeDrr7}%`, hint: 'Средний ДРР магазина WB за последние 7 дней: расходы на рекламу / выручка по всем кампаниям (из рекламного API)' },
+      ]} />
 
       {/* ─── Таблица цен ─── */}
-      <div className="card">
+      <div className="card pr-table-card">
         <div className="tbl-scroll">
-        <table className="mp-table" style={{ fontSize: 15 }}>
+        <table className="mp-table" style={{ fontSize: 16 }}>
           <thead className="mp-head">
             <tr>
               <th style={{ width: 78 }}></th>
@@ -635,7 +590,7 @@ export function LiveWbPricing() {
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       <b>{lkPrice > 0 ? fmt(lkPrice) : '—'}</b>
-                      {lkFromApi && <div className="muted" style={{ fontSize: 12 }} title="Серая цена — после скидки продавца (без «приманочного» зачёркнутого ценника). Живьём из WB API/продаж">серая</div>}
+                      {lkFromApi && <div className="muted" style={{ fontSize: 13 }} title="Серая цена — после скидки продавца (без «приманочного» зачёркнутого ценника). Живьём из WB API/продаж">серая</div>}
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       <b style={{ color: 'var(--good)' }}>{buyerPrice > 0 ? fmt(buyerPrice) : '—'}</b>
@@ -643,37 +598,37 @@ export function LiveWbPricing() {
                           любая цена из продаж подписывалась «последняя», и давняя
                           сделка выглядела так же убедительно, как сегодняшняя. */}
                       {buyerSource === 'showcase' && (
-                        <div className="muted" style={{ fontSize: 12, color: 'var(--good)' }} title={`Живая цена с витрины wildberries.ru (публичная карточка, снята ${showcase?.at ? new Date(showcase.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—'}). Это ровно то, что видит покупатель, с учётом СПП площадки.${showcase?.oldPrice ? ` Зачёркнутая на витрине: ${showcase.oldPrice.toLocaleString('ru-RU')} ₽.` : ''}`}>витрина · СПП {sppPct}%</div>
+                        <div className="muted" style={{ fontSize: 13, color: 'var(--good)' }} title={`Живая цена с витрины wildberries.ru (публичная карточка, снята ${showcase?.at ? new Date(showcase.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—'}). Это ровно то, что видит покупатель, с учётом СПП площадки.${showcase?.oldPrice ? ` Зачёркнутая на витрине: ${showcase.oldPrice.toLocaleString('ru-RU')} ₽.` : ''}`}>витрина · СПП {sppPct}%</div>
                       )}
                       {buyerSource === 'sale' && (
-                        <div className="muted" style={{ fontSize: 12 }} title={`Реальная цена покупателя из продажи ${salesBuyer?.date} (СПП ${sppPct}%) — свежее ${FRESH_SALE_DAYS} дней`}>live · СПП {sppPct}%</div>
+                        <div className="muted" style={{ fontSize: 13 }} title={`Реальная цена покупателя из продажи ${salesBuyer?.date} (СПП ${sppPct}%) — свежее ${FRESH_SALE_DAYS} дней`}>live · СПП {sppPct}%</div>
                       )}
                       {buyerSource === 'showcase-mem' && (
-                        <div className="muted" style={{ fontSize: 12 }} title={`СПП ${sppPct}% зафиксирован при последней принудительной проверке витрины (${fmtDateClock(wbShowcase[String(r.nmId)]?.at ?? null)}). Пока витрину не проверили заново, цена покупателя = текущая цена ЛК x (1 - СПП): при смене цены продавца в кабинете цена покупателя пересчитывается пропорционально. Чтобы снять витрину и зафиксировать новый СПП, нажмите «Проверить цены на витрине» и введите пароль.`}>витрина · СПП {sppPct}%</div>
+                        <div className="muted" style={{ fontSize: 13 }} title={`СПП ${sppPct}% зафиксирован при последней принудительной проверке витрины (${fmtDateClock(wbShowcase[String(r.nmId)]?.at ?? null)}). Пока витрину не проверили заново, цена покупателя = текущая цена ЛК x (1 - СПП): при смене цены продавца в кабинете цена покупателя пересчитывается пропорционально. Чтобы снять витрину и зафиксировать новый СПП, нажмите «Проверить цены на витрине» и введите пароль.`}>витрина · СПП {sppPct}%</div>
                       )}
                       {buyerSource === 'gp' && (
-                        <div className="muted" style={{ fontSize: 12, color: 'var(--warn)' }} title="Витрина по этому товару ещё не снималась и свежих продаж со скидкой нет — цена покупателя оценена по «СПП по умолч.» из глобальных параметров">оценка · СПП по умолч. {sppPct}%</div>
+                        <div className="muted" style={{ fontSize: 13, color: 'var(--warn)' }} title="Витрина по этому товару ещё не снималась и свежих продаж со скидкой нет — цена покупателя оценена по «СПП по умолч.» из глобальных параметров">оценка · СПП по умолч. {sppPct}%</div>
                       )}
                       {buyerSource === 'store-avg' && (
-                        <div className="muted" style={{ fontSize: 12, color: 'var(--warn)', whiteSpace: 'normal', lineHeight: 1.25 }} title="Витрина по этому товару ещё не снималась (на странице магазина WB видны только первые ~36 карточек) и свежих продаж со скидкой нет — цена покупателя оценена по среднему СПП магазина из последнего снимка витрины">оценка · средний СПП магазина {sppPct}%</div>
+                        <div className="muted" style={{ fontSize: 13, color: 'var(--warn)', whiteSpace: 'normal', lineHeight: 1.25 }} title="Витрина по этому товару ещё не снималась (на странице магазина WB видны только первые ~36 карточек) и свежих продаж со скидкой нет — цена покупателя оценена по среднему СПП магазина из последнего снимка витрины">оценка · средний СПП магазина {sppPct}%</div>
                       )}
                       {buyerSource === 'club' && (
-                        <div className="muted" style={{ fontSize: 12 }} title="Живая цена из ценового API WB (clubDiscountedPrice — с клубной скидкой). Свежих продаж нет. Полный СПП с кошельком WB в API не отдаёт, поэтому на витрине может быть чуть ниже.">клубная цена · API</div>
+                        <div className="muted" style={{ fontSize: 13 }} title="Живая цена из ценового API WB (clubDiscountedPrice — с клубной скидкой). Свежих продаж нет. Полный СПП с кошельком WB в API не отдаёт, поэтому на витрине может быть чуть ниже.">клубная цена · API</div>
                       )}
                       {buyerSource === 'old-sale' && (
-                        <div className="muted" style={{ fontSize: 12, color: 'var(--warn)' }} title={`Свежих продаж нет и клубной цены в API тоже. Показана цена последней сделки от ${salesBuyer?.date} — она может быть неактуальной.`}>
+                        <div className="muted" style={{ fontSize: 13, color: 'var(--warn)' }} title={`Свежих продаж нет и клубной цены в API тоже. Показана цена последней сделки от ${salesBuyer?.date} — она может быть неактуальной.`}>
                           продажа {salesBuyer?.date ? salesBuyer.date.slice(5).split('-').reverse().join('.') : '—'}
                           {Number.isFinite(saleAgeDays) ? ` · ${saleAgeDays} дн назад` : ''}
                         </div>
                       )}
                       {buyerSource === 'table' && (
-                        <div className="muted" style={{ fontSize: 12, color: 'var(--warn)' }} title="Цена из Google-таблицы: живых источников WB по этому товару нет.">из таблицы</div>
+                        <div className="muted" style={{ fontSize: 13, color: 'var(--warn)' }} title="Цена из Google-таблицы: живых источников WB по этому товару нет.">из таблицы</div>
                       )}
                       {buyerSource === 'lk' && (
-                        <div className="muted" style={{ fontSize: 12 }} title="СПП неизвестен — показана цена ЛК после скидки продавца.">цена ЛК · без СПП</div>
+                        <div className="muted" style={{ fontSize: 13 }} title="СПП неизвестен — показана цена ЛК после скидки продавца.">цена ЛК · без СПП</div>
                       )}
                       {buyerSource === 'none' && sppPct > 0 && (
-                        <div className="muted" style={{ fontSize: 13 }}>СПП {sppPct}%</div>
+                        <div className="muted" style={{ fontSize: 14 }}>СПП {sppPct}%</div>
                       )}
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
@@ -687,12 +642,12 @@ export function LiveWbPricing() {
                           <b style={{ fontSize: 17, color: marginPct! >= 30 ? 'var(--good)' : marginPct! >= 15 ? 'var(--warn)' : 'var(--bad)' }}>
                             {Math.round(marginPct ?? 0)}%
                           </b>
-                          <div className="muted" style={{ fontSize: 13 }}>{marginRub.toLocaleString('ru-RU')} ₽</div>
+                          <div className="muted" style={{ fontSize: 14 }}>{marginRub.toLocaleString('ru-RU')} ₽</div>
                           {Object.keys(k).length > 0 && (
-                            <div style={{ fontSize: 12, color: 'var(--accent)' }} title="Маржа посчитана по ручным значениям из раскрытой строки. Они снимутся сами, как только по этим полям придут новые данные, или кнопкой «Сбросить».">✎ ручной расчёт</div>
+                            <div style={{ fontSize: 13, color: 'var(--accent)' }} title="Маржа посчитана по ручным значениям из раскрытой строки. Они снимутся сами, как только по этим полям придут новые данные, или кнопкой «Сбросить».">✎ ручной расчёт</div>
                           )}
                           {commIsDefault && (
-                            <div style={{ fontSize: 12, color: 'var(--warn)' }} title={`Комиссия WB не пришла из API — взят дефолт ${WB_DEFAULTS.commission}%. Реальная (обычно ~35.5% для автотоваров) может быть выше → маржа завышена. Раскрой строку и задай комиссию.`}>⚠ ком. {WB_DEFAULTS.commission}%</div>
+                            <div style={{ fontSize: 13, color: 'var(--warn)' }} title={`Комиссия WB не пришла из API — взят дефолт ${WB_DEFAULTS.commission}%. Реальная (обычно ~35.5% для автотоваров) может быть выше → маржа завышена. Раскрой строку и задай комиссию.`}>⚠ ком. {WB_DEFAULTS.commission}%</div>
                           )}
                         </>
                       ) : <span className="muted" title={cost <= 0 ? 'Нет себестоимости в таблице — маржу не считаем' : undefined}>—</span>}
@@ -705,7 +660,7 @@ export function LiveWbPricing() {
                       ) : <span className="muted">—</span>}
                     </td>
                     <td className="right" style={{ whiteSpace: 'normal' }}>
-                      {(() => { const adv = adsAdvice({ drr: inp.drr, drr7: econRow?.drr7 ?? null, drr30: econRow?.drr30 ?? null, orders7: econRow?.orders7 ?? 0, marginPct, roi, inStock: isInStock(r) }); return adv ? <div title={adv.hint} className={adv.tone === 'muted' ? 'muted' : undefined} style={{ fontSize: 12, marginTop: 3, whiteSpace: 'normal', lineHeight: 1.3, color: adv.tone === 'bad' ? 'var(--bad)' : adv.tone === 'warn' ? 'var(--warn)' : adv.tone === 'good' ? 'var(--good)' : undefined }}>{adv.text}</div> : null; })()}
+                      {(() => { const adv = adsAdvice({ drr: inp.drr, drr7: econRow?.drr7 ?? null, drr30: econRow?.drr30 ?? null, orders7: econRow?.orders7 ?? 0, marginPct, roi, inStock: isInStock(r) }); return adv ? <div title={adv.hint} className={adv.tone === 'muted' ? 'muted' : undefined} style={{ fontSize: 13, marginTop: 3, whiteSpace: 'normal', lineHeight: 1.3, color: adv.tone === 'bad' ? 'var(--bad)' : adv.tone === 'warn' ? 'var(--warn)' : adv.tone === 'good' ? 'var(--good)' : undefined }}>{adv.text}</div> : null; })()}
 </td>
                     <td style={{ textAlign: 'center' }}>
                       <div className="row" style={{ gap: 4, justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
@@ -805,7 +760,7 @@ export function LiveWbPricing() {
                                       <span>Цена продажи (серая)</span>
                                       <span style={{ color: 'var(--good)' }}>{c ? fmt(Math.round(inp.retail)) : '—'}</span>
                                     </div>
-                                    <div className="flex-between muted" style={{ fontSize: 13 }}>
+                                    <div className="flex-between muted" style={{ fontSize: 14 }}>
                                       <span>↳ цена покупателя (с СПП {inp.spp}%)</span>
                                       <span>{c ? fmt(Math.round(c.sppPrice)) : '—'}</span>
                                     </div>
@@ -871,7 +826,7 @@ export function LiveWbPricing() {
         </div>
 
         {bundle.fetchedAt && (
-          <div className="muted" style={{ fontSize: 13, marginTop: 8, textAlign: 'right' }}>
+          <div className="muted" style={{ fontSize: 14, marginTop: 8, textAlign: 'right' }}>
             Данные на {bundle.fetchedAt.toLocaleTimeString('ru-RU')} · discounts-prices API
           </div>
         )}

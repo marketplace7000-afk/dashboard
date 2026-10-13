@@ -3,7 +3,7 @@ import { safeSetItem } from '../utils/safeStorage';
 import { onUiStateChange } from '../utils/uiState';
 import {
   SpinnerIcon, WarningIcon, CalculatorIcon,
-  CaretUpIcon, CaretDownIcon, StorefrontIcon, ArchiveIcon, ArrowCounterClockwiseIcon, EyeIcon,
+  CaretUpIcon, CaretDownIcon, ArchiveIcon, ArrowCounterClockwiseIcon,
 } from '@phosphor-icons/react';
 import { OzonPriceRow, OzonProductInfo } from '../api/marketplaces';
 import { useLiveOzonBundle, productInfoIndex } from '../api/useLiveOzonCache';
@@ -14,6 +14,7 @@ import { archiveSKU, unarchiveSKU, getArchivedSKUs } from '../utils/procurementL
 import { AiAdvice } from './AiAdvice';
 import { calcOzonProfit, OZON_DEFAULTS, type OzonCalcInput } from '../utils/ozonProfit';
 import { PricingGlobalParams, type GParamField } from './PricingGlobalParams';
+import { PriceToolbar, PriceKpis, type ListMode } from './PriceToolbar';
 import { ozonBuyerPricesRes, ozonSkuAdsRes, ozonShowcaseRes } from '../api/pricingResources';
 import { fmtClock, fmtDateClock } from '../api/sideResource';
 import { noteSwallowed } from '../utils/log';
@@ -140,10 +141,13 @@ export function LiveOzonPricing() {
   const [inStockOnly, setInStockOnly] = useState<boolean>(() => {
     try { return localStorage.getItem('prices-ozon:inStockOnly') !== '0'; } catch { return true; }
   });
-  const toggleInStock = () => setInStockOnly(v => {
-    try { localStorage.setItem('prices-ozon:inStockOnly', v ? '0' : '1'); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); }
-    return !v;
-  });
+  // Переключатель «В продаже / Все / Архив» (13.10.2026); выбор «в продаже» запоминается, как раньше.
+  const setListMode = (m: ListMode) => {
+    setShowArchive(m === 'archive');
+    if (m === 'archive') return;
+    setInStockOnly(m === 'sale');
+    try { localStorage.setItem('prices-ozon:inStockOnly', m === 'sale' ? '1' : '0'); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); }
+  };
 
   // Глобальные параметры расчёта (панель сверху) — как на WB.
   const GP_LS = 'prices-ozon:globalParams';
@@ -248,7 +252,8 @@ export function LiveOzonPricing() {
     return (p?.sales7Ozon || 0) > 0 || (p?.sales30Ozon || 0) > 0 || (p?.buyoutOzon || 0) > 0;
   };
   const inStockCount = rows.filter(r => !archivedSet.has(r.offer_id.toUpperCase()) && inStock(r)).length;
-  const visibleRows = rows.filter(r => (!searchQ || r.offer_id.toLowerCase().includes(searchQ) || String(r.product_id).includes(searchQ)) && (showArchive
+  const visibleRows = rows.filter(r => (!searchQ || r.offer_id.toLowerCase().includes(searchQ) || String(r.product_id).includes(searchQ)
+    || String(r.name ?? '').toLowerCase().includes(searchQ)) && (showArchive
     ? archivedSet.has(r.offer_id.toUpperCase())
     : (!archivedSet.has(r.offer_id.toUpperCase()) && (!inStockOnly || inStock(r)))));
   const proposedCount = visibleRows.filter((r) => recommendFor(r).price !== num(r.price.price)).length;
@@ -474,78 +479,29 @@ export function LiveOzonPricing() {
     <div className="grid" style={{ gap: 16 }}>
       <AiAdvice module="prices" context={adviceContext} disabled={visibleRows.length === 0} />
       <PricingGlobalParams fields={OZON_GPARAMS} draft={gpDraft} onChange={gpChange} onApply={gpApply} onReset={gpReset} color="#005bff" />
-      <div className="card">
-      <div className="flex-between" style={{ marginBottom: 14 }}>
-        <h2 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 10, whiteSpace: 'nowrap' }}>
-          <span className="mp-tab-dot" style={{ background: '#005bff' }} />
-          Управление ценами Ozon
-        </h2>
-        <div className="row gap-8" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          {bundle.loading && bundle.fetchedAt == null && (
-            <span className="chip info"><SpinnerIcon size={11} weight="bold" className="spin" /> загрузка…</span>
-          )}
-          {!showArchive && (
-            <button
-              className="btn btn-sm"
-              onClick={toggleInStock}
-              title="Показывать только товары с остатком на Ozon"
-              style={inStockOnly ? { background: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' } : undefined}
-            >
-              <StorefrontIcon size={13} weight="bold" /> В продаже ({inStockCount})
-            </button>
-          )}
-          <button
-            className="btn btn-sm"
-            onClick={() => setShowArchive(s => !s)}
-            title={showArchive ? 'Показать активные' : 'Показать архив'}
-          >
-            {showArchive ? <EyeIcon size={13} weight="bold" /> : <ArchiveIcon size={13} weight="bold" />}
-            {showArchive ? `Активные` : `Архив (${archivedCount})`}
-          </button>
-          <input
-            className="input"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Поиск по артикулу…"
-            title="Фильтр таблицы по артикулу (любая часть)"
-            style={{ width: 210, padding: '6px 10px', fontSize: 14 }}
-          />
-          <select
-            className="input"
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-            style={{ width: 'auto', padding: '6px 8px', fontSize: 14 }}
-            title="Сортировка"
-          >
-            <option value="price">по цене ↓</option>
-            <option value="margin">по марже ↓</option>
-            <option value="roi">по ROI ↓</option>
-            <option value="name">по названию</option>
-          </select>
-          <span className="muted" style={{ fontSize: 13, flexBasis: '100%', textAlign: 'right', whiteSpace: 'normal' }} title="Когда агент на ПК последний раз снимал цены покупателя с витрины. Обход идёт по расписанию (06:00, 13:00, 20:00 МСК); внеплановый — раздел «Сборщики», карточка «Агент 1 · Цены покупателя», кнопка «Запустить». Между обходами цена покупателя = текущая цена ЛК × (1 − СПП последнего обхода).">
-            {`цена на витрине проверена: ${fmtDateClock(showcaseLastAt ?? showcaseRes.data?.fetchedAt ?? buyerRes.fetchedAt)}`}
-          </span>
-        </div>
-      </div>
-
-        <div className="grid grid-3" style={{ gap: 12 }}>
-          <div className="kpi">
-            <div className="card-title">Товаров</div>
-            <div className="v">{visibleRows.length}</div>
-          </div>
-          <div className="kpi" title="Средний СПП по всем видимым товарам на момент просмотра: реальная скидка площадки (цена покупателя ниже цены продавца)">
-            <div className="card-title">Средний СПП</div>
-            <div className="v">{avgSpp}%</div>
-          </div>
-          <div className="kpi" title="Средний ДРР магазина Ozon за последние 7 дней: расходы на рекламу / выручка по всем кампаниям (из рекламного API)">
-            <div className="card-title">ДРР магазина · 7 дн</div>
-            <div className="v">{storeDrr7 == null ? '—' : `${storeDrr7}%`}</div>
-          </div>
-        </div>
-      </div>
+      {/* ─── Фильтры и сводка (как на «РНП», 13.10.2026) ─── */}
+      <PriceToolbar
+        mode={showArchive ? 'archive' : inStockOnly ? 'sale' : 'all'}
+        onMode={setListMode}
+        counts={{ sale: inStockCount, all: rows.length - archivedCount, archive: archivedCount }}
+        saleHint="Только товары с остатком на Ozon"
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Артикул, название или ID товара"
+        sortBy={sortBy}
+        onSort={setSortBy}
+        checkedAt={fmtDateClock(showcaseLastAt ?? showcaseRes.data?.fetchedAt ?? buyerRes.fetchedAt)}
+        checkedHint="Когда агент на ПК последний раз снимал цены покупателя с витрины. Обход идёт по расписанию (06:00, 13:00, 20:00 МСК); внеплановый — раздел «Сборщики», карточка «Агент 1 · Цены покупателя», кнопка «Запустить». Между обходами цена покупателя = текущая цена ЛК × (1 − СПП последнего обхода)."
+        loading={bundle.loading && bundle.fetchedAt == null}
+      />
+      <PriceKpis items={[
+        { label: 'Товаров в списке', value: visibleRows.length },
+        { label: 'Средний СПП', value: `${avgSpp}%`, hint: 'Средний СПП по всем видимым товарам на момент просмотра: реальная скидка площадки (цена покупателя ниже цены продавца)' },
+        { label: 'ДРР магазина · 7 дн', value: storeDrr7 == null ? '—' : `${storeDrr7}%`, hint: 'Средний ДРР магазина Ozon за последние 7 дней: расходы на рекламу / выручка по всем кампаниям (из рекламного API)' },
+      ]} />
 
       {/* ─── Таблица цен ─── */}
-      <div className="card">
+      <div className="card pr-table-card">
       {bundle.error && (
         <div className="row" style={{ gap: 10, padding: 12, background: 'rgba(220,38,38,.08)', borderRadius: 8 }}>
           <WarningIcon size={18} weight="bold" style={{ color: 'var(--bad)' }} />
@@ -555,7 +511,7 @@ export function LiveOzonPricing() {
 
       {visibleRows.length > 0 && (
         <div className="tbl-scroll">
-        <table className="mp-table" style={{ fontSize: 15 }}>
+        <table className="mp-table" style={{ fontSize: 16 }}>
           <thead className="mp-head">
             <tr>
               <th style={{ width: 78 }}></th>
@@ -597,28 +553,28 @@ export function LiveOzonPricing() {
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       <b>{fmt(cur)}</b>
-                      <div className="muted" style={{ fontSize: 12 }} title="Наша цена в личном кабинете Ozon — до соинвеста площадки">цена ЛК</div>
+                      <div className="muted" style={{ fontSize: 13 }} title="Наша цена в личном кабинете Ozon — до соинвеста площадки">цена ЛК</div>
                       {oldPrice > cur && (
-                        <div className="muted" style={{ fontSize: 13, textDecoration: 'line-through' }}>{fmt(oldPrice)}</div>
+                        <div className="muted" style={{ fontSize: 14, textDecoration: 'line-through' }}>{fmt(oldPrice)}</div>
                       )}
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       <b style={{ color: 'var(--good)' }}>{fmt(buyerPrice)}</b>
                       {buyerFromShowcase > 0
-                  ? <div className="muted" style={{ fontSize: 12, color: 'var(--good)' }} title={`Живая цена с витрины ozon.ru (публичная карточка, снята ${showcase?.at ? new Date(showcase.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—'}). Это ровно то, что видит покупатель, с учётом СПП/соинвеста.${showcase?.oldPrice ? ` Зачёркнутая на витрине: ${showcase.oldPrice.toLocaleString('ru-RU')} ₽.` : ''}`}>витрина · СПП {sppReal}%</div>
+                  ? <div className="muted" style={{ fontSize: 13, color: 'var(--good)' }} title={`Живая цена с витрины ozon.ru (публичная карточка, снята ${showcase?.at ? new Date(showcase.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—'}). Это ровно то, что видит покупатель, с учётом СПП/соинвеста.${showcase?.oldPrice ? ` Зачёркнутая на витрине: ${showcase.oldPrice.toLocaleString('ru-RU')} ₽.` : ''}`}>витрина · СПП {sppReal}%</div>
                   : showcaseMem > 0 && showcase
-                    ? <div className="muted" style={{ fontSize: 12 }} title={`СПП ${sppReal}% зафиксирован при последней принудительной проверке витрины (${fmtDateClock(showcase.at)}). Пока витрину не проверили заново, цена покупателя = текущая цена ЛК x (1 - СПП): при смене цены продавца в кабинете цена покупателя пересчитывается пропорционально. Чтобы снять витрину и зафиксировать новый СПП, нажмите «Проверить цены на витрине» и введите пароль.`}>витрина · СПП {sppReal}%</div>
+                    ? <div className="muted" style={{ fontSize: 13 }} title={`СПП ${sppReal}% зафиксирован при последней принудительной проверке витрины (${fmtDateClock(showcase.at)}). Пока витрину не проверили заново, цена покупателя = текущая цена ЛК x (1 - СПП): при смене цены продавца в кабинете цена покупателя пересчитывается пропорционально. Чтобы снять витрину и зафиксировать новый СПП, нажмите «Проверить цены на витрине» и введите пароль.`}>витрина · СПП {sppReal}%</div>
                   : buyerFromApi > 0
-                        ? <div className="muted" style={{ fontSize: 12 }} title="Реальная цена покупателя со соинвестом — из отчёта о реализации Ozon (факт продаж), как у Культуры Аналитики">факт · СПП {sppReal}%</div>
+                        ? <div className="muted" style={{ fontSize: 13 }} title="Реальная цена покупателя со соинвестом — из отчёта о реализации Ozon (факт продаж), как у Культуры Аналитики">факт · СПП {sppReal}%</div>
                         : buyerFromMemory > 0 && memHist
-                          ? <div style={{ fontSize: 12, color: 'var(--warn)' }} title={`Живой скидки сейчас нет — вторая цена восстановлена от цены ЛК по последнему запомненному СПП ${memHist.spp}% (зафиксирован ${memHist.date})`}>≈ по СПП {memHist.spp}% · {memHist.date}</div>
+                          ? <div style={{ fontSize: 13, color: 'var(--warn)' }} title={`Живой скидки сейчас нет — вторая цена восстановлена от цены ЛК по последнему запомненному СПП ${memHist.spp}% (зафиксирован ${memHist.date})`}>≈ по СПП {memHist.spp}% · {memHist.date}</div>
                           : sppReal > 0
-                            ? <div className="muted" style={{ fontSize: 13 }} title="Цена покупателя из таблицы «ДРР и цены» / панели">СПП {sppReal}%</div>
+                            ? <div className="muted" style={{ fontSize: 14 }} title="Цена покупателя из таблицы «ДРР и цены» / панели">СПП {sppReal}%</div>
                             : memHist && Number.isFinite(memAgeDays)
                               // Память есть, но старая: честно говорим, что не применяем её.
                               // Старый процент на новой цене — не оценка, а выдумка (04.09).
-                              ? <div style={{ fontSize: 12, color: 'var(--warn)' }} title={`Последний известный соинвест ${memHist.spp}% зафиксирован ${memHist.date} — ${memAgeDays} дн назад. Старше ${SPP_MEMORY_DAYS} дней память не применяем: процент мог измениться, и цена вышла бы выдуманной. Показана цена ЛК.`}>нет свежих продаж · СПП {memHist.spp}% устарел ({memAgeDays} дн)</div>
-                              : <div className="muted" style={{ fontSize: 12 }} title="Ozon не отдаёт реальную скидку площадки/соинвест в API, и запомненного СПП по товару ещё нет — показываем цену ЛК. Задай «СПП по умолч.» в панели или впиши цену в таблицу">= ЛК · нет скидки в API</div>}
+                              ? <div style={{ fontSize: 13, color: 'var(--warn)' }} title={`Последний известный соинвест ${memHist.spp}% зафиксирован ${memHist.date} — ${memAgeDays} дн назад. Старше ${SPP_MEMORY_DAYS} дней память не применяем: процент мог измениться, и цена вышла бы выдуманной. Показана цена ЛК.`}>нет свежих продаж · СПП {memHist.spp}% устарел ({memAgeDays} дн)</div>
+                              : <div className="muted" style={{ fontSize: 13 }} title="Ozon не отдаёт реальную скидку площадки/соинвест в API, и запомненного СПП по товару ещё нет — показываем цену ЛК. Задай «СПП по умолч.» в панели или впиши цену в таблицу">= ЛК · нет скидки в API</div>}
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       {oi.cost > 0
@@ -631,12 +587,12 @@ export function LiveOzonPricing() {
                           <b style={{ fontSize: 17, color: marginPct! >= 30 ? 'var(--good)' : marginPct! >= 15 ? 'var(--warn)' : 'var(--bad)' }}>
                             {Math.round(marginPct ?? 0)}%
                           </b>
-                          <div className="muted" style={{ fontSize: 13 }}>{marginRub.toLocaleString('ru-RU')} ₽</div>
+                          <div className="muted" style={{ fontSize: 14 }}>{marginRub.toLocaleString('ru-RU')} ₽</div>
                           {Object.keys(kk).length > 0 && (
-                            <div style={{ fontSize: 12, color: 'var(--accent)' }} title="Маржа посчитана по ручным значениям из раскрытой строки. Они снимутся сами, как только по этим полям придут новые данные, или кнопкой «Сбросить».">✎ ручной расчёт</div>
+                            <div style={{ fontSize: 13, color: 'var(--accent)' }} title="Маржа посчитана по ручным значениям из раскрытой строки. Они снимутся сами, как только по этим полям придут новые данные, или кнопкой «Сбросить».">✎ ручной расчёт</div>
                           )}
                           {commIsDefault && (
-                            <div style={{ fontSize: 12, color: 'var(--warn)' }} title={`Комиссия Ozon не пришла из API — взят дефолт ${OZON_DEFAULTS.commission}%. Раскрой строку и проверь/задай комиссию.`}>⚠ ком. {OZON_DEFAULTS.commission}%</div>
+                            <div style={{ fontSize: 13, color: 'var(--warn)' }} title={`Комиссия Ozon не пришла из API — взят дефолт ${OZON_DEFAULTS.commission}%. Раскрой строку и проверь/задай комиссию.`}>⚠ ком. {OZON_DEFAULTS.commission}%</div>
                           )}
                         </>
                       ) : <span className="muted" title={cost <= 0 ? 'Нет себестоимости в таблице — маржу не считаем' : undefined}>—</span>}
@@ -649,7 +605,7 @@ export function LiveOzonPricing() {
                       ) : <span className="muted">—</span>}
                     </td>
                     <td className="right" style={{ whiteSpace: 'normal' }}>
-                      {(() => { const adv = adsAdvice({ drr: oi.drr, drr7: econRow?.drr7 ?? null, drr30: econRow?.drr30 ?? null, orders7: econRow?.orders7 ?? 0, marginPct, roi, inStock: inStock(r) }); return adv ? <div title={adv.hint} className={adv.tone === 'muted' ? 'muted' : undefined} style={{ fontSize: 12, marginTop: 3, whiteSpace: 'normal', lineHeight: 1.3, color: adv.tone === 'bad' ? 'var(--bad)' : adv.tone === 'warn' ? 'var(--warn)' : adv.tone === 'good' ? 'var(--good)' : undefined }}>{adv.text}</div> : null; })()}
+                      {(() => { const adv = adsAdvice({ drr: oi.drr, drr7: econRow?.drr7 ?? null, drr30: econRow?.drr30 ?? null, orders7: econRow?.orders7 ?? 0, marginPct, roi, inStock: inStock(r) }); return adv ? <div title={adv.hint} className={adv.tone === 'muted' ? 'muted' : undefined} style={{ fontSize: 13, marginTop: 3, whiteSpace: 'normal', lineHeight: 1.3, color: adv.tone === 'bad' ? 'var(--bad)' : adv.tone === 'warn' ? 'var(--warn)' : adv.tone === 'good' ? 'var(--good)' : undefined }}>{adv.text}</div> : null; })()}
 </td>
                     <td style={{ textAlign: 'center' }}>
                       <div className="row" style={{ gap: 4, justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>

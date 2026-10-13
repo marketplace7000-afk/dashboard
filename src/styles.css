@@ -1340,3 +1340,62 @@ code {
 @media (prefers-reduced-motion: reduce) {
   .rv-page *, .rv-page *::after { transition: none !important; }
 }
+/* ═══ «Цены» (Prices.tsx, LiveWbPricing, LiveOzonPricing, PriceToolbar), префикс .pr- (13.10.2026)
+   Фильтры — как на «РНП»; крупнее шрифт, мягче углы, больше воздуха в таблице. */
+.pr-page { font-variant-numeric: tabular-nums; }
+.pr-page .card { border-radius: 14px; }
+.pr-page .card-title { font-size: 14px; }
+.pr-page .btn-sm { font-size: 14px; padding: 7px 12px; border-radius: 9px; }
+.pr-page .input, .pr-page .select { font-size: 15px; border-radius: 9px; }
+.pr-page .input:focus, .pr-page .select:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
+.pr-page .rnp-tabs .mp-tab .muted { font-size: 13px; }
+
+/* Панель фильтров */
+.pr-filters { display: grid; gap: 12px; }
+.pr-frow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.pr-filters .period-btn { font-size: 14.5px; padding: 7px 14px; display: inline-flex; align-items: center; gap: 7px; }
+.pr-count { font-size: 12.5px; font-weight: 600; min-width: 22px; padding: 0 7px; line-height: 20px; border-radius: 999px; background: var(--bg-3); color: var(--muted); text-align: center; }
+.period-btn.active .pr-count { background: var(--accent-soft); color: var(--accent-2); }
+.pr-sort { display: inline-flex; align-items: center; gap: 8px; font-size: 14.5px; }
+.pr-search { position: relative; display: inline-flex; align-items: center; flex: 1 1 260px; max-width: 380px; }
+.pr-search > svg { position: absolute; left: 11px; color: var(--muted); pointer-events: none; }
+.pr-search .input { width: 100%; padding: 9px 34px 9px 34px; }
+.pr-search-clear { position: absolute; right: 6px; width: 26px; height: 26px; display: grid; place-items: center; border: none; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; }
+.pr-search-clear:hover { background: var(--bg-2); color: var(--text); }
+.pr-spacer { flex: 1; }
+.pr-upd { font-size: 14px; display: inline-flex; align-items: center; gap: 6px; cursor: help; }
+
+/* Плитки сводки */
+.pr-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.pr-kpi { display: grid; gap: 4px; padding: 14px 18px; border-radius: 14px; background: #fff; border: 1px solid var(--border); }
+.pr-kpi-label { font-size: 14px; color: var(--muted); font-weight: 500; }
+.pr-kpi-value { font-size: 26px; font-weight: 650; letter-spacing: -0.01em; color: var(--text); }
+
+/* Глобальные параметры */
+.pr-gparams .card-title { font-size: 14.5px; color: var(--text); font-weight: 600; margin-bottom: 12px !important; }
+.pr-gfield { font-size: 13.5px; display: grid; gap: 5px; }
+.pr-gnote { font-size: 13px; margin-top: 10px; line-height: 1.5; }
+
+/* Таблица */
+.pr-table-card { background: #fff; border: 1px solid var(--border); padding: 6px 10px 10px; }
+.pr-table-card .tbl-scroll thead.mp-head th { font-size: 14.5px; color: var(--muted); font-weight: 600; background: #fff; border-bottom: 1px solid var(--border); padding: 14px 12px; }
+.pr-table-card table.mp-table > tbody > tr > td { padding: 14px 12px; border-bottom: 1px solid #eef0f4; vertical-align: middle; }
+.pr-table-card table.mp-table > tbody > tr { transition: background .12s; }
+.pr-table-card table.mp-table > tbody > tr:hover { background: #f8f9fb; }
+.pr-table-card table.mp-table img { border-radius: 10px !important; box-shadow: 0 1px 3px rgba(15,23,42,.10); }
+
+@media (max-width: 760px) {
+  .pr-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .pr-kpi { padding: 10px 12px; }
+  .pr-kpi-value { font-size: 20px; }
+  .pr-kpi-label { font-size: 12.5px; }
+  .pr-search { max-width: none; flex-basis: 100%; }
+  .pr-sort { flex-wrap: wrap; }
+  .pr-filters .period-btn { padding: 7px 10px; }
+  .pr-table-card { padding: 4px; }
+}
+/* Репрайсер на «Ценах»: таблица крупнее */
+.pr-page table.table { font-size: 15px; }
+.pr-page table.table th { font-size: 14px; }
+/* «Цены» шире обычных страниц: таблице с 9 колонками тесно в 1280px */
+.content.content-prices { max-width: 1480px; }

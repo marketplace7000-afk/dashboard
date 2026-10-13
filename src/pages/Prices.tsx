@@ -34,20 +34,9 @@ export function Prices() {
   }, []);
 
   return (
-    <div className="grid" style={{ gap: 20 }}>
-      <div
-        className="row gap-8"
-        style={{
-          flexWrap: 'wrap',
-          position: 'sticky',
-          top: topbarH,
-          zIndex: 4,               // ниже топбара (5), выше карточек
-          background: 'var(--bg)',
-          padding: '10px 0',
-          margin: '-10px 0 0',      // компенсируем padding, чтобы не рос зазор
-          boxShadow: '0 6px 8px -8px rgba(0,0,0,.18)',
-        }}
-      >
+    <div className="grid pr-page" style={{ gap: 16 }}>
+      {/* Липкие вкладки — тот же вид, что на «РНП» (.rnp-tabs: sticky, ниже топбара, выше карточек). */}
+      <div className="row gap-8 rnp-tabs" style={{ top: topbarH }}>
         <button className={`mp-tab ${mp === 'wb' ? 'active' : ''}`} onClick={() => setMp('wb')}>
           <span className="mp-tab-dot" style={{ background: '#cb11ab' }} />
           Wildberries

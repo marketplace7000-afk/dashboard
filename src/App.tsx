@@ -167,7 +167,7 @@ export function App() {
             </div>
           </div>
         </div>
-        <div className={`content ${page === 'rnp' ? 'content-wide' : ''}`}>
+        <div className={`content ${page === 'rnp' ? 'content-wide' : page === 'prices' ? 'content-prices' : ''}`}>
           {page === 'dashboard' && <Dashboard onNav={(k) => setPage(k as Page)} />}
           {page === 'prices' && <Prices />}
           {page === 'reviews' && <Reviews />}

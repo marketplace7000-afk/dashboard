@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, PaperPlaneTiltIcon,
-  GearIcon, GraphIcon, SquaresFourIcon,
+  GearIcon, SquaresFourIcon,
   CaretRightIcon, MegaphoneIcon,
   ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon
 } from '@phosphor-icons/react';
@@ -12,7 +12,6 @@ import { Prices } from './pages/Prices';
 import { Reviews } from './pages/Reviews';
 import { Chats } from './pages/Chats';
 import { Settings } from './pages/Settings';
-import { Agents } from './pages/Agents';
 import { Modules } from './pages/Modules';
 import { Ads } from './pages/Ads';
 import { Rnp } from './pages/Rnp';
@@ -22,7 +21,7 @@ import { prefetchAll } from './api/prefetch';
 import { setUnauthorizedHandler } from './api/http';
 import { noteSwallowed } from './utils/log';
 
-type Page = 'dashboard' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | 'ads' | 'agents' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | 'ads' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -50,9 +49,9 @@ const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
 ];
 const NAV_CONFIG: { key: Page; Icon: any; label: string }[] = [
   // «Сборщики» — сеть агентов на ПК (ТЗ «Сеть агентов»): очередь, живой ход
-  // выполнения, паузы площадок. Не путать с «ИИ-агенты» (серверные /api/ai/*).
+  // выполнения, паузы площадок. 13.10.2026: раздел «ИИ-агенты» удалён по просьбе
+  // клиента — статус ключа Claude и расход на нейросеть теперь внизу «Сборщиков».
   { key: 'collectors',  Icon: RobotIcon,           label: 'Сборщики' },
-  { key: 'agents',      Icon: GraphIcon,           label: 'ИИ-агенты' },
   { key: 'settings',    Icon: GearIcon,            label: 'Настройки' },
 ];
 
@@ -64,7 +63,6 @@ const TITLES: Record<Page, string> = {
   rnp: 'Рука на пульсе (РНП)',
   ads: 'Реклама',
   modules: 'Модули · акции, аудит карточек',
-  agents: 'ИИ-агенты',
   collectors: 'Сборщики · агенты на ПК',
   settings: 'Настройки',
 };
@@ -176,7 +174,6 @@ export function App() {
           {page === 'ads' && <Ads />}
           {page === 'settings' && <Settings />}
           {page === 'modules' && <Modules />}
-          {page === 'agents' && <Agents />}
           {page === 'collectors' && <AgentHosts />}
         </div>
       </main>

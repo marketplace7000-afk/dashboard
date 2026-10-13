@@ -898,6 +898,19 @@ code {
 .ah-tl span + span { box-shadow: inset 1px 0 0 #fff; }
 .ah-tl-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: var(--muted); margin-top: 4px; }
 
+/* Расход на нейросеть — одна строка внизу, разбивка по кнопке */
+.ah-ai { padding: 12px 16px; }
+.ah-ai-row { display: flex; align-items: center; gap: 8px 20px; flex-wrap: wrap; font-size: 14px; }
+.ah-ai-row h2 { font-size: 14.5px; margin: 0; }
+.ah-ai-key { font-weight: 600; white-space: nowrap; }
+.ah-ai-fact { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.ah-ai-fact strong { font-weight: 600; }
+.ah-ai-bar { display: inline-block; width: 56px; height: 4px; margin-left: 6px; border-radius: 2px; background: var(--bg-3); overflow: hidden; }
+.ah-ai-bar span { display: block; height: 100%; }
+.ah-ai-more { margin-left: auto; }
+.ah-ai-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--bg-3); display: grid; gap: 8px; max-width: 520px; }
+.ah-ai-note { font-size: 13px; }
+
 @media (max-width: 768px) {
   .ah-agents { grid-template-columns: 1fr; }
   .ah-journal { grid-template-columns: 1fr; }

@@ -1,13 +1,27 @@
 // fetch с авто-retry на 429 и 5xx. Используем на серверной стороне, чтобы
 // браузер пользователя никогда не видел rate-limit ошибок WB/Ozon.
 // 429 уважает Retry-After заголовок, дальше — exponential backoff.
+//
+// 13.10.2026: каждая попытка проходит общий шлюз (gateway.ts) — единую очередь
+// с лимитами площадок для всех модулей сервера.
+import { gate, note, GatewayBusy, type Priority } from './gateway';
 
 export type FetchRetryOptions = {
   maxRetries?: number;
   backoff429Ms?: number;
   backoff5xxMs?: number;
   timeoutMs?: number;
+  /** Очередь шлюза: 0 — действие, 1 — свежие данные (по умолчанию), 2 — история. */
+  priority?: Priority;
 };
+
+/** Ответ «занято» от шлюза — выглядит как 429 площадки, чтобы вызывающие не менялись. */
+function busyResponse(e: GatewayBusy): Response {
+  return new Response(JSON.stringify({ error: 'rate_limited_locally', bucket: e.bucket, retryAfterSec: e.retryAfterSec }), {
+    status: 429,
+    headers: { 'Content-Type': 'application/json', 'X-Ratelimit-Retry': String(e.retryAfterSec), 'X-Av-Gateway': '1' },
+  });
+}
 
 export async function fetchWithRetry(
   url: string,
@@ -21,21 +35,28 @@ export async function fetchWithRetry(
 
   let lastErr: any;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await gate(url, opts.priority ?? 1);
+    } catch (e) {
+      if (e instanceof GatewayBusy) return busyResponse(e);
+      throw e;
+    }
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), timeoutMs);
     try {
       const res = await fetch(url, { ...init, signal: ac.signal });
       clearTimeout(t);
+      // WB отдаёт окно ожидания в X-Ratelimit-Retry (секунды), а НЕ в Retry-After.
+      // Например sales-funnel: корзина 1 запрос, X-Ratelimit-Retry: 37. Читаем оба,
+      // приоритет — WB-заголовку. +1с запас, чтобы корзина точно успела пополниться.
+      const ra = parseInt(
+        res.headers.get('x-ratelimit-retry') || res.headers.get('Retry-After') || '',
+        10,
+      );
+      note(url, res.status, Number.isFinite(ra) ? ra : undefined);
 
       if (res.status === 429 || res.status === 503) {
         if (attempt >= maxRetries) return res;
-        // WB отдаёт окно ожидания в X-Ratelimit-Retry (секунды), а НЕ в Retry-After.
-        // Например sales-funnel: корзина 1 запрос, X-Ratelimit-Retry: 37. Читаем оба,
-        // приоритет — WB-заголовку. +1с запас, чтобы корзина точно успела пополниться.
-        const ra = parseInt(
-          res.headers.get('x-ratelimit-retry') || res.headers.get('Retry-After') || '',
-          10,
-        );
         // Глобальный лимитер кабинета («global limiter, per seller») при перегрузе
         // просит ждать сотни/тысячи секунд (напр. 1360). Ждать столько inline нельзя,
         // а повторять во время штрафа — только продлевать его. Если окно больше нашего

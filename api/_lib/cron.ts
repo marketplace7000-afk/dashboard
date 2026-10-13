@@ -681,6 +681,13 @@ export async function handleCron(req: VercelRequest, res: VercelResponse) {
             r ? `строк ${r.items.length} (WB ${r.items.filter(i => i.platform === 'wb').length}, Ozon ${r.items.filter(i => i.platform === 'ozon').length}) · ${r.diagnostics}` : 'не удалось'
           }`);
         }
+        // «Реклама 2.0», этап 0: снимок кампаний и ставок + статистика по кампаниям
+        // из только что прогретого fullstats (новых запросов статистики не делает).
+        try {
+          const { syncAds } = await import('./ads/sync');
+          console.warn('[warm-extras] хранилище рекламы:', (await syncAds()).join(' · '));
+        } catch (e) { console.warn('[warm-extras] хранилище рекламы не обновлено:', (e as Error)?.message); }
+
         // «Рука на пульсе» — после рекламы: читает уже прогретые заказы, fullstats
         // и отчёты Ozon, сверху добавляет аналитику Ozon по дням и отчёты рекламы за сутки.
         const { collectRnp } = await import('./rnp');

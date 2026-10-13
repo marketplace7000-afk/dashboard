@@ -284,6 +284,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ─── /api/ads2/* ── «Реклама 2.0», этап 0 (13.10.2026): хранилище кампаний,
+  // ставок и статистики, журнал изменений, отметка «Не рекламировать».
+  //   GET  state | campaigns?mp= | log?limit= | flags
+  //   POST sync                     — собрать сейчас (обычно идёт в цепочке крона)
+  //   POST flags {mp, sku, noAds, reason, note}
+  if (section === 'ads2') {
+    const what = rest[0] ?? 'state';
+    try {
+      const store = await import('./_lib/ads/store');
+      if (what === 'sync' && req.method === 'POST') {
+        const { syncAds } = await import('./_lib/ads/sync');
+        return res.status(200).json({ ok: true, result: await syncAds() });
+      }
+      if (what === 'campaigns') {
+        const mp = req.query.mp === 'wb' || req.query.mp === 'ozon' ? req.query.mp : undefined;
+        return res.status(200).json({ ok: true, campaigns: store.listCampaigns(mp as any) });
+      }
+      if (what === 'log') {
+        return res.status(200).json({ ok: true, items: store.listChanges(Number(req.query.limit) || 100) });
+      }
+      if (what === 'flags') {
+        if (req.method === 'POST') {
+          const b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
+          if (b.mp !== 'wb' && b.mp !== 'ozon') return res.status(400).json({ ok: false, error: 'mp: wb или ozon' });
+          if (!b.sku) return res.status(400).json({ ok: false, error: 'нужен sku' });
+          const flag = store.setFlag(b.mp, String(b.sku), !!b.noAds, b.reason ?? null, b.note ? String(b.note).slice(0, 300) : null, 'manager');
+          store.logChange({ mp: b.mp, sku: String(b.sku), actor: 'manager', action: flag.no_ads ? 'no_ads_on' : 'no_ads_off',
+            after: { reason: flag.reason, note: flag.note }, status: 'applied' });
+          return res.status(200).json({ ok: true, flag });
+        }
+        return res.status(200).json({ ok: true, flags: store.listFlags() });
+      }
+      // state — сводка для проверки и для экрана настроек
+      const { lastAdsSync } = await import('./_lib/ads/sync');
+      const { gatewayStatus } = await import('./_lib/gateway');
+      const campaigns = store.listCampaigns();
+      const byStatus: Record<string, number> = {};
+      for (const c of campaigns) byStatus[`${c.mp}:${c.status}`] = (byStatus[`${c.mp}:${c.status}`] ?? 0) + 1;
+      return res.status(200).json({
+        ok: true, storage: !!store.adsDb(), lastSync: lastAdsSync(), campaigns: byStatus,
+        stats: store.statSummary(), flags: store.listFlags().length, gateway: gatewayStatus(),
+      });
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
+    }
+  }
+
   // ─── /api/costs ── справочник себестоимости (свой, вместо листа «Склад») ───
   // GET  → { items, updatedAt }
   // POST { items: {SKU: цена}, source? }  → сохранить пачкой (0/пусто = удалить)

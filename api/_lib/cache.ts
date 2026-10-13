@@ -282,6 +282,16 @@ export function cacheGetNewestByPrefix<T = any>(prefix: string): CachedEntry<T> 
   return best;
 }
 
+/** Все записи с данным префиксом (любое окно), от старых к свежим. Для сборщиков, которые сами режут по датам. */
+export function cacheEntriesByPrefix<T = any>(prefix: string): CachedEntry<T>[] {
+  if (memCache.size === 0) loadFromDisk();
+  const out: CachedEntry<T>[] = [];
+  for (const [k, v] of memCache.entries()) {
+    if (k === prefix || k.startsWith(prefix + ':')) out.push(v as CachedEntry<T>);
+  }
+  return out.sort((a, b) => a.fetchedAt - b.fetchedAt);
+}
+
 /** Разбор суффикса окна `oNNsMM` → смещение и длина. */
 function parseWindow(suffix: string): { offset: number; span: number } | null {
   const m = /^o(-?\d+)s(\d+)$/.exec(suffix);

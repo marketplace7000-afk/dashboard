@@ -15,6 +15,11 @@ import {
   chatDb, chatMessages, getThread, patchThread, rowToThread, replySignOf, addMessages, type ChatThread,
 } from './chatStore';
 
+/** Лимит площадки на одно сообщение чата (WB — по документации buyer-chat-api; у Ozon держим так же). */
+export const CHAT_MAX = 1000;
+/** Целевая длина черновика — с запасом до лимита. */
+const CHAT_TARGET = 900;
+
 export const CHAT_PROMPT = `Ты — сотрудник поддержки интернет-магазина автотоваров и электроники «avto-vibe». Ведёшь переписку с покупателем в чате продавца на маркетплейсе (Wildberries или Ozon — указано в диалоге). Магазин продаёт разную электронику: адаптеры CarPlay / Android Auto и автоприставки, HDMI-передатчики, лампы, зарядки, плёнки и многое другое — поэтому вопросы бывают о совместимости, подключении и настройке, прошивке, неисправностях, возврате.
 
 ТОВАР — САМОЕ ВАЖНОЕ: отвечай только про тот товар, который указан в диалоге («товар: …») или ясно назван самим покупателем. Не подставляй другой товар и не додумывай тип товара по профилю стиля или прошлым ответам магазина — там примеры про другие товары. Если товар неизвестен и из переписки непонятно, что это, — не давай инструкций к конкретному устройству: уточни у покупателя, о каком товаре речь (название или артикул), confidence "low".
@@ -28,6 +33,10 @@ export const CHAT_PROMPT = `Ты — сотрудник поддержки ин�
 - Если покупатель недоволен — без спора и оправданий: признай неудобство, предложи понятный путь (проверить настройку, обновить прошивку, оформить возврат или обмен через личный кабинет площадки — если так делал магазин).
 - Если для ответа не хватает данных о машине/магнитоле/телефоне — спроси их, а не угадывай.
 - Длина — сколько нужно для сути: обычно 1–5 предложений, инструкция — коротким списком.
+
+ДЛИНА СООБЩЕНИЯ: площадка принимает не больше 1000 символов в одном сообщении. Пиши ответ не длиннее ${CHAT_TARGET} символов вместе с пробелами — это твой лимит, а не повод сокращать суть. Никогда не обрывай мысль. Если полная инструкция не помещается — дай в этом сообщении первые, самые вероятные шаги и закончи просьбой написать результат; следующие шаги дашь отдельным сообщением после ответа покупателя (по переписке видно, что уже было предложено, — не повторяй это).
+
+ЕСЛИ НИЧЕГО НЕ ПОМОГЛО: не настаивай, что товар исправен, и не уходи в бесконечные проверки. Если по переписке покупатель уже выполнил наши рекомендации (основные способы решения из материалов товара испробованы), а проблема осталась — деликатно признай, что, похоже, дело в конкретном экземпляре, извинись за неудобство и предложи оформить возврат (или обмен) через личный кабинет площадки, коротко подскажи, как это сделать. Без обвинений покупателя и без намёков, что он что-то сделал не так.
 
 ЖЁСТКИЕ ПРАВИЛА:
 - Факты о товаре (совместимость, характеристики, комплектация) — только из выданных материалов и прошлых ответов магазина. Нет данных — не выдумывай: confidence "low", спроси уточнение или скажи, что уточнишь.
@@ -149,8 +158,22 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
   try { j = extractJson(res.text); } catch {
     j = { answer: res.text.trim(), confidence: 'low', needs_escalation: true, escalation_reason: 'Модель вернула не JSON', sources_used: [] };
   }
-  const answer = String(j.answer || '').trim().slice(0, 1000);
+  let answer = String(j.answer || '').trim();
+  let cost = res.cost;
+  // Длиннее лимита площадки — не обрезаем, а просим ужать (короткий дешёвый запрос только по тексту ответа).
+  if (answer.length > CHAT_MAX) {
+    try {
+      const fix = await askClaude('chat-shorten', {
+        model: s.indexModel, max_tokens: 1500, temperature: 0.2,
+        messages: [{ role: 'user', content: `Это сообщение покупателю в чат маркетплейса, оно длиннее лимита в ${CHAT_MAX} символов (сейчас ${answer.length}). Перепиши его не длиннее ${CHAT_TARGET} символов: сохрани тон, факты и порядок шагов, убери повторы и лишние слова. Если все шаги не помещаются — оставь первые, самые важные, и закончи просьбой написать результат, остальное мы отправим следующим сообщением. Мысль не обрывай. Верни только новый текст сообщения, без пояснений.\n\n${answer}` }],
+      });
+      cost += fix.cost;
+      const short = fix.text.trim().replace(/^["«]|["»]$/g, '');
+      if (short && short.length <= CHAT_MAX) answer = short;
+    } catch (e) { if (e instanceof BudgetExceeded) throw e; }
+  }
   const reasons = [
+    answer.length > CHAT_MAX ? `Ответ длиннее ${CHAT_MAX} символов — уйдёт несколькими сообщениями, проверьте` : null,
     codeEscalation({ text: ask, pros: null, cons: null, rating: null, kind: 'question' }, 0),
     FORBIDDEN.test(answer) ? 'В ответе ссылка или контакт' : null,
     j.needs_escalation ? (j.escalation_reason || 'Модель просит проверку') : null,
@@ -159,7 +182,7 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
   ].filter(Boolean) as string[];
   const reason = reasons.length ? [...new Set(reasons)].join('; ') : null;
   patchThread(mp, chatId, {
-    draft_answer: answer, draft_model: s.draftModel, draft_cost: res.cost, draft_for: lastBuyer?.id || null,
+    draft_answer: answer, draft_model: s.draftModel, draft_cost: cost, draft_for: lastBuyer?.id || null,
     confidence: ['high', 'medium', 'low'].includes(j.confidence) ? j.confidence : 'low',
     escalation_reason: reason, status: reason ? 'escalated' : 'drafted', draft_attempts: 0,
     sources_used: JSON.stringify(Array.isArray(j.sources_used) ? j.sources_used.slice(0, 12) : []),
@@ -170,10 +193,42 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
 // ─── Отправка ──────────────────────────────────────────────────────────────
 export async function sendThread(mp: string, chatId: string, text: string, by: 'owner' | 'auto'): Promise<{ ok: boolean; error?: string; thread?: ChatThread | null }> {
   if (mp !== 'wb' && mp !== 'ozon') return { ok: false, error: 'Неизвестная площадка' };
-  const msg = String(text || '').trim();
-  if (!msg) return { ok: false, error: 'Пустое сообщение' };
-  if (msg.length > 1000) return { ok: false, error: 'Сообщение длиннее 1000 символов' };
-  if (by === 'auto' && FORBIDDEN.test(msg)) return { ok: false, error: 'В ответе ссылка или контакт' };
+  const full = String(text || '').trim();
+  if (!full) return { ok: false, error: 'Пустое сообщение' };
+  if (full.length > CHAT_MAX * 4) return { ok: false, error: `Сообщение длиннее ${CHAT_MAX * 4} символов — сократите` };
+  if (by === 'auto' && full.length > CHAT_MAX) return { ok: false, error: `Длиннее ${CHAT_MAX} символов — автоматически не отправляем` };
+  if (by === 'auto' && FORBIDDEN.test(full)) return { ok: false, error: 'В ответе ссылка или контакт' };
+  // Лимит площадки — 1000 символов на сообщение: длинный ответ уходит несколькими сообщениями по границам абзацев/предложений.
+  const parts = splitChatMessage(full, CHAT_MAX);
+  for (let i = 0; i < parts.length; i++) {
+    const r = await sendOne(mp, chatId, parts[i], by);
+    if (!r.ok) return i ? { ...r, error: `Отправлено ${i} из ${parts.length} сообщений, дальше ошибка: ${r.error}` } : r;
+    if (i < parts.length - 1) await new Promise(res => setTimeout(res, 1500));
+  }
+  patchThread(mp, chatId, { status: 'sent', sent_at: Date.now(), sent_by: by, send_error: null, draft_answer: null });
+  return { ok: true, thread: getThread(mp, chatId) };
+}
+
+/** Разбить текст на сообщения не длиннее max: по абзацам, затем по предложениям, в крайнем случае — по словам. */
+export function splitChatMessage(text: string, max: number): string[] {
+  const t = text.trim();
+  if (t.length <= max) return [t];
+  const out: string[] = [];
+  let rest = t;
+  while (rest.length > max) {
+    const head = rest.slice(0, max + 1);
+    let cut = Math.max(head.lastIndexOf('\n\n'), head.lastIndexOf('\n'));
+    if (cut < max * 0.4) { const m = [...head.matchAll(/[.!?…](?=\s)/g)].pop(); cut = m ? m.index! + 1 : -1; }
+    if (cut < max * 0.4) cut = head.lastIndexOf(' ');
+    if (cut <= 0) cut = max;
+    out.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) out.push(rest);
+  return out;
+}
+
+async function sendOne(mp: string, chatId: string, msg: string, by: 'owner' | 'auto'): Promise<{ ok: boolean; error?: string; thread?: ChatThread | null }> {
   let errText = '';
   try {
     if (mp === 'wb') {
@@ -205,9 +260,8 @@ export async function sendThread(mp: string, chatId: string, text: string, by: '
   }
   // Своё сообщение сразу в ленту; событие площадки с настоящим id придёт при синхронизации.
   addMessages(mp as 'wb' | 'ozon', chatId, [{ id: `local:${Date.now()}`, at: Date.now(), fromBuyer: false, text: msg }]);
-  patchThread(mp, chatId, { status: 'sent', sent_at: Date.now(), sent_by: by, send_error: null, draft_answer: null });
   rlog('info', `Чат ${mpName}: ответ отправлен`, { chat: chatId, by, text: msg.slice(0, 300) });
-  return { ok: true, thread: getThread(mp, chatId) };
+  return { ok: true };
 }
 
 // ─── Фон: синхронизация каждые 5 минут, черновики к новым сообщениям ─────────

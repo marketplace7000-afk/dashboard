@@ -183,7 +183,7 @@ export async function handleReviews(req: VercelRequest, res: VercelResponse, res
         if (c === 'draft') return res.status(200).json({ ok: true, thread: await draftThread(mp, id) });
         if (c === 'save') {
           const th = getThread(mp, id)!;
-          patchThread(mp, id, { draft_answer: String(p.text ?? '').slice(0, 1000), status: th.status === 'new' || th.status === 'idle' ? 'drafted' : th.status });
+          patchThread(mp, id, { draft_answer: String(p.text ?? '').slice(0, 4000), status: th.status === 'new' || th.status === 'idle' ? 'drafted' : th.status });
           return res.status(200).json({ ok: true, thread: getThread(mp, id) });
         }
         if (c === 'send') {

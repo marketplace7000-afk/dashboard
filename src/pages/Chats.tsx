@@ -277,7 +277,12 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
           onBlur={() => { if (text !== (th.draftAnswer || '')) act('save', async () => apply((await chatsApi.save(mp, id, text)).thread)); }} />
         <div className="rv-reply-foot">
           <span className="rv-hint">
-            <span className={text.length > 1000 ? 'rv-text-bad' : ''}>{text.length} из 1000</span>{hint ? ` · ${hint}` : ''}
+            {text.length <= 1000
+              ? <span>{text.length} из 1000</span>
+              : <span className="rv-text-warn" title="Площадка принимает до 1000 символов в одном сообщении — текст разделится по абзацам и предложениям">
+                  {text.length} симв. · уйдёт {Math.ceil(text.length / 950)} сообщениями
+                </span>}
+            {hint ? ` · ${hint}` : ''}
           </span>
           <div className="rv-actions">
             {th.status === 'skipped'

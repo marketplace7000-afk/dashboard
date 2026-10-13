@@ -1060,6 +1060,7 @@ code {
 .rv-page h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
 .rv-muted { color: var(--muted); }
 .rv-text-bad { color: var(--bad); }
+.rv-text-warn { color: #b45309; font-weight: 500; }
 .rv-text-warn { color: var(--warn); }
 .rv-spacer { flex: 1; }
 .rv-sub { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.55; max-width: 78ch; }

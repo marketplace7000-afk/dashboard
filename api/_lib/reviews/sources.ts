@@ -245,6 +245,11 @@ async function syncWbChatsOnce(maxPages: number): Promise<{ events: number; pair
   return { events, pairs };
 }
 
+/** Текст сообщения Ozon: картинки-ссылки ![](…) → «[фото]». */
+export function ozonChatText(s: string): string {
+  return String(s || '').replace(/!\[[^\]]*\]\([^)\s]*\)/g, '[фото]').trim();
+}
+
 /** Название и артикул Ozon по sku: карта активных товаров + карточки (в т.ч. архивные). */
 function ozonOfferName(sku: string | null, skuMap: Record<string, string>): { offerId: string | null; name: string | null } {
   if (!sku) return { offerId: null, name: null };
@@ -302,17 +307,21 @@ async function guessChatProduct(mp: 'wb' | 'ozon', texts: string[], skuMap: Reco
 }
 
 /** Догоняем товар у недавних чатов без товара (по сообщениям покупателя; повторно — только при новых сообщениях). */
-export async function fillChatProducts(maxChats = 40): Promise<number> {
+export async function fillChatProducts(maxChats = 40, only?: { mp: string; chatId: string }): Promise<number> {
   const d = chatDb();
-  const rows = d.prepare(`SELECT marketplace, chat_id, last_at FROM chat_threads WHERE offer_id IS NULL
-    AND last_at >= ? ORDER BY last_at DESC LIMIT 300`).all(Date.now() - 60 * 86400_000) as any[];
+  const rows = (only
+    ? d.prepare('SELECT marketplace, chat_id, last_at FROM chat_threads WHERE offer_id IS NULL AND marketplace = ? AND chat_id = ?').all(only.mp, only.chatId)
+    : d.prepare(`SELECT marketplace, chat_id, last_at FROM chat_threads WHERE offer_id IS NULL
+    AND last_at >= ? ORDER BY last_at DESC LIMIT 300`).all(Date.now() - 60 * 86400_000)) as any[];
+  if (!rows.length) return 0;
   let skuMap: Record<string, string> = {};
   if (rows.some(r => r.marketplace === 'ozon')) {
     try { skuMap = await (await import('../ozonShowcase')).getSkuMap(); } catch { /* без карты */ }
   }
   const old = kvGet<Record<string, number>>('chatprod_tried', {});
-  const tried: Record<string, number> = {};  // только текущие чаты без товара — список не растёт
-  for (const r of rows) { const k = `${r.marketplace}:${r.chat_id}`; if (old[k]) tried[k] = old[k]; }
+  // Полный проход хранит только текущие чаты без товара — список не растёт; точечный — дописывает.
+  const tried: Record<string, number> = only ? { ...old } : {};
+  if (!only) for (const r of rows) { const k = `${r.marketplace}:${r.chat_id}`; if (old[k]) tried[k] = old[k]; }
   const budget = { left: 15 };
   let found = 0; let n = 0;
   for (const r of rows) {
@@ -324,6 +333,11 @@ export async function fillChatProducts(maxChats = 40): Promise<number> {
     const g = await guessChatProduct(r.marketplace, texts, skuMap, budget);
     if (!g) continue;
     setThreadMeta(r.marketplace, r.chat_id, { sku: g.sku, offerId: g.offerId, productName: g.name });
+    // Черновик, написанный без товара, переписываем уже с карточкой товара.
+    if (!only) {
+      d.prepare(`UPDATE chat_threads SET status = 'new', draft_attempts = 0 WHERE marketplace = ? AND chat_id = ?
+        AND status IN ('drafted','escalated') AND last_from_buyer = 1`).run(r.marketplace, r.chat_id);
+    }
     found++;
   }
   kvSet('chatprod_tried', tried);
@@ -371,7 +385,8 @@ async function syncOzonChatsOnce(maxChats: number): Promise<{ chats: number; pai
         const type = String(m?.user?.type || '');
         if (m?.context?.sku && !sku) sku = String(m.context.sku);
         if (!/customer|seller/i.test(type)) continue;  // уведомления, бот, поддержка — не переписка
-        let text = (Array.isArray(m?.data) ? m.data.join('\n') : String(m?.data || '')).trim();
+        // Фото покупателя Ozon присылает ссылкой-разметкой ![](https://api-seller.ozon.ru/…) — это не текст.
+        let text = ozonChatText(Array.isArray(m?.data) ? m.data.join('\n') : String(m?.data || ''));
         if (!text && (m?.images?.length || m?.files?.length)) text = '[фото/файл]';
         if (!text) continue;
         msgs.push({ id: String(m.message_id), at: Date.parse(m.created_at) || 0, fromBuyer: /customer/i.test(type), text: text.slice(0, 2000) });

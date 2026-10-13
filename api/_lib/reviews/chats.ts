@@ -5,7 +5,7 @@
  * (тумблер «авто» отдельно для WB и для Ozon, по умолчанию выключены; эскалация не отправляется никогда).
  * Конституция 1.3.0, принцип X: разрешённая запись — текстовый ответ покупателю в чате WB/Ozon.
  */
-import { getDb, getSettings, rlog } from './db';
+import { getDb, getSettings, rlog, kvGet, kvSet } from './db';
 import { askClaude, BudgetExceeded, budgetState } from './claude';
 import { productKnowledge, similarTgPairs, similarPastAnswers } from './kb';
 import { getStyleProfile, syncWbChats, syncOzonChats, fillChatProducts, WB_CHAT_BASE, wbChatHeaders } from './sources';
@@ -15,7 +15,9 @@ import {
   chatDb, chatMessages, getThread, patchThread, rowToThread, replySignOf, addMessages, type ChatThread,
 } from './chatStore';
 
-export const CHAT_PROMPT = `Ты — сотрудник поддержки интернет-магазина автотоваров и электроники «avto-vibe». Ведёшь переписку с покупателем в чате продавца на маркетплейсе (Wildberries или Ozon — указано в диалоге). Чаще всего это вопросы об адаптерах CarPlay / Android Auto, Android-приставках и другой автоэлектронике: совместимость с машиной и магнитолой, подключение и настройка, прошивка, неисправности, возврат.
+export const CHAT_PROMPT = `Ты — сотрудник поддержки интернет-магазина автотоваров и электроники «avto-vibe». Ведёшь переписку с покупателем в чате продавца на маркетплейсе (Wildberries или Ozon — указано в диалоге). Магазин продаёт разную электронику: адаптеры CarPlay / Android Auto и автоприставки, HDMI-передатчики, лампы, зарядки, плёнки и многое другое — поэтому вопросы бывают о совместимости, подключении и настройке, прошивке, неисправностях, возврате.
+
+ТОВАР — САМОЕ ВАЖНОЕ: отвечай только про тот товар, который указан в диалоге («товар: …») или ясно назван самим покупателем. Не подставляй другой товар и не додумывай тип товара по профилю стиля или прошлым ответам магазина — там примеры про другие товары. Если товар неизвестен и из переписки непонятно, что это, — не давай инструкций к конкретному устройству: уточни у покупателя, о каком товаре речь (название или артикул), confidence "low".
 
 ГЛАВНОЕ: ответь на последние сообщения покупателя с учётом всего диалога. Это живой разговор, а не публичный отзыв: можно задать уточняющий вопрос (марка и год авто, модель магнитолы, телефон, что именно не работает), дать пошаговую инструкцию, предложить следующий шаг.
 
@@ -96,6 +98,12 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
   for (let i = msgs.length - 1; i >= 0 && msgs[i].fromBuyer; i--) tail.unshift(msgs[i].text);
   const ask = (tail.length ? tail : [lastBuyer?.text || '']).join('\n');
   const s = getSettings();
+  // Товар не определён — сначала ищем его в сообщениях (номер заказа, артикул), иначе модель гадает.
+  if (!th.offerId) {
+    await fillChatProducts(1, { mp, chatId }).catch(() => 0);
+    const again = getThread(mp, chatId);
+    if (again) Object.assign(th, again);
+  }
 
   const pseudo: any = { id: -1, kind: 'question', text: ask, pros: null, cons: null, rating: null, offerId: th.offerId };
   const know = productKnowledge(th.offerId, `${ask} ${th.productName || ''}`, 7000);
@@ -108,13 +116,15 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
 
   const dynamic = [
     `# Диалог в чате ${mp === 'wb' ? 'Wildberries' : 'Ozon'}`,
-    `Покупатель: ${th.clientName || '—'}; товар: ${th.productName || '—'}; артикул: ${th.offerId || '—'}${th.sku ? `; ${mp === 'wb' ? 'nmID' : 'SKU'} ${th.sku}` : ''}`,
+    th.offerId || th.productName
+      ? `Покупатель: ${th.clientName || '—'}; товар: ${th.productName || '—'}; артикул: ${th.offerId || '—'}${th.sku ? `; ${mp === 'wb' ? 'nmID' : 'SKU'} ${th.sku}` : ''}`
+      : `Покупатель: ${th.clientName || '—'}; товар: НЕ ОПРЕДЕЛЁН (площадка его не передала) — не угадывай, см. правило о товаре`,
     `\n# Переписка (старые сверху, время МСК)`,
     // Последние 15 сообщений — целиком, более ранние — коротко: нить разговора остаётся, а запрос легче.
     ...msgs.map((m, i) => `[${fmt(m.at)}] ${m.fromBuyer ? 'Покупатель' : 'Магазин'}: ${i >= msgs.length - 15 ? m.text.slice(0, 1200) : shorten(m.text, 200)}`),
     `\n# Что известно о товаре\n${know.text || '(ни карточки, ни материалов — опирайся только на прошлые ответы, факты не придумывай)'}`,
     past.length ? `\n# Наши ответы на похожие вопросы по этому товару\n${past.map(p => `[history:${p.id}] «${p.text || '(без текста)'}» → «${p.answer}»`).join('\n')}` : '',
-    chats.length ? `\n# Как магазин отвечал в похожих переписках\n${chats.map(p => `[chat:${p.id}] (${chatName(p.source)}) «${p.question}» → «${p.answer}»`).join('\n')}` : '',
+    chats.length ? `\n# Как магазин отвечал в похожих переписках (часто про ДРУГИЕ товары: бери тон и подход, а не факты и инструкции)\n${chats.map(p => `[chat:${p.id}] (${chatName(p.source)}) «${p.question}» → «${p.answer}»`).join('\n')}` : '',
   ].filter(Boolean).join('\n');
 
   const styleBlock = `# Профиль стиля магазина (выжимка из наших реальных ответов)\n${style?.text || '(профиль ещё не составлен)'}`;
@@ -213,6 +223,14 @@ export function chatTick(): Promise<any> {
     const s = getSettings();
     if (!s.chatAutoDraft) return out;
     const d = chatDb();
+    // Разово (13.10): черновики, написанные до того, как нашёлся товар чата, — переписать с карточкой товара.
+    if (!kvGet<boolean>('chat_redraft_noproduct_v1', false)) {
+      const r = d.prepare(`UPDATE chat_threads SET status = 'new', draft_attempts = 0 WHERE offer_id IS NOT NULL
+        AND status IN ('drafted','escalated') AND last_from_buyer = 1 AND last_at >= ?
+        AND sources_used NOT LIKE '%card:%' AND sources_used NOT LIKE '%product:%'`).run(Date.now() - 48 * 3600_000);
+      kvSet('chat_redraft_noproduct_v1', true);
+      out.redraft = r.changes;
+    }
     // Пауза 3 минуты после последнего сообщения покупателя: часто пишут несколькими сообщениями
     // подряд, и без паузы черновик переписывался заново на каждое.
     const rows = d.prepare(`SELECT marketplace, chat_id FROM chat_threads WHERE status = 'new' AND last_from_buyer = 1

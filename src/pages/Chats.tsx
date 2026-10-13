@@ -257,7 +257,9 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
       <div className="rv-messages">
         {msgs.map(m => (
           <div key={m.id} className={`rv-msg ${m.fromBuyer ? 'rv-msg--buyer' : 'rv-msg--shop'}`}>
-            {m.text}
+            {/^\[(фото|фото\/файл|файл[^\]]*|фото: \d+)\]$/.test(m.text.trim())
+              ? <span className="rv-muted">Фото или файл — открыть можно в кабинете {MP_NAME[th.marketplace]}</span>
+              : m.text}
             <time>{m.fromBuyer ? '' : 'Магазин · '}{fmt(m.at)}</time>
           </div>
         ))}

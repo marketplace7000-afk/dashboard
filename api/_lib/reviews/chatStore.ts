@@ -37,7 +37,22 @@ export function chatDb(): any {
   `);
   ready = true;
   migrateKvBuffers(d);
+  fixOzonImageLinks(d);
   return d;
+}
+
+/** До 13.10 фото покупателей Ozon сохранялись как разметка ![](ссылка) — приводим к «[фото]». */
+function fixOzonImageLinks(d: any): void {
+  const rows = d.prepare("SELECT marketplace, msg_id, chat_id, text FROM chat_messages WHERE text LIKE '%![%](%'").all() as any[];
+  if (!rows.length) return;
+  const upd = d.prepare('UPDATE chat_messages SET text = ? WHERE marketplace = ? AND msg_id = ?');
+  const chats = new Set<string>();
+  for (const r of rows) {
+    upd.run(String(r.text).replace(/!\[[^\]]*\]\([^)\s]*\)/g, '[фото]').trim(), r.marketplace, r.msg_id);
+    chats.add(`${r.marketplace}|${r.chat_id}`);
+  }
+  // «Последнее сообщение» в списке чатов — тоже без ссылок.
+  for (const k of chats) { const [mp, id] = k.split('|'); touchThread(mp, id); }
 }
 
 /** До 06.10 сообщения WB лежали в kv («wbchat:<id>», последние 200) — переносим один раз. */

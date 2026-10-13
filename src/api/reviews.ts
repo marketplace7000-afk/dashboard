@@ -40,7 +40,7 @@ export const reviewsApi = {
     diskSync: { at: number; added: string[]; changed: string[]; removed: string[] } | null;
     withoutMaterials: string[];
     poppler: boolean;
-    style: { text: string; at: number; basedOn: number } | null;
+    style: { text: string; at: number; basedOn: number; fresh?: number; version?: number } | null;
     history: { answered: { marketplace: string; kind: string; n: number }[]; done: { wb_reviews: boolean; wb_questions: boolean; ozon_questions: boolean } };
   }>('kb'),
   refreshSources: () => post('kb/sources'),

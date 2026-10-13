@@ -8,7 +8,7 @@
 import { getDb, getSettings, rlog } from './db';
 import { askClaude, BudgetExceeded, budgetState } from './claude';
 import { productKnowledge, similarTgPairs, similarPastAnswers } from './kb';
-import { getStyleProfile, syncWbChats, syncOzonChats, WB_CHAT_BASE, wbChatHeaders } from './sources';
+import { getStyleProfile, syncWbChats, syncOzonChats, fillChatProducts, WB_CHAT_BASE, wbChatHeaders } from './sources';
 import { ozonUpstream } from '../../_proxy';
 import { codeEscalation, extractJson, FORBIDDEN } from './drafts';
 import {
@@ -209,6 +209,7 @@ export function chatTick(): Promise<any> {
     const out: any = {};
     try { out.wb = await syncWbChats(10); } catch (e) { out.wb = { error: String((e as Error).message).slice(0, 200) }; }
     try { out.ozon = await syncOzonChats(80); } catch (e) { out.ozon = { error: String((e as Error).message).slice(0, 200) }; }
+    try { out.products = await fillChatProducts(); } catch (e) { out.products = { error: String((e as Error).message).slice(0, 200) }; }
     const s = getSettings();
     if (!s.chatAutoDraft) return out;
     const d = chatDb();

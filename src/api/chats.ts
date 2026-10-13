@@ -6,6 +6,7 @@ export type ChatThread = {
   draftAnswer: string | null; draftModel: string | null; draftCostUsd: number | null; draftFor: string | null;
   confidence: string | null; escalationReason: string | null; sourcesUsed: string[];
   sentAt: number | null; sentBy: string | null; sendError: string | null; canReply: boolean;
+  productPhoto?: string | null; productUrl?: string | null;
 };
 export type ChatMsg = { id: string; at: number; fromBuyer: boolean; text: string };
 export type ChatView = 'waiting' | 'drafts' | 'all';

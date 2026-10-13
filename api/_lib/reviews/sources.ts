@@ -261,6 +261,76 @@ function ozonOfferName(sku: string | null, skuMap: Record<string, string>): { of
   return { offerId, name };
 }
 
+/**
+ * Товар чата, когда площадка его не указала: ищем в сообщениях покупателя номер товара
+ * (nmID / SKU), артикул продавца или номер отправления Ozon. Запросы к площадке — только
+ * по номеру отправления, не больше budget.left за проход.
+ */
+async function guessChatProduct(mp: 'wb' | 'ozon', texts: string[], skuMap: Record<string, string>, budget: { left: number }): Promise<{ sku: string | null; offerId: string | null; name: string | null } | null> {
+  const all = texts.join('\n');
+  const d = getDb();
+  for (const n of new Set(all.match(/(?<![\d-])\d{6,12}(?![\d-])/g) || [])) {
+    if (mp === 'wb') {
+      const offerId = kvGet<string | null>(`wbnm:${n}`, null);
+      if (offerId) return { sku: n, offerId, name: null };
+    } else {
+      const { offerId, name } = ozonOfferName(n, skuMap);
+      if (offerId) return { sku: n, offerId, name };
+    }
+  }
+  const words = new Set((all.toUpperCase().match(/[A-ZА-ЯЁ0-9][A-ZА-ЯЁ0-9_.\/-]{3,40}/g) || []).filter(w => /\d/.test(w) && /[A-ZА-ЯЁ]/.test(w)));
+  if (words.size) {
+    const ids = d.prepare('SELECT offer_id, name FROM kb_cards WHERE marketplace = ?').all(mp) as any[];
+    const hit = ids.find(r => words.has(String(r.offer_id).toUpperCase()));
+    if (hit) return { sku: null, offerId: String(hit.offer_id), name: hit.name || null };
+  }
+  if (mp === 'ozon') {
+    for (const pn of new Set(all.match(/(?<!\d)\d{8,10}-\d{4}(?:-\d{1,2})?(?!\d)/g) || [])) {
+      if (budget.left <= 0) break;
+      budget.left--;
+      const posting = pn.split('-').length === 3 ? pn : `${pn}-1`;
+      for (const path of ['/v3/posting/fbs/get', '/v2/posting/fbo/get']) {
+        try {
+          const j = await ozonPost(path, { posting_number: posting });
+          const p = (j?.result ?? j)?.products?.[0];
+          if (p?.offer_id) return { sku: p.sku ? String(p.sku) : null, offerId: String(p.offer_id), name: p.name || null };
+        } catch { /* не это отправление или не та схема — пробуем дальше */ }
+      }
+    }
+  }
+  return null;
+}
+
+/** Догоняем товар у недавних чатов без товара (по сообщениям покупателя; повторно — только при новых сообщениях). */
+export async function fillChatProducts(maxChats = 40): Promise<number> {
+  const d = chatDb();
+  const rows = d.prepare(`SELECT marketplace, chat_id, last_at FROM chat_threads WHERE offer_id IS NULL
+    AND last_at >= ? ORDER BY last_at DESC LIMIT 300`).all(Date.now() - 60 * 86400_000) as any[];
+  let skuMap: Record<string, string> = {};
+  if (rows.some(r => r.marketplace === 'ozon')) {
+    try { skuMap = await (await import('../ozonShowcase')).getSkuMap(); } catch { /* без карты */ }
+  }
+  const old = kvGet<Record<string, number>>('chatprod_tried', {});
+  const tried: Record<string, number> = {};  // только текущие чаты без товара — список не растёт
+  for (const r of rows) { const k = `${r.marketplace}:${r.chat_id}`; if (old[k]) tried[k] = old[k]; }
+  const budget = { left: 15 };
+  let found = 0; let n = 0;
+  for (const r of rows) {
+    const key = `${r.marketplace}:${r.chat_id}`;
+    if (tried[key] === r.last_at) continue;
+    if (++n > maxChats) break;
+    tried[key] = r.last_at;
+    const texts = chatMessages(r.marketplace, r.chat_id, 100).filter(m => m.fromBuyer).map(m => m.text);
+    const g = await guessChatProduct(r.marketplace, texts, skuMap, budget);
+    if (!g) continue;
+    setThreadMeta(r.marketplace, r.chat_id, { sku: g.sku, offerId: g.offerId, productName: g.name });
+    found++;
+  }
+  kvSet('chatprod_tried', tried);
+  if (found) rlog('info', 'Чаты: товар найден по сообщениям', { found });
+  return found;
+}
+
 let ozSyncing: Promise<{ chats: number; pairs: number; messages: number }> | null = null;
 /** Синхронизация чатов Ozon (только изменившиеся с прошлого раза; один проход за раз). */
 export function syncOzonChats(maxChats = 60): Promise<{ chats: number; pairs: number; messages: number }> {
@@ -306,6 +376,20 @@ async function syncOzonChatsOnce(maxChats: number): Promise<{ chats: number; pai
         if (!text) continue;
         msgs.push({ id: String(m.message_id), at: Date.parse(m.created_at) || 0, fromBuyer: /customer/i.test(type), text: text.slice(0, 2000) });
       }
+      // Пометка о товаре обычно в начале чата: в длинной переписке она старше последних 100 сообщений.
+      // Один раз на чат, чтобы не листать историю при каждом новом сообщении.
+      if (!sku && !getThread('ozon', id)?.sku && (h?.messages?.length ?? 0) >= 100 && !kvGet<boolean>(`ozdeep:${id}`, false)) {
+        kvSet(`ozdeep:${id}`, true);
+        let from = h.messages.reduce((a: any, m: any) => (!a || Date.parse(m.created_at) < Date.parse(a.created_at) ? m : a), null)?.message_id;
+        for (let page = 0; page < 3 && from && !sku; page++) {
+          await sleep(350);
+          const older = await ozonPost('/v3/chat/history', { chat_id: id, direction: 'Backward', from_message_id: String(from), limit: 100 }).catch(() => null);
+          const arr: any[] = older?.messages || [];
+          for (const m of arr) if (m?.context?.sku) { sku = String(m.context.sku); break; }
+          if (arr.length < 100) break;
+          from = arr.reduce((a: any, m: any) => (!a || Date.parse(m.created_at) < Date.parse(a.created_at) ? m : a), null)?.message_id;
+        }
+      }
       const { offerId, name } = ozonOfferName(sku, skuMap);
       setThreadMeta('ozon', id, { replySign: id, sku, offerId, productName: name });
       messages += addMessages('ozon', id, msgs);
@@ -342,7 +426,7 @@ export function chatStats(): { wb: number; ozon: number; at: number | null } {
 }
 
 // ─── 3. Профиль стиля ───────────────────────────────────────────────────────
-export type StyleProfile = { text: string; at: number; basedOn: number };
+export type StyleProfile = { text: string; at: number; basedOn: number; fresh?: number; version?: number };
 
 const STYLE_PROMPT = `Ниже — реальные ответы интернет-магазина автотоваров и электроники (Wildberries и Ozon) покупателям: на отзывы с разной оценкой, на вопросы о товарах и в чатах.
 Составь по ним «профиль стиля» — инструкцию для нового сотрудника поддержки, как отвечает ЭТОТ магазин. Опиши кратко, по пунктам:
@@ -354,51 +438,82 @@ const STYLE_PROMPT = `Ниже — реальные ответы интерне�
 6. Сильные приёмы, которые стоит повторять, и слабые места прошлых ответов, которые не надо копировать.
 Не используй имена, телефоны, ссылки и номера заказов. До 600 слов, без вступления.`;
 
+/** Повторный разбор: профиль не пишется с нуля, а дорабатывается по свежим ответам. */
+const STYLE_UPDATE = `Ниже — текущий профиль стиля (составлен раньше) и ответы магазина. Ответы с пометкой «новый» появились после прошлого разбора — по ним видно, как магазин отвечает СЕЙЧАС.
+Улучши профиль: сохрани то, что подтверждается; поправь то, что в новых ответах делается иначе (новый вариант важнее старого); добавь новые приёмы, типичные проблемы и решения; убери устаревшее и повторы. Формат и пункты те же.`;
+
 export function getStyleProfile(): StyleProfile | null {
   return kvGet<StyleProfile | null>('style_profile', null);
 }
 
+// Учимся только на ответах людей: данных в кабинете вручную и опубликованных менеджером с сайта.
+// Автопубликации агента не берём — иначе он учился бы сам на себе.
+const HUMAN = "mp_answer IS NOT NULL AND LENGTH(mp_answer) > 15 AND (published_by IS NULL OR published_by <> 'auto')";
+const answeredAt = 'COALESCE(published_at, created_at)';
+
 function answeredCount(): number {
-  const a = (getDb().prepare("SELECT COUNT(*) AS n FROM items WHERE mp_answer IS NOT NULL AND mp_answer <> ''").get() as any).n;
+  const a = (getDb().prepare(`SELECT COUNT(*) AS n FROM items WHERE ${HUMAN}`).get() as any).n;
   const b = (getDb().prepare("SELECT COUNT(*) AS n FROM kb_tg").get() as any).n;
+  return a + b;
+}
+
+/** Ответы людей, появившиеся после момента since. */
+function freshCount(since: number): number {
+  const a = (getDb().prepare(`SELECT COUNT(*) AS n FROM items WHERE ${HUMAN} AND ${answeredAt} > ?`).get(since) as any).n;
+  const b = (getDb().prepare('SELECT COUNT(*) AS n FROM kb_tg WHERE date > ?').get(new Date(since).toISOString()) as any).n;
   return a + b;
 }
 
 export async function buildStyleProfile(): Promise<StyleProfile> {
   const d = getDb();
-  const pick = (sql: string, n: number) => d.prepare(sql).all(n) as any[];
-  const base = "FROM items WHERE mp_answer IS NOT NULL AND LENGTH(mp_answer) > 15";
+  const prev = getStyleProfile();
+  const since = prev?.at ?? 0;
+  const sinceIso = new Date(since).toISOString();
+  // В каждой группе сначала свежие ответы (после прошлого разбора), остаток — случайные старые.
+  const pick = (where: string, n: number) => d.prepare(`SELECT kind, rating, text, pros, cons, mp_answer, ${answeredAt} > ? AS fresh
+    FROM items WHERE ${HUMAN} AND ${where} ORDER BY fresh DESC, RANDOM() LIMIT ?`).all(since, n) as any[];
   const samples = [
-    ...pick(`SELECT kind, rating, text, pros, cons, mp_answer ${base} AND kind = 'review' AND rating <= 3 ORDER BY RANDOM() LIMIT ?`, 45),
-    ...pick(`SELECT kind, rating, text, pros, cons, mp_answer ${base} AND kind = 'review' AND rating = 4 ORDER BY RANDOM() LIMIT ?`, 15),
-    ...pick(`SELECT kind, rating, text, pros, cons, mp_answer ${base} AND kind = 'review' AND rating = 5 AND LENGTH(text) > 0 ORDER BY RANDOM() LIMIT ?`, 20),
-    ...pick(`SELECT kind, rating, text, pros, cons, mp_answer ${base} AND kind = 'review' AND rating = 5 AND LENGTH(text) = 0 ORDER BY RANDOM() LIMIT ?`, 10),
-    ...pick(`SELECT kind, rating, text, pros, cons, mp_answer ${base} AND kind = 'question' ORDER BY RANDOM() LIMIT ?`, 50),
+    ...pick("kind = 'review' AND rating <= 3", 45),
+    ...pick("kind = 'review' AND rating = 4", 15),
+    ...pick("kind = 'review' AND rating = 5 AND LENGTH(text) > 0", 20),
+    ...pick("kind = 'review' AND rating = 5 AND LENGTH(text) = 0", 10),
+    ...pick("kind = 'question'", 50),
   ];
-  const chats = d.prepare('SELECT source, question, answer FROM kb_tg ORDER BY RANDOM() LIMIT 40').all() as any[];
+  const chats = d.prepare('SELECT source, question, answer, date > ? AS fresh FROM kb_tg ORDER BY fresh DESC, RANDOM() LIMIT 40').all(sinceIso) as any[];
   const cut = (s: string, n: number) => String(s || '').replace(/\s+/g, ' ').slice(0, n);
+  const mark = (r: any) => prev && r.fresh ? ', новый' : '';
   const lines = [
-    ...samples.map(r => `[${r.kind === 'review' ? `отзыв ${r.rating ?? '?'}★` : 'вопрос'}] «${cut([r.text, r.pros && `+ ${r.pros}`, r.cons && `− ${r.cons}`].filter(Boolean).join(' '), 300) || '(без текста)'}» → «${cut(r.mp_answer, 400)}»`),
-    ...chats.map(r => `[чат ${r.source === 'tg' ? 'Telegram' : r.source === 'wb_chat' ? 'WB' : 'Ozon'}] «${cut(stripPii(r.question), 250)}» → «${cut(stripPii(r.answer), 350)}»`),
+    ...samples.map(r => `[${r.kind === 'review' ? `отзыв ${r.rating ?? '?'}★` : 'вопрос'}${mark(r)}] «${cut([r.text, r.pros && `+ ${r.pros}`, r.cons && `− ${r.cons}`].filter(Boolean).join(' '), 300) || '(без текста)'}» → «${cut(r.mp_answer, 400)}»`),
+    ...chats.map(r => `[чат ${r.source === 'tg' ? 'Telegram' : r.source === 'wb_chat' ? 'WB' : 'Ozon'}${mark(r)}] «${cut(stripPii(r.question), 250)}» → «${cut(stripPii(r.answer), 350)}»`),
   ];
   if (lines.length < 15) throw new Error('Мало наших прошлых ответов для профиля стиля — дождитесь догрузки истории');
+  const fresh = [...samples, ...chats].filter(r => r.fresh).length;
   const s = getSettings();
+  const content = prev
+    ? `${STYLE_PROMPT}\n\n${STYLE_UPDATE}\n\n# Текущий профиль\n${prev.text}\n\n# Ответы магазина\n${lines.join('\n')}`
+    : `${STYLE_PROMPT}\n\n${lines.join('\n')}`;
   const { text, usage, stop } = await askClaude('style', {
-    model: s.draftModel, max_tokens: 8000,
-    messages: [{ role: 'user', content: `${STYLE_PROMPT}\n\n${lines.join('\n')}` }],
+    // Разбор раз в неделю: средних размышлений хватает, высокие оплачивались бы как лишний ответ.
+    model: s.draftModel, max_tokens: 8000, effort: 'medium',
+    messages: [{ role: 'user', content }],
   });
-  const prof: StyleProfile = { text: text.trim(), at: Date.now(), basedOn: answeredCount() };
-  rlog('info', 'Профиль стиля обновлён', { samples: lines.length, chars: prof.text.length, out: usage?.output_tokens, in: usage?.input_tokens, stop });
+  const prof: StyleProfile = { text: text.trim(), at: Date.now(), basedOn: answeredCount(), fresh, version: (prev?.version ?? 1) + (prev ? 1 : 0) };
+  rlog('info', 'Профиль стиля обновлён', { version: prof.version, samples: lines.length, fresh, chars: prof.text.length, out: usage?.output_tokens, in: usage?.input_tokens, stop });
   if (prof.text.length < 1200) throw new Error(`Профиль получился слишком коротким (${prof.text.length} симв., stop=${stop}) — повторите позже`);
+  if (prev) kvSet('style_profile_prev', prev);  // прошлая версия — на случай отката
   kvSet('style_profile', prof);
   return prof;
 }
 
-/** Раз в неделю, или раньше (не чаще раза в сутки), если с прошлого раза наших ответов стало вдвое больше. */
+/**
+ * Раз в неделю, если с прошлого разбора есть хотя бы 10 новых ответов людей (иначе учиться не на чем —
+ * токены не тратим), или раньше (не чаще раза в сутки), если ответов стало вдвое больше.
+ */
 export function styleProfileDue(): boolean {
   const p = getStyleProfile();
   const n = answeredCount();
   if (!p) return n >= 30;
   const age = Date.now() - p.at;
-  return age > 7 * 86400_000 || (age > 86400_000 && n > 2 * Math.max(p.basedOn, 1));
+  if (age <= 86400_000) return false;
+  return (age > 7 * 86400_000 && freshCount(p.at) >= 10) || n > 2 * Math.max(p.basedOn, 1);
 }

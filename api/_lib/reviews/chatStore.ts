@@ -6,6 +6,7 @@
  * Пары «вопрос → ответ» для базы знаний собираются из chat_messages (см. sources.ts).
  */
 import { getDb, kvGet, safeJson } from './db';
+import { rnpProductLookup } from '../rnp';
 
 export type ChatMsgRow = { id: string; at: number; fromBuyer: boolean; text: string };
 
@@ -118,12 +119,30 @@ export type ChatThread = {
   draftAnswer: string | null; draftModel: string | null; draftCostUsd: number | null; draftFor: string | null;
   confidence: string | null; escalationReason: string | null; sourcesUsed: string[];
   sentAt: number | null; sentBy: string | null; sendError: string | null; canReply: boolean;
+  /** Фото товара (справочник РНП) и ссылка на карточку на площадке. */
+  productPhoto: string | null; productUrl: string | null;
 };
 
+/** Фото, название и nmID/SKU товара: справочник РНП, затем карточки товаров. */
+function productInfo(mp: 'wb' | 'ozon', sku: string | null, offerId: string | null) {
+  const p = rnpProductLookup(mp, { sku, offerId });
+  const ext = sku || p?.extId || null;
+  let name = p?.name || null;
+  if (!name && offerId) {
+    const c = getDb().prepare('SELECT name FROM kb_cards WHERE marketplace = ? AND UPPER(offer_id) = UPPER(?)').get(mp, offerId) as any;
+    name = c?.name || null;
+  }
+  const url = !ext || !/^\d+$/.test(ext) ? null
+    : mp === 'wb' ? `https://www.wildberries.ru/catalog/${ext}/detail.aspx` : `https://www.ozon.ru/product/${ext}/`;
+  return { photo: p?.photo || null, name, sku: ext, offerId: offerId || p?.article || null, url };
+}
+
 export function rowToThread(r: any): ChatThread {
+  const p = (r.sku || r.offer_id) ? productInfo(r.marketplace, r.sku, r.offer_id) : null;
   return {
-    marketplace: r.marketplace, chatId: r.chat_id, clientName: r.client_name, sku: r.sku, offerId: r.offer_id,
-    productName: r.product_name, lastAt: r.last_at, lastFromBuyer: !!r.last_from_buyer, lastText: r.last_text,
+    marketplace: r.marketplace, chatId: r.chat_id, clientName: r.client_name, sku: p?.sku ?? r.sku, offerId: p?.offerId ?? r.offer_id,
+    productName: r.product_name || p?.name || null, productPhoto: p?.photo || null, productUrl: p?.url || null,
+    lastAt: r.last_at, lastFromBuyer: !!r.last_from_buyer, lastText: r.last_text,
     status: r.status, draftAnswer: r.draft_answer, draftModel: r.draft_model, draftCostUsd: r.draft_cost, draftFor: r.draft_for,
     confidence: r.confidence, escalationReason: r.escalation_reason, sourcesUsed: safeJson(r.sources_used, []),
     sentAt: r.sent_at, sentBy: r.sent_by, sendError: r.send_error, canReply: !!r.reply_sign,

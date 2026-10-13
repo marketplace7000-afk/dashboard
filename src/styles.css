@@ -1256,7 +1256,24 @@ code {
 .rv-thread-product, .rv-thread-last { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rv-thread-product { font-size: 13.5px; color: var(--muted); }
 .rv-thread-product .rv-mp { font-size: 11.5px; padding: 0 6px; margin-right: 2px; }
+.rv-thread-product { display: flex; align-items: center; gap: 6px; }
+.rv-thread-product .rv-mp { flex-shrink: 0; }
+.rv-thread-pname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rv-thread-last { font-size: 14.5px; }
+
+/* Фото товара в списке чатов и в полосе над перепиской */
+.rv-pthumb { position: relative; flex-shrink: 0; display: block; overflow: hidden; background: #fff; border: 1px solid var(--rv-line); }
+.rv-pthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rv-pthumb--sm { width: 44px; height: 56px; border-radius: 10px; }
+.rv-thread > .rv-avatar { width: 44px; height: 44px; }
+.rv-pthumb--sm::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 9px; height: 9px; border-radius: 50%; background: var(--mp); box-shadow: 0 0 0 2px #fff; }
+.rv-pthumb--lg { width: 52px; height: 66px; border-radius: 12px; }
+.rv-product { display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-bottom: 1px solid var(--rv-line); background: color-mix(in srgb, var(--mp) 4%, #fff); }
+.rv-product-body { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.rv-product-name { font-size: 15px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rv-product-body .rv-muted { font-size: 13.5px; overflow-wrap: anywhere; }
+.rv-product-link { flex-shrink: 0; gap: 6px; font-size: 14px; white-space: nowrap; }
+.rv-product--none { display: block; font-size: 14px; color: var(--muted); background: var(--rv-soft); }
 .rv-thread-status { margin-top: 4px; }
 .rv-thread-status .rv-badge { font-size: 12.5px; padding: 2px 9px; }
 
@@ -1315,6 +1332,8 @@ code {
   .rv-messages { max-height: 60vh; padding: 14px 12px; }
   .rv-msg { max-width: 88%; }
   .rv-pane-head { padding: 12px; }
+  .rv-product { padding: 10px 12px; gap: 12px; }
+  .rv-product-link { padding: 8px 10px; }
   .rv-composer { padding: 14px 12px; }
 }
 @media (prefers-reduced-motion: reduce) {

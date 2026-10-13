@@ -462,8 +462,13 @@ function LearningBlock({ kb, reload }: { kb: Kb; reload: () => void }) {
       </dl>
       <div className="rv-panel-row">
         <div>
-          <b>Профиль стиля</b> <span className="rv-muted">{kb.style ? `составлен ${fmtDate(kb.style.at)}` : 'ещё не составлен'}</span>
-          <div className="rv-hint">ИИ сам читает наши реальные ответы и описывает, как магазин общается с покупателями. Обновляется раз в неделю (≈ $0,05).</div>
+          <b>Профиль стиля</b> <span className="rv-muted">{kb.style
+            ? `версия ${kb.style.version ?? 1} · ${fmtDate(kb.style.at)}${kb.style.fresh ? ` · учтено новых ответов: ${kb.style.fresh}` : ''}`
+            : 'ещё не составлен'}</span>
+          <div className="rv-hint">
+            Раз в неделю ИИ перечитывает ответы, которые дали люди (автоответы агента не в счёт), и дорабатывает профиль:
+            тон, приёмы, решения типичных проблем. Свежие ответы важнее старых. Нет новых ответов — разбор пропускается (≈ $0,05–0,15 за раз).
+          </div>
         </div>
         <div className="rv-actions">
           <button className="btn" disabled={!!busy} onClick={() => run('src', reviewsApi.refreshSources, 'Карточки и чаты обновлены')}>

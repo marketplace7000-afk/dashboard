@@ -135,6 +135,23 @@ function writeDays(mp: RnpMp, days: Iterable<string>, metrics: string[], facts: 
   return rows;
 }
 
+/**
+ * Фото и название товара из справочника РНП — для чатов с покупателями.
+ * WB: ключ — nmID, Ozon: ключ — артикул продавца, ext_id — SKU площадки.
+ */
+export function rnpProductLookup(mp: RnpMp, q: { sku?: string | null; offerId?: string | null }): { photo: string; name: string; article: string; extId: string } | null {
+  const d = getDb();
+  if (!d || (!q.sku && !q.offerId)) return null;
+  try {
+    const r = d.prepare(`SELECT sku, article, name, photo, ext_id FROM rnp_item WHERE mp = ?
+      AND (sku = ? OR (? <> '' AND ext_id = ?) OR (? <> '' AND (UPPER(sku) = ? OR UPPER(article) = ?)))
+      ORDER BY (photo <> '') DESC LIMIT 1`)
+      .get(mp, String(q.sku ?? ''), String(q.sku ?? ''), String(q.sku ?? ''), up(q.offerId), up(q.offerId), up(q.offerId)) as any;
+    if (!r) return null;
+    return { photo: String(r.photo || ''), name: String(r.name || ''), article: String(r.article || ''), extId: String(mp === 'wb' ? r.sku : r.ext_id || '') };
+  } catch { return null; }
+}
+
 function upsertItems(mp: RnpMp, items: RnpItem[]): void {
   const d = getDb();
   if (!d || !items.length) return;

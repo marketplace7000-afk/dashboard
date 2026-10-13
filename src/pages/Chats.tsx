@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ArrowsClockwiseIcon, WarningIcon, SpinnerIcon, PaperPlaneRightIcon, SparkleIcon, MagnifyingGlassIcon, ArrowLeftIcon, ChatsCircleIcon,
+  ArrowSquareOutIcon,
 } from '@phosphor-icons/react';
 import { chatsApi, type ChatThread, type ChatMsg, type ChatView, type ChatMp } from '../api/chats';
 import { reviewsApi } from '../api/reviews';
@@ -33,6 +34,41 @@ function statusBadge(t: ChatThread) {
 function Avatar({ t }: { t: ChatThread }) {
   const letter = (t.clientName || 'П').trim().charAt(0).toUpperCase();
   return <span className="rv-avatar" style={mpVar(t.marketplace)} aria-hidden="true">{letter}</span>;
+}
+
+/** Фото товара; нет фото (или не загрузилось) — буква покупателя, как раньше. */
+function ProductThumb({ t, size = 'sm' }: { t: ChatThread; size?: 'sm' | 'lg' }) {
+  const [broken, setBroken] = useState(false);
+  if (!t.productPhoto || broken) return size === 'sm' ? <Avatar t={t} /> : null;
+  return (
+    <span className={`rv-pthumb rv-pthumb--${size}`} style={mpVar(t.marketplace)} aria-hidden="true">
+      <img src={t.productPhoto} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setBroken(true)} />
+    </span>
+  );
+}
+
+/** Полоса «о каком товаре чат» над перепиской. */
+function ProductStrip({ t }: { t: ChatThread }) {
+  if (!t.productName && !t.offerId && !t.sku) {
+    return <div className="rv-product rv-product--none">Товар не определён: покупатель написал не из карточки товара и не назвал артикул или номер заказа.</div>;
+  }
+  const idName = t.marketplace === 'wb' ? 'nmID' : 'SKU';
+  return (
+    <div className="rv-product">
+      <ProductThumb t={t} size="lg" />
+      <div className="rv-product-body">
+        <b className="rv-product-name">{t.productName || 'Название не загружено'}</b>
+        <span className="rv-muted">
+          {[t.offerId && `арт. ${t.offerId}`, t.sku && `${idName} ${t.sku}`].filter(Boolean).join(' · ')}
+        </span>
+      </div>
+      {t.productUrl && (
+        <a className="btn btn-ghost rv-product-link" href={t.productUrl} target="_blank" rel="noopener noreferrer">
+          На {MP_NAME[t.marketplace]} <ArrowSquareOutIcon size={16} />
+        </a>
+      )}
+    </div>
+  );
 }
 
 export function Chats() {
@@ -139,13 +175,16 @@ export function Chats() {
           <div className="rv-threads">
             {data?.threads.map(t => (
               <button key={key(t)} className={`rv-thread${sel === key(t) ? ' is-active' : ''}`} style={mpVar(t.marketplace)} onClick={() => setSel(key(t))}>
-                <Avatar t={t} />
+                <ProductThumb t={t} />
                 <span className="rv-thread-body">
                   <span className="rv-thread-top">
                     <b>{t.clientName || 'Покупатель'}</b>
                     <time>{fmt(t.lastAt)}</time>
                   </span>
-                  <span className="rv-thread-product"><MpTag mp={t.marketplace} /> {t.productName || t.offerId || 'Товар не указан'}</span>
+                  <span className="rv-thread-product">
+                    <MpTag mp={t.marketplace} />
+                    <span className="rv-thread-pname">{t.productName || (t.offerId ? `арт. ${t.offerId}` : 'Товар не определён')}</span>
+                  </span>
                   <span className="rv-thread-last">{t.lastFromBuyer ? '' : <span className="rv-muted">Вы: </span>}{t.lastText}</span>
                   {statusBadge(t) && <span className="rv-thread-status">{statusBadge(t)}</span>}
                 </span>
@@ -209,10 +248,11 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
         <Avatar t={th} />
         <div className="rv-pane-title">
           <b>{th.clientName || 'Покупатель'}</b>
-          <span className="rv-muted"><MpTag mp={th.marketplace} /> {th.productName || 'Товар не указан'}{th.offerId ? ` · арт. ${th.offerId}` : ''}</span>
+          <span className="rv-muted"><MpTag mp={th.marketplace} /> чат с покупателем</span>
         </div>
         {statusBadge(th)}
       </header>
+      <ProductStrip t={th} />
 
       <div className="rv-messages">
         {msgs.map(m => (

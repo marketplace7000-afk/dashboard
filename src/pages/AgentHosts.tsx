@@ -134,8 +134,10 @@ const AGENTS: AgentDef[] = [
   },
   {
     num: 3, title: 'Реклама',
-    about: 'Кампании, ставки и статистику рекламы собирает сервер через API, автопилот — в разделе «Реклама». В Chrome агента — то, чего нет в API: разведка разделов аналитики кабинетов (основа для сбора конкурентов и воронки).',
+    about: 'Кампании, ставки и статистику рекламы собирает сервер через API, автопилот — в разделе «Реклама». В Chrome агента — то, чего нет в API: конкуренты и позиции из аналитики кабинетов (вкладка «Конкуренты» в «Рекламе»), разведка новых разделов.',
     lanes: [
+      { type: 'competitor_watch', mp: 'wb', label: 'Конкуренты и позиции WB', short: 'Конкуренты WB', color: MP_COLOR.wb },
+      { type: 'competitor_watch', mp: 'ozon', label: 'Конкуренты Ozon', short: 'Конкуренты Ozon', color: MP_COLOR.ozon },
       { type: 'cabinet_recon', mp: 'wb', label: 'Разведка кабинета WB', short: 'Разведка WB', color: MP_COLOR.wb },
       { type: 'cabinet_recon', mp: 'ozon', label: 'Разведка кабинета Ozon', short: 'Разведка Ozon', color: MP_COLOR.ozon },
     ],

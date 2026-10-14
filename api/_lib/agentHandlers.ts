@@ -84,6 +84,15 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     return;
   }
 
+  // Конкуренты и позиции из аналитики кабинетов (Агент 3, сценарий competitor_watch).
+  if (what === 'competitors-ingest') {
+    const { saveCabinetSnapshot } = await import('./ads/cabinet');
+    const mp = b?.marketplace === 'ozon' ? 'ozon' : 'wb';
+    const summary = saveCabinetSnapshot(mp, b?.data ?? null);
+    res.status(200).json({ ok: true, summary });
+    return;
+  }
+
   // Разведка кабинета (Агент 3, сценарий cabinet_recon) — отчёт о запросах кабинета.
   if (what === 'recon-ingest') {
     const { saveRecon } = await import('./agentRecon');
@@ -106,6 +115,12 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     // Отзывы Ozon: id компании в кабинете = Client-Id Seller API.
     if (task.type === 'ozon_reviews' && !task.params.company_id) {
       task.params = { ...task.params, marketplace: 'ozon', company_id: String(process.env.OZON_CLIENT_ID || '').trim() };
+    }
+    // Конкуренты Ozon (Агент 3): id компании и типы наших товаров по выручке.
+    if (task.type === 'competitor_watch' && task.params.marketplace === 'ozon') {
+      const { ozonTopTypeIds } = await import('./rnp');
+      const top = await ozonTopTypeIds(8).catch(() => []);
+      task.params = { ...task.params, company_id: String(process.env.OZON_CLIENT_ID || '').trim(), categories: top.map(t => t.typeId) };
     }
     res.status(200).json({ task, settings: getSettings() });
     return;

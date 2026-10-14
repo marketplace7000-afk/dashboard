@@ -71,7 +71,7 @@ export type StageDef = { stage: string; title: string; counted: boolean };
 
 export const TASK_TYPE_TITLES: Record<AgentTaskType, string> = {
   showcase_prices: 'Цены покупателя',
-  competitor_watch: 'Мониторинг конкурентов',
+  competitor_watch: 'Конкуренты',
   funnel_compare: 'Воронка продаж',
   ozon_reviews: 'Отзывы Ozon',
   cabinet_recon: 'Разведка кабинета',
@@ -84,12 +84,13 @@ export const SCENARIO_STAGES: Record<AgentTaskType, StageDef[]> = {
     { stage: 'direct_cards',   title: 'Прямые карточки',    counted: true  },
     { stage: 'ingest',         title: 'Отправка в дашборд', counted: true  },
   ],
+  // Агент 3 «Реклама» (14.10.2026): конкуренты и позиции из аналитики кабинетов.
+  // WB — «Поисковые запросы: ваши товары» (позиции, факторы ранжирования) и наборы
+  // «Сравнения карточек»; Ozon — «Товары на Ozon» по нашим категориям и конкурентная позиция.
   competitor_watch: [
-    { stage: 'load_links',     title: 'Список конкурентов',  counted: false },
-    { stage: 'snapshot_cards', title: 'Снимки карточек',     counted: true  },
-    { stage: 'ingest',         title: 'Отправка снимков',    counted: false },
-    { stage: 'analyze',        title: 'Анализ (Claude)',     counted: true  },
-    { stage: 'save_advice',    title: 'Запись рекомендаций', counted: false },
+    { stage: 'open_cabinet', title: 'Кабинет',             counted: false },
+    { stage: 'collect',      title: 'Отчёты аналитики',    counted: true  },
+    { stage: 'ingest',       title: 'Отправка в дашборд',  counted: false },
   ],
   funnel_compare: [
     { stage: 'open_cabinet',        title: 'Вход в кабинет',         counted: false },
@@ -138,6 +139,8 @@ export type AgentSettings = {
   competitor_urgent_pct: number;
   /** Лимит токенов анализа на один товар. */
   tokens_per_item_limit: number;
+  /** WB «Сравнение карточек»: сколько платных сравнений в месяц может тратить агент (решение владельца 14.10.2026). */
+  wb_comparisons_month_limit: number;
 };
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
@@ -152,6 +155,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   competitor_attention_pct: 5,
   competitor_urgent_pct: 15,
   tokens_per_item_limit: 2000,
+  wb_comparisons_month_limit: 130,
 };
 
 // ─── Контракты API хоста ────────────────────────────────────────────────────

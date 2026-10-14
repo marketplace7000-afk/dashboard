@@ -390,6 +390,24 @@ export function upsertSchedule(s: { id?: number; type: AgentTaskType; params?: R
   return listSchedules();
 }
 
+/**
+ * Расписания по умолчанию (МСК). Агент 3 «Конкуренты» — ночью, раньше цен покупателя
+ * в 06:00, раз в сутки: отчёты аналитики кабинетов обновляются за прошедший день (14.10.2026).
+ */
+const DEFAULT_SCHEDULES: { type: AgentTaskType; marketplace: 'wb' | 'ozon'; cron: string }[] = [
+  { type: 'competitor_watch', marketplace: 'wb', cron: '40 5 * * *' },
+  { type: 'competitor_watch', marketplace: 'ozon', cron: '50 5 * * *' },
+];
+
+function ensureDefaultSchedules(d: any): void {
+  for (const s of DEFAULT_SCHEDULES) {
+    const exists = d.prepare(`SELECT 1 FROM agent_schedules WHERE type = ? AND json_extract(params, '$.marketplace') = ?`).get(s.type, s.marketplace);
+    if (exists) continue;
+    d.prepare('INSERT INTO agent_schedules(type, params, cron, enabled, next_run_at, created_at) VALUES (?, ?, ?, 1, ?, ?)')
+      .run(s.type, J({ marketplace: s.marketplace }), s.cron, nextCronRun(s.cron, now()), now());
+  }
+}
+
 // ─── Правила очереди ────────────────────────────────────────────────────────
 
 export function maintainQueue(): void {
@@ -409,7 +427,9 @@ export function maintainQueue(): void {
   // 3. claimed, не ставшие running, — обратно в очередь (без роста attempts).
   d.prepare("UPDATE agent_tasks SET status='queued', claimed_by=NULL, claimed_at=NULL WHERE status='claimed' AND claimed_at < ?").run(t - s.unclaim_after_min * 60_000);
 
-  // 4. Расписания.
+  // 4. Расписания. Расписания по умолчанию заводятся один раз — выключенное в панели
+  //    расписание остаётся выключенным.
+  ensureDefaultSchedules(d);
   for (const sc of d.prepare('SELECT * FROM agent_schedules WHERE enabled=1 AND next_run_at IS NOT NULL AND next_run_at <= ?').all(t)) {
     const prev = sc.last_task_id ? getTask(Number(sc.last_task_id)) : null;
     const busy = prev && ['queued', 'claimed', 'running'].includes(prev.status);

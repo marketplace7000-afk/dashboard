@@ -90,6 +90,44 @@ export const NO_ADS_REASON_LABEL: Record<string, string> = {
 
 export type Ads2ActionKind = 'pause' | 'start' | 'bid' | 'daily_limit' | 'weekly_budget';
 
+// ─── Конкуренты из аналитики кабинетов (Агент 3, competitor_watch, 14.10.2026) ──
+
+export type Ads2WbPosItem = {
+  nmId: string; name: string; vendorCode: string; photo: string; subject: string; isAdvertised: boolean;
+  price: number | null; rating: number | null; feedbackRating: number | null;
+  avgPos: number | null; avgPosDyn: number | null; views: number | null; viewsDyn: number | null;
+  ctr: number | null; openCard: number | null; orders: number | null; ordersDyn: number | null; visibility: number | null;
+  /** Что WB считает плохим для ранжирования (подписи по-русски). */
+  bad: string[];
+};
+
+export type Ads2WbCompSet = { date: string; free: boolean; nms: { nmId: string; name: string; photo: string; ours: boolean }[] };
+
+export type Ads2OzMarketItem = {
+  rank: number; sku: string; name: string; link: string; photo: string; seller: string; ours: boolean;
+  price: number | null; gmv: number | null; sold: number | null; salesDyn: number | null;
+  convSearch: number | null; convPdp: number | null; drr: number | null; daysInPromo: number | null; daysWithTrafarets: number | null;
+};
+
+export type Ads2Competitors = {
+  ok: true; mp: Ads2Mp; at: number | null;
+  /** Нет снимка — задание ещё не отработало. */
+  empty: boolean;
+  wb?: {
+    period: { start: string; end: string } | null;
+    summary: { avgPos: number | null; avgPosDyn: number | null; medianPos: number | null; visibility: number | null; advertised: number | null; total: number | null };
+    items: Ads2WbPosItem[];
+    comparisons: { thisMonth: number | null; remaining: number | null; agentLimit: number; sets: Ads2WbCompSet[] };
+  };
+  ozon?: {
+    categories: { category3Id: string; name: string; updateDate: string | null; ours: Ads2OzMarketItem[]; top: Ads2OzMarketItem[];
+      benchmark: { price: number | null; convSearch: number | null; convPdp: number | null; drr: number | null } }[];
+    positions: { category2Id: string; name: string; myPosition: number | null; myPositionDyn: number | null; sellers: number | null;
+      competitor: string | null; percentDiff: number | null; series: { date: string; my: number | null; competitor: number | null; best: number | null }[] }[];
+  };
+  errors: string[];
+};
+
 // ─── Автопилот, этап 2 «советник» (14.10.2026) ──────────────────────────────
 
 /** off — выключен; confirm — готовит предложения, применяет менеджер. Режим «сам» — этап 3. */

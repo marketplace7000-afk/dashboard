@@ -1571,6 +1571,28 @@ code {
 .ad2-prop-what { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
 .ad2-prop-reason { margin: 0; line-height: 1.45; color: var(--muted); }
 .ad2-prop-btns { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+.ad2-dyn { font-size: 12px; font-weight: 600; margin-left: 2px; }
+.ad2-dyn.good { color: var(--good); }
+.ad2-dyn.bad { color: var(--bad); }
+.ad2-chipsm { font-size: 11.5px; margin: 0 4px 4px 0; display: inline-block; }
+.ad2-h3 { margin: 0; font-size: 16px; }
+.ad2-row-ours td { background: var(--accent-soft); }
+.ad2-ozpos { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.ad2-minilines { width: 100%; height: 56px; display: block; margin: 6px 0; }
+.ad2-minilines path { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.ad2-minilines .l-my { stroke: var(--accent); stroke-width: 2.5; }
+.ad2-minilines .l-comp { stroke: var(--warn); }
+.ad2-minilines .l-best { stroke: var(--muted); stroke-dasharray: 4 3; }
+.ad2-lg::before { content: ''; display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 4px; vertical-align: middle; background: var(--muted); }
+.ad2-lg.my::before { background: var(--accent); }
+.ad2-lg.comp::before { background: var(--warn); }
+.ad2-cmpsets { display: grid; gap: 10px; }
+.ad2-cmpset { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.ad2-cmpnms { display: flex; flex-wrap: wrap; gap: 6px; }
+.ad2-cmpnm { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; padding: 4px 8px 4px 4px; border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px; color: var(--text); text-decoration: none; }
+.ad2-cmpnm img { width: 28px; height: 36px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.ad2-cmpnm span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ad2-cmpnm.ours { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 .ad2-field { display: grid; gap: 6px; font-size: 13px; color: var(--muted); margin-top: 8px; }
 @media (max-width: 640px) {
   .ad2-prop { flex-direction: column; }

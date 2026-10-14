@@ -734,6 +734,27 @@ async function collectOzonSpp(): Promise<string> {
 const OZ_CATALOG_KEY = 'rnp:ozon-catalog:v1';
 const OZ_TREE_KEY = 'rnp:ozon-type-names:v1';
 
+/**
+ * Типы товаров Ozon (type_id = category3Id в «Товарах на Ozon»), отсортированные
+ * по нашей выручке заказов за последние дни — для задания «Конкуренты» Агента 3.
+ * Только из кэша каталога и базы РНП, без запросов к Ozon.
+ */
+export async function ozonTopTypeIds(limit = 8, days = 14): Promise<{ typeId: string; revenue: number }[]> {
+  const cat = (await cacheGet<Record<string, { typeId: string }>>(OZ_CATALOG_KEY))?.data;
+  if (!cat) return [];
+  const to = mskDate(0);
+  const from = new Date(Date.parse(to + 'T00:00:00Z') - (days - 1) * DAY_MS).toISOString().slice(0, 10);
+  const rnp = await getRnp('ozon', from, to);
+  const sum = new Map<string, number>();
+  for (const [key, f] of Object.entries(rnp.facts)) {
+    const t = cat[key]?.typeId;
+    if (!t) continue;
+    const rev = (f?.ordered_amount ?? []).reduce((s: number, v: number | null) => s + (v ?? 0), 0);
+    if (rev > 0) sum.set(t, (sum.get(t) ?? 0) + rev);
+  }
+  return [...sum.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([typeId, revenue]) => ({ typeId, revenue: Math.round(revenue) }));
+}
+
 /** Тип товара Ozon (то, что «Культура Аналитики» показывает категорией) по type_id. */
 async function ozonTypeNames(): Promise<Record<string, string>> {
   const cached = await cacheGet<Record<string, string>>(OZ_TREE_KEY);

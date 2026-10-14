@@ -29,7 +29,7 @@ import { apiGet, apiPost, errText } from '../api/http';
 import {
   NO_ADS_REASON_LABEL,
   type Ads2Mp, type Ads2Overview, type Ads2Product, type Ads2Campaign, type Ads2CampaignItem, type Ads2Stat, type Ads2Issue,
-  type Ads2ActionKind, type Ads2Proposal, type Ads2AutopilotState,
+  type Ads2ActionKind, type Ads2Proposal, type Ads2AutopilotState, type Ads2Competitors,
 } from '../../shared/ads2';
 
 // ─── Числа ──────────────────────────────────────────────────────────────────
@@ -44,8 +44,8 @@ const pct = (v: number | null | undefined) => (v == null || !Number.isFinite(v) 
 const ddmm = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 const kRub = (v: number) => (Math.abs(v) >= 1_000_000 ? `${nf1.format(v / 1_000_000)} млн ₽` : Math.abs(v) >= 10_000 ? `${nf0.format(v / 1000)} тыс ₽` : rub(v));
 
-type Tab = 'overview' | 'products' | 'campaigns' | 'autopilot' | 'log';
-const TABS: Array<[Tab, string]> = [['overview', 'Обзор'], ['products', 'Товары'], ['campaigns', 'Кампании'], ['autopilot', 'Автопилот'], ['log', 'Журнал']];
+type Tab = 'overview' | 'products' | 'campaigns' | 'competitors' | 'autopilot' | 'log';
+const TABS: Array<[Tab, string]> = [['overview', 'Обзор'], ['products', 'Товары'], ['campaigns', 'Кампании'], ['competitors', 'Конкуренты'], ['autopilot', 'Автопилот'], ['log', 'Журнал']];
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   active: { label: 'активна', cls: 'good' }, paused: { label: 'пауза', cls: '' }, ready: { label: 'готова', cls: 'info' },
@@ -738,6 +738,165 @@ function Journal({ mp, names }: { mp: Ads2Mp; names: Map<string, string> }) {
   );
 }
 
+// ─── Конкуренты (Агент 3 на ПК, 14.10.2026) ─────────────────────────────────
+
+/** Динамика позиции: меньше — лучше. WB отдаёт разницу «сейчас − прошлый период». */
+function PosDyn({ v }: { v: number | null }) {
+  if (v == null || v === 0) return null;
+  const better = v < 0;
+  return <span className={`ad2-dyn ${better ? 'good' : 'bad'}`}>{better ? '▲' : '▼'}{nf0.format(Math.abs(v))}</span>;
+}
+function PctDyn({ v }: { v: number | null }) {
+  if (v == null || v === 0) return null;
+  return <span className={`ad2-dyn ${v > 0 ? 'good' : 'bad'}`}>{v > 0 ? '+' : ''}{nf0.format(v)}%</span>;
+}
+
+function MiniLines({ s }: { s: { date: string; my: number | null; competitor: number | null; best: number | null }[] }) {
+  const W = 260, H = 56;
+  const vals = s.flatMap(x => [x.my, x.competitor, x.best]).filter((v): v is number => v != null);
+  if (s.length < 2 || !vals.length) return null;
+  const max = Math.max(...vals) || 1;
+  const path = (k: 'my' | 'competitor' | 'best') => s.map((x, i) => {
+    const v = x[k];
+    if (v == null) return '';
+    return `${i === 0 ? 'M' : 'L'}${((i / (s.length - 1)) * W).toFixed(1)},${(H - (v / max) * (H - 4) - 2).toFixed(1)}`;
+  }).join(' ');
+  return (
+    <svg className="ad2-minilines" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Выручка: мы, ближайший конкурент, лидер">
+      <path d={path('best')} className="l-best" /><path d={path('competitor')} className="l-comp" /><path d={path('my')} className="l-my" />
+    </svg>
+  );
+}
+
+function Competitors({ mp }: { mp: Ads2Mp }) {
+  const [d, setD] = useState<Ads2Competitors | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [onlyBad, setOnlyBad] = useState(false);
+  useEffect(() => {
+    setD(null);
+    apiGet<Ads2Competitors>(`/api/ads2/competitors?mp=${mp}`).then(r => { setD(r.data); setErr(null); }).catch(e => setErr(errText(e)));
+  }, [mp]);
+  if (err) return <div className="rnp-alert">Конкуренты не загрузились: {err}</div>;
+  if (!d) return <div className="card muted">Загружаю…</div>;
+  const when = d.at ? new Date(d.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
+  const head = (
+    <p className="muted ad2-small">
+      Данные из аналитики кабинета {mp === 'wb' ? 'WB («Поисковые запросы: ваши товары», «Сравнение карточек»)' : 'Ozon («Товары на Ozon», «Конкурентная позиция»)'} — собирает Агент 3 в Chrome на ПК каждую ночь, только чтение.
+      {when && <> Снимок: {when}.</>}
+    </p>
+  );
+  if (d.empty) return <section className="card">{head}<p>Снимков ещё нет — задание «Конкуренты» запустится ночью по расписанию или кнопкой в «Сборщиках» → Агент 3.</p></section>;
+
+  if (d.wb) {
+    const w = d.wb;
+    const items = [...w.items].filter(i => !onlyBad || i.bad.length).sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
+    return (
+      <>
+        <section className="ad2-kpis">
+          <div className="card ad2-kpi"><div className="card-title">Средняя позиция в поиске</div><div className="ad2-kpi-v">{num(w.summary.avgPos)} <PosDyn v={w.summary.avgPosDyn} /></div><div className="ad2-kpi-sub">медиана {num(w.summary.medianPos)} · {w.period ? `${ddmm(w.period.start)}–${ddmm(w.period.end)}` : '7 дней'}</div></div>
+          <div className="card ad2-kpi"><div className="card-title">Видимость</div><div className="ad2-kpi-v">{pct(w.summary.visibility)}</div><div className="ad2-kpi-sub">доля показов карточек в поиске</div></div>
+          <div className="card ad2-kpi"><div className="card-title">В рекламе</div><div className="ad2-kpi-v">{num(w.summary.advertised)}</div><div className="ad2-kpi-sub">из {num(w.summary.total)} карточек</div></div>
+          <div className="card ad2-kpi"><div className="card-title">Сравнения карточек</div><div className="ad2-kpi-v">{num(w.comparisons.thisMonth)}</div><div className="ad2-kpi-sub">за месяц · агенту можно {w.comparisons.agentLimit}/мес · осталось у WB {num(w.comparisons.remaining)}</div></div>
+        </section>
+        <section className="card ad2-tablecard">
+          {head}
+          <div className="ad2-filters">
+            <button className={`period-btn ${!onlyBad ? 'active' : ''}`} onClick={() => setOnlyBad(false)}>Все · {w.items.length}</button>
+            <button className={`period-btn ${onlyBad ? 'active' : ''}`} onClick={() => setOnlyBad(true)}>Есть что исправить · {w.items.filter(i => i.bad.length).length}</button>
+          </div>
+          <div className="ad2-scroll">
+            <table className="ad2-table">
+              <thead><tr><th>Товар</th><th>Позиция</th><th>Показы</th><th>CTR</th><th>Переходы</th><th>Заказы</th><th>Видимость</th><th>Что мешает в поиске (по WB)</th></tr></thead>
+              <tbody>
+                {items.map(i => (
+                  <tr key={i.nmId}>
+                    <td><ProductCell p={{ photo: i.photo, name: i.name, article: `${i.vendorCode} · ${i.nmId}`, link: `https://www.wildberries.ru/catalog/${i.nmId}/detail.aspx` }} />
+                      {i.isAdvertised && <span className="chip info ad2-small">в рекламе</span>}</td>
+                    <td className="ad2-nowrap"><b>{num(i.avgPos)}</b> <PosDyn v={i.avgPosDyn} /></td>
+                    <td className="ad2-nowrap">{num(i.views)} <PctDyn v={i.viewsDyn} /></td>
+                    <td>{pct(i.ctr)}</td>
+                    <td>{num(i.openCard)}</td>
+                    <td className="ad2-nowrap">{num(i.orders)} <PctDyn v={i.ordersDyn} /></td>
+                    <td>{pct(i.visibility)}</td>
+                    <td>{i.bad.length ? i.bad.map(b => <span key={b} className="chip warn ad2-chipsm">{b}</span>) : <span className="muted">—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section className="card ad2-tablecard">
+          <h3 className="ad2-h3">Сравнения карточек (созданы в кабинете WB)</h3>
+          <p className="muted ad2-small">Наш товар выделен. «Бесплатно» — WB даёт открыть без списания лимита; отчёты сравнений агент начнёт снимать после того, как будет записан формат запроса (см. «Сборщики»).</p>
+          <div className="ad2-cmpsets">
+            {w.comparisons.sets.slice(0, 20).map((s, k) => (
+              <div key={k} className="ad2-cmpset">
+                <div className="ad2-small"><b>{s.date ? new Date(s.date).toLocaleDateString('ru-RU') : ''}</b> {s.free ? <span className="chip good ad2-chipsm">бесплатно</span> : <span className="chip ad2-chipsm">1 сравнение</span>}</div>
+                <div className="ad2-cmpnms">{s.nms.map(n => (
+                  <a key={n.nmId} href={`https://www.wildberries.ru/catalog/${n.nmId}/detail.aspx`} target="_blank" rel="noreferrer" className={`ad2-cmpnm ${n.ours ? 'ours' : ''}`} title={n.name}>
+                    {n.photo ? <img src={n.photo} alt="" loading="lazy" /> : null}<span>{n.name}</span>
+                  </a>
+                ))}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+        {d.errors.length > 0 && <div className="rnp-note">Кабинет ответил ошибкой: {d.errors.join(' · ')}</div>}
+      </>
+    );
+  }
+
+  const o = d.ozon!;
+  return (
+    <>
+      <section className="card ad2-tablecard">
+        {head}
+        <div className="ad2-ozpos">
+          {o.positions.map(p => (
+            <div key={p.category2Id} className="card ad2-kpi">
+              <div className="card-title">Место среди продавцов: {p.name}</div>
+              <div className="ad2-kpi-v">{num(p.myPosition)} <span className="muted ad2-small">из {num(p.sellers)}</span> <PosDyn v={p.myPositionDyn} /></div>
+              <MiniLines s={p.series} />
+              <div className="ad2-kpi-sub"><span className="ad2-lg my">мы</span> <span className="ad2-lg comp">ближайший: {p.competitor ?? '—'}</span> <span className="ad2-lg best">лидер</span>
+                {p.percentDiff != null && <> · у ближайшего выручка больше на {nf0.format(p.percentDiff)}%</>}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+      {o.categories.map(c => {
+        const rows = [...c.top, ...c.ours.filter(x => x.rank > 10)];
+        return (
+          <section key={c.category3Id} className="card ad2-tablecard">
+            <h3 className="ad2-h3">{c.name}: топ рынка за неделю {c.ours.length ? <span className="muted ad2-small">· наших в топ-50: {c.ours.length}</span> : <span className="muted ad2-small">· наших в топ-50 нет</span>}</h3>
+            <p className="muted ad2-small">Средние по категории: конверсия в корзину из поиска {pct(c.benchmark.convSearch)}, из карточки {pct(c.benchmark.convPdp)}, ДРР {pct(c.benchmark.drr)}.{c.updateDate ? ` Данные Ozon на ${c.updateDate.slice(0, 10)}.` : ''}</p>
+            <div className="ad2-scroll">
+              <table className="ad2-table">
+                <thead><tr><th>#</th><th>Товар</th><th>Продавец</th><th>Цена</th><th>Выручка</th><th>Продано</th><th>В корзину: поиск / карточка</th><th>ДРР</th><th>Дней в акциях / трафаретах</th></tr></thead>
+                <tbody>
+                  {rows.map(x => (
+                    <tr key={x.sku} className={x.ours ? 'ad2-row-ours' : ''}>
+                      <td>{x.rank}</td>
+                      <td><ProductCell p={{ photo: x.photo, name: x.name, article: x.sku, link: x.link }} /></td>
+                      <td>{x.ours ? <b>мы</b> : x.seller}</td>
+                      <td className="ad2-nowrap">{rub(x.price)}</td>
+                      <td className="ad2-nowrap">{kRub(x.gmv ?? 0)} <PctDyn v={x.salesDyn} /></td>
+                      <td>{num(x.sold)}</td>
+                      <td className="ad2-nowrap">{pct(x.convSearch)} / {pct(x.convPdp)}</td>
+                      <td>{pct(x.drr)}</td>
+                      <td>{num(x.daysInPromo)} / {num(x.daysWithTrafarets)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        );
+      })}
+      {d.errors.length > 0 && <div className="rnp-note">Кабинет ответил ошибкой: {d.errors.join(' · ')}</div>}
+    </>
+  );
+}
+
 // ─── Автопилот (этап 2) ─────────────────────────────────────────────────────
 
 type ApResp = { state: Ads2AutopilotState; proposals: Ads2Proposal[] };
@@ -1028,6 +1187,7 @@ function Board({ mp }: { mp: Ads2Mp }) {
           {tab === 'overview' && <Overview d={data} openProduct={setProductKey} />}
           {tab === 'products' && <Products d={data} openProduct={setProductKey} />}
           {tab === 'campaigns' && <Campaigns d={data} ask={ask} openId={openCamp} setOpenId={setOpenCamp} />}
+          {tab === 'competitors' && <Competitors mp={mp} />}
           {tab === 'autopilot' && <Autopilot d={data} setToast={setToast} reload={load} />}
           {tab === 'log' && <Journal mp={mp} names={names} />}
         </Fragment>

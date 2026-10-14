@@ -116,6 +116,14 @@ export async function reconIngest(marketplace: 'wb' | 'ozon', pages: unknown[]):
   } catch (e) { localLog(`[api] recon-ingest не прошёл: ${(e as Error).message}`); return false; }
 }
 
+/** Конкуренты и позиции из аналитики кабинета (Агент 3) → дашборд. Возвращает итог для сводки или null. */
+export async function competitorsIngest(marketplace: 'wb' | 'ozon', data: unknown): Promise<string | null> {
+  try {
+    const r = await call<{ ok: boolean; summary?: string }>(`/api/agent/competitors-ingest`, { marketplace, data });
+    return r.status === 200 && r.json?.ok ? (r.json.summary || 'принято') : null;
+  } catch (e) { localLog(`[api] competitors-ingest не прошёл: ${(e as Error).message}`); return null; }
+}
+
 /** Отзывы Ozon из кабинета → дашборд (раздел «Отзывы и вопросы»). complete = список полный. */
 export async function reviewsIngest(reviews: unknown[], complete: boolean): Promise<boolean> {
   try {

@@ -335,6 +335,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           proposals: await ap.listProposals(mp as any, req.query.history === '1'),
         });
       }
+      // Конкуренты и позиции из аналитики кабинетов (Агент 3 на ПК, 14.10.2026).
+      if (what === 'competitors') {
+        const { getCompetitors } = await import('./_lib/ads/cabinet');
+        return res.status(200).json(getCompetitors(req.query.mp === 'ozon' ? 'ozon' : 'wb'));
+      }
       if (what === 'campaigns') {
         const mp = req.query.mp === 'wb' || req.query.mp === 'ozon' ? req.query.mp : undefined;
         return res.status(200).json({ ok: true, campaigns: store.listCampaigns(mp as any) });

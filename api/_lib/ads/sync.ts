@@ -161,9 +161,11 @@ async function syncWbCampaigns(): Promise<string> {
     let lj: any = null;
     try { lj = JSON.parse(text); } catch { /* разбор ниже вернёт пусто */ }
     const rows = parseWbDailyLimits(lj);
-    // На проде 14.10 ответ 200 дал 0 строк — форма ответа не та, что ждали.
-    // Пока не сверим, печатаем начало ответа в итог сбора (он идёт в журнал).
-    if (!rows.length && !limitsNote) limitsNote = ` (лимиты: 200, но не разобраны: ${text.slice(0, 300)})`;
+    // Прод 14.10: {"adverts":[]} — ключ подходит, но лимиты в кабинете не заданы.
+    // Незнакомую форму ответа печатаем в итог сбора (он идёт в журнал).
+    if (!rows.length && !limitsNote) {
+      limitsNote = Array.isArray(lj?.adverts) ? ' (лимиты в кабинете не заданы)' : ` (лимиты: 200, но не разобраны: ${text.slice(0, 300)})`;
+    }
     upsertDailyLimits('wb', rows);
     limits += rows.length;
   }

@@ -12,7 +12,7 @@ import {
   getAllLinks, suggestLinks, watchedIds, addLink, setLinkStatus, removeLink, parseNmId, parseOzonSku, getLatestPrices,
   type CompetitorLink, type WatchStatus,
 } from '../competitorWatch';
-import { rnpItems } from '../rnp';
+import { rnpInStockSkus, rnpItems } from '../rnp';
 import { wbImageUrl } from '../wbBasket';
 
 const KEEP = 30;
@@ -67,14 +67,16 @@ export function titleWords(s: string): Set<string> {
 }
 
 /** Наш справочник: артикул продавца ↔ номер на площадке (WB nmID, Ozon SKU). */
-function ourCatalog(mp: AdMp): { byKey: Map<string, { id: string; name: string; photo: string }>; byId: Map<string, string> } {
-  const byKey = new Map<string, { id: string; name: string; photo: string }>();
+function ourCatalog(mp: AdMp): { byKey: Map<string, { id: string; name: string; photo: string; active?: boolean }>; byId: Map<string, string> } {
+  const byKey = new Map<string, { id: string; name: string; photo: string; active?: boolean }>();
   const byId = new Map<string, string>();
+  const active = rnpInStockSkus(mp);
   for (const r of rnpItems(mp)) {
     const key = up(mp === 'wb' ? r.article : (r.article || r.sku));
     const id = mp === 'wb' ? r.sku : r.extId;
     if (!key) continue;
-    if (!byKey.has(key)) byKey.set(key, { id: id || '', name: r.name, photo: r.photo });
+    if (!byKey.has(key)) byKey.set(key, { id: id || '', name: r.name, photo: r.photo, active: active.has(r.sku) });
+    else if (active.has(r.sku)) byKey.get(key)!.active = true;
     if (id) byId.set(String(id), key);
   }
   return { byKey, byId };
@@ -339,8 +341,9 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     if ((ourSeller && String(x.sellerId) === ourSeller) || x.blockedAsYourGood) fromSnap.set(up(x.article), { id: String(x.sku ?? ''), name: String(x.name ?? ''), photo: String(x.photo ?? '') });
   }
   for (const k of fromSnap.keys()) keys.add(k);
-  // и весь наш справочник площадки: «Все товары» — это все товары, а не только попавшие в снимок кабинета
-  for (const [k, v] of byKey) if (v.id) keys.add(k);
+  // и все наши товары в наличии (остаток FBO+FBS > 0, как «В продаже» в «Ценах»), а не только попавшие в снимок кабинета;
+  // архив без остатка и продаж не показываем — привязать к нему всё равно можно через поле «Наш товар»
+  for (const [k, v] of byKey) if (v.id && v.active) keys.add(k);
   keys.delete('');
   const watch: Ads2WatchProduct[] = [...keys].map(key => {
     const cat = byKey.get(key)?.id ? byKey.get(key) : fromSnap.get(key) ?? byKey.get(key);

@@ -162,6 +162,20 @@ export function rnpItems(mp: RnpMp): { sku: string; article: string; name: strin
   } catch { return []; }
 }
 
+/**
+ * Товары в наличии: остаток FBO+FBS > 0 в последнем обходе остатков (как фильтр «В продаже» в «Ценах»).
+ * Заказы без остатка не считаем: на Ozon это в основном старые дубли карточек.
+ */
+export function rnpInStockSkus(mp: RnpMp): Set<string> {
+  const d = getDb();
+  if (!d) return new Set();
+  try {
+    const last = (d.prepare(`SELECT max(date) dt FROM rnp_fact WHERE mp = ? AND metric = 'stocks'`).get(mp) as any)?.dt ?? '';
+    const rows = d.prepare(`SELECT DISTINCT sku FROM rnp_fact WHERE mp = ? AND metric = 'stocks' AND date = ? AND value > 0`).all(mp, last) as any[];
+    return new Set(rows.map(r => String(r.sku)));
+  } catch { return new Set(); }
+}
+
 function upsertItems(mp: RnpMp, items: RnpItem[]): void {
   const d = getDb();
   if (!d || !items.length) return;

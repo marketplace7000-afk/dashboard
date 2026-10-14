@@ -94,6 +94,9 @@ export function adsDb(): any | null {
       );
       CREATE TABLE IF NOT EXISTS ad_meta (key TEXT PRIMARY KEY, value TEXT);
     `);
+    // 14.10: архив товара (карточки под самовыкуп, дубли) — скрыт со всех экранов «Рекламы».
+    const flagCols = (db.prepare('PRAGMA table_info(ad_product_flag)').all() as any[]).map(c => c.name);
+    if (!flagCols.includes('archived')) db.exec('ALTER TABLE ad_product_flag ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
     return db;
   } catch (e) {
     console.warn('[ads-store] sqlite init failed:', (e as Error).message);
@@ -349,13 +352,39 @@ export function listChanges(limit = 100): any[] {
 export const NO_ADS_REASONS = ['self_buyout', 'phase_out', 'inactive', 'other'] as const;
 export type NoAdsReason = typeof NO_ADS_REASONS[number];
 
-export type ProductFlag = { mp: AdMp; sku: string; no_ads: boolean; reason: NoAdsReason | null; note: string | null; updated_at: number; updated_by: string | null };
+export type ProductFlag = { mp: AdMp; sku: string; no_ads: boolean; archived: boolean; reason: NoAdsReason | null; note: string | null; updated_at: number; updated_by: string | null };
 
 export function listFlags(): ProductFlag[] {
   const d = adsDb();
   if (!d) return [];
-  return (d.prepare('SELECT * FROM ad_product_flag WHERE no_ads = 1 ORDER BY updated_at DESC').all() as any[])
-    .map(r => ({ ...r, no_ads: !!r.no_ads }));
+  return (d.prepare('SELECT * FROM ad_product_flag WHERE no_ads = 1 OR archived = 1 ORDER BY updated_at DESC').all() as any[])
+    .map(r => ({ ...r, no_ads: !!r.no_ads, archived: !!r.archived }));
+}
+
+/**
+ * Архив: товар пропадает из «Товаров», «Обзора» и «Конкурентов» и одновременно получает
+ * «Не рекламировать» (автопилот его не трогает). Возврат из архива снимает только архив —
+ * отметку «Не рекламировать» менеджер снимает сам, осознанно.
+ */
+export function setArchived(mp: AdMp, skus: string[], archived: boolean, reason: NoAdsReason | null, by: string): number {
+  const d = adsDb();
+  if (!d) throw new Error('хранилище рекламы недоступно');
+  if (archived && (!reason || !NO_ADS_REASONS.includes(reason))) throw new Error('укажите причину: ' + NO_ADS_REASONS.join(', '));
+  const now = Date.now();
+  const on = d.prepare(`INSERT INTO ad_product_flag (mp, sku, no_ads, archived, reason, note, updated_at, updated_by) VALUES (?, ?, 1, 1, ?, NULL, ?, ?)
+    ON CONFLICT(mp, sku) DO UPDATE SET archived = 1, reason = CASE WHEN ad_product_flag.no_ads = 1 THEN ad_product_flag.reason ELSE excluded.reason END,
+      no_ads = 1, updated_at = excluded.updated_at, updated_by = excluded.updated_by`);
+  const off = d.prepare('UPDATE ad_product_flag SET archived = 0, updated_at = ?, updated_by = ? WHERE mp = ? AND sku = ?');
+  let n = 0;
+  d.exec('BEGIN');
+  try {
+    for (const sku of [...new Set(skus.map(s => String(s).trim()).filter(Boolean))].slice(0, 500)) {
+      if (archived) on.run(mp, sku, reason, now, by); else off.run(now, by, mp, sku);
+      n++;
+    }
+    d.exec('COMMIT');
+  } catch (e) { d.exec('ROLLBACK'); throw e; }
+  return n;
 }
 
 export function setFlag(mp: AdMp, sku: string, noAds: boolean, reason: NoAdsReason | null, note: string | null, by: string): ProductFlag {
@@ -367,7 +396,8 @@ export function setFlag(mp: AdMp, sku: string, noAds: boolean, reason: NoAdsReas
     ON CONFLICT(mp, sku) DO UPDATE SET no_ads = excluded.no_ads, reason = excluded.reason, note = excluded.note,
       updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
     .run(mp, sku, noAds ? 1 : 0, noAds ? reason : null, note, now, by);
-  return { mp, sku, no_ads: noAds, reason: noAds ? reason : null, note, updated_at: now, updated_by: by };
+  const archived = !!(d.prepare('SELECT archived FROM ad_product_flag WHERE mp = ? AND sku = ?').get(mp, sku) as any)?.archived;
+  return { mp, sku, no_ads: noAds, archived, reason: noAds ? reason : null, note, updated_at: now, updated_by: by };
 }
 
 /** Можно ли автопилоту трогать товар. */

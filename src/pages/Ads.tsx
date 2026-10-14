@@ -228,7 +228,7 @@ function SpendChart({ days }: { days: Ads2Overview['days'] }) {
 
 function Overview({ d, openProduct }: { d: Ads2Overview; openProduct: (k: string) => void }) {
   const b = d.budget;
-  const attention = d.products.filter(p => p.issues.some(i => i.level !== 'info'))
+  const attention = d.products.filter(p => p.issues.some(i => i.level !== 'info')) // у архива остаётся только «отмечен, но реклама идёт»
     .sort((x, y) => (y.issues.some(i => i.level === 'critical') ? 1 : 0) - (x.issues.some(i => i.level === 'critical') ? 1 : 0) || y.spend - x.spend);
   const chances = d.products.filter(p => p.issues.some(i => i.code === 'no_ads_opportunity'));
   const active = d.campaigns.filter(c => c.status === 'active').length;
@@ -301,26 +301,34 @@ function Overview({ d, openProduct }: { d: Ads2Overview; openProduct: (k: string
 
 // ─── Товары ─────────────────────────────────────────────────────────────────
 
-type PFilter = 'all' | 'ads' | 'noads' | 'issues' | 'flagged';
+type PFilter = 'all' | 'ads' | 'noads' | 'issues' | 'flagged' | 'archive';
 type PSort = 'revenue' | 'spend' | 'drr' | 'stock';
 
-function Products({ d, openProduct }: { d: Ads2Overview; openProduct: (k: string) => void }) {
+function Products({ d, openProduct, onChanged, setToast }: {
+  d: Ads2Overview; openProduct: (k: string) => void; onChanged: () => void; setToast: (t: { ok: boolean; text: string }) => void;
+}) {
   const [q, setQ] = useState('');
   const [f, setF] = useState<PFilter>('all');
   const [sort, setSort] = useState<PSort>('revenue');
   const [dir, setDir] = useState<1 | -1>(-1);
   const [shown, setShown] = useState(60);
+  // Архив (карточки под самовыкуп, дубли): отмечаем пачкой — галочки в строках или «выбрать все найденные».
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [reason, setReason] = useState('self_buyout');
+  const [saving, setSaving] = useState(false);
+  const work = useMemo(() => d.products.filter(p => !p.archived), [d]);
   const counts = useMemo(() => ({
-    all: d.products.length,
-    ads: d.products.filter(p => p.spend > 0 || p.campaigns.length).length,
-    noads: d.products.filter(p => !p.spend && !p.campaigns.length).length,
-    issues: d.products.filter(p => p.issues.some(i => i.level !== 'info')).length,
-    flagged: d.products.filter(p => p.flag).length,
-  }), [d]);
+    all: work.length,
+    ads: work.filter(p => p.spend > 0 || p.campaigns.length).length,
+    noads: work.filter(p => !p.spend && !p.campaigns.length).length,
+    issues: work.filter(p => p.issues.some(i => i.level !== 'info')).length,
+    flagged: work.filter(p => p.flag).length,
+    archive: d.products.length - work.length,
+  }), [d, work]);
   const list = useMemo(() => {
     const s = q.trim().toLowerCase();
-    const xs = d.products.filter(p =>
-      (f === 'all' || (f === 'ads' && (p.spend > 0 || p.campaigns.length)) || (f === 'noads' && !p.spend && !p.campaigns.length)
+    const xs = (f === 'archive' ? d.products.filter(p => p.archived) : work).filter(p =>
+      (f === 'all' || f === 'archive' || (f === 'ads' && (p.spend > 0 || p.campaigns.length)) || (f === 'noads' && !p.spend && !p.campaigns.length)
         || (f === 'issues' && p.issues.some(i => i.level !== 'info')) || (f === 'flagged' && p.flag))
       && (!s || `${p.name} ${p.article} ${p.adSku ?? ''} ${p.key}`.toLowerCase().includes(s)));
     const val = (p: Ads2Product) => sort === 'revenue' ? p.revenue : sort === 'spend' ? p.spend : sort === 'drr' ? (p.drr ?? -1) : (p.daysOfStock ?? 1e9);
@@ -331,6 +339,23 @@ function Products({ d, openProduct }: { d: Ads2Overview; openProduct: (k: string
       {label} {sort === k && (dir === -1 ? <CaretDownIcon size={11} /> : <CaretUpIcon size={11} />)}
     </th>
   );
+  const skuOf = (p: Ads2Product) => p.adSku ?? p.key;
+  const selKeys = list.filter(p => sel.has(p.key));
+  const allSel = list.length > 0 && list.every(p => sel.has(p.key));
+  const toggle = (k: string) => setSel(s => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const archive = async (on: boolean) => {
+    if (!selKeys.length) return;
+    setSaving(true);
+    try {
+      await apiPost('/api/ads2/flags', { mp: d.mp, skus: selKeys.map(skuOf), archive: on, reason: on ? reason : null });
+      setToast({ ok: true, text: on
+        ? `В архиве: ${selKeys.length}. Скрыты из «Товаров», «Обзора» и «Конкурентов», отмечены «Не рекламировать» — автопилот их не тронет`
+        : `Возвращены из архива: ${selKeys.length}. Отметка «Не рекламировать» осталась — снимите в карточке товара, если нужно` });
+      setSel(new Set());
+      onChanged();
+    } catch (e) { setToast({ ok: false, text: `Не сохранено: ${errText(e)}` }); }
+    finally { setSaving(false); }
+  };
   return (
     <section className="card ad2-tablecard">
       <div className="ad2-filters">
@@ -339,15 +364,32 @@ function Products({ d, openProduct }: { d: Ads2Overview; openProduct: (k: string
           <input className="input" placeholder="Название, артикул или SKU" value={q} onChange={e => { setQ(e.target.value); setShown(60); }} />
         </label>
         <div className="period-switch" role="group" aria-label="Фильтр">
-          {([['all', 'Все'], ['ads', 'С рекламой'], ['noads', 'Без рекламы'], ['issues', 'Есть проблемы'], ['flagged', 'Не рекламировать']] as Array<[PFilter, string]>).map(([k, l]) => (
-            <button key={k} className={`period-btn ${f === k ? 'active' : ''}`} onClick={() => { setF(k); setShown(60); }}>{l} <span className="ad2-cnt">{counts[k]}</span></button>
+          {([['all', 'Все'], ['ads', 'С рекламой'], ['noads', 'Без рекламы'], ['issues', 'Есть проблемы'], ['flagged', 'Не рекламировать'], ['archive', 'Архив']] as Array<[PFilter, string]>).map(([k, l]) => (
+            <button key={k} className={`period-btn ${f === k ? 'active' : ''}`} onClick={() => { setF(k); setShown(60); setSel(new Set()); }}>{l} <span className="ad2-cnt">{counts[k]}</span></button>
           ))}
         </div>
       </div>
+      {selKeys.length > 0 && (
+        <div className="ad2-selbar">
+          <b>Выбрано: {selKeys.length}</b>
+          {f === 'archive'
+            ? <button className="btn btn-sm" disabled={saving} onClick={() => void archive(false)}>Вернуть из архива</button>
+            : <>
+                <select className="select" value={reason} onChange={e => setReason(e.target.value)} aria-label="Причина архива">
+                  {Object.entries(NO_ADS_REASON_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+                <button className="btn btn-sm btn-bad" disabled={saving} onClick={() => void archive(true)}>В архив</button>
+              </>}
+          <button className="btn btn-sm" onClick={() => setSel(new Set())}>Снять выбор</button>
+          {f !== 'archive' && <span className="muted ad2-small">Архив — для карточек под самовыкуп и дублей: скрыты из «Товаров», «Обзора» и «Конкурентов», автопилот их не трогает. Вернуть — фильтр «Архив».</span>}
+        </div>
+      )}
       <div className="ad2-scroll">
         <table className="ad2-table">
           <thead>
             <tr>
+              <th className="ad2-col-chk"><input type="checkbox" aria-label="Выбрать все найденные" title="Выбрать все найденные (с учётом поиска и фильтра)" checked={allSel}
+                onChange={() => setSel(allSel ? new Set() : new Set(list.map(p => p.key)))} /></th>
               <th className="ad2-col-prod">Товар</th>
               <th className="ad2-num">Заказы</th>
               {th('revenue', 'Заказано')}
@@ -364,7 +406,8 @@ function Products({ d, openProduct }: { d: Ads2Overview; openProduct: (k: string
           </thead>
           <tbody>
             {list.slice(0, shown).map(p => (
-              <tr key={p.key} onClick={() => openProduct(p.key)} className="ad2-click">
+              <tr key={p.key} onClick={() => openProduct(p.key)} className={`ad2-click ${sel.has(p.key) ? 'ad2-row-sel' : ''}`}>
+                <td className="ad2-col-chk" onClick={e => e.stopPropagation()}><input type="checkbox" aria-label="Выбрать" checked={sel.has(p.key)} onChange={() => toggle(p.key)} /></td>
                 <td className="ad2-col-prod"><ProductCell p={p} /></td>
                 <td className="ad2-num">{num(p.orders)}</td>
                 <td className="ad2-num">{rub(p.revenue)}</td>
@@ -375,7 +418,7 @@ function Products({ d, openProduct }: { d: Ads2Overview; openProduct: (k: string
                 <td className={`ad2-num ${p.issues.some(i => i.code === 'cart_to_order') ? 'ad2-warn' : ''}`}>{pct(p.cartToOrder)}</td>
                 <td className={`ad2-num ${p.daysOfStock != null && p.daysOfStock < 7 ? 'ad2-bad' : ''}`}>{p.daysOfStock == null ? (p.stock === 0 ? '0 шт' : '–') : `${num(p.daysOfStock)} дн`}</td>
                 <td className="ad2-num">{pct(p.marginPct)}</td>
-                <td>{p.flag ? <span className="chip bad">не рекламировать</span> : p.campaigns.length ? `${p.campaigns.filter(c => c.status === 'active').length} из ${p.campaigns.length}` : <span className="muted">нет</span>}</td>
+                <td>{p.archived ? <span className="chip">архив</span> : p.flag ? <span className="chip bad">не рекламировать</span> : p.campaigns.length ? `${p.campaigns.filter(c => c.status === 'active').length} из ${p.campaigns.length}` : <span className="muted">нет</span>}</td>
                 <td><span className="ad2-issues">{p.issues.map(i => <IssueIcon key={i.code} i={i} />)}</span></td>
               </tr>
             ))}
@@ -447,6 +490,16 @@ function ProductDrawer({ d, p, onClose, onChanged, setToast, openCampaign }: {
     } catch (e) { setToast({ ok: false, text: `Не сохранено: ${errText(e)}` }); }
     finally { setSaving(false); }
   };
+  const setArchive = async (on: boolean) => {
+    setSaving(true);
+    try {
+      await apiPost('/api/ads2/flags', { mp: d.mp, skus: [p.adSku ?? p.key], archive: on, reason: on ? reason : null });
+      setToast({ ok: true, text: on ? 'Товар в архиве — скрыт с экранов «Рекламы», автопилот его не тронет' : 'Товар возвращён из архива' });
+      onChanged();
+      if (on) onClose();
+    } catch (e) { setToast({ ok: false, text: `Не сохранено: ${errText(e)}` }); }
+    finally { setSaving(false); }
+  };
   return (
     <div className="ad2-drawer-bg" onClick={onClose}>
       <aside className="ad2-drawer" onClick={e => e.stopPropagation()} aria-label="Карточка товара">
@@ -504,6 +557,14 @@ function ProductDrawer({ d, p, onClose, onChanged, setToast, openCampaign }: {
                 <button className="btn btn-good" disabled={saving} onClick={() => saveFlag(false)}>Снять отметку</button>
               </>
             : <button className="btn btn-bad" disabled={saving} onClick={() => saveFlag(true)}><ProhibitIcon size={14} /> Не рекламировать</button>}
+        </div>
+
+        <h4>Архив</h4>
+        <p className="muted ad2-small">Для карточек под самовыкуп и дублей: товар пропадает из «Товаров», «Обзора» и «Конкурентов» и получает «Не рекламировать». Найти и вернуть — фильтр «Архив» во вкладке «Товары».</p>
+        <div className="ad2-flag">
+          {p.archived
+            ? <button className="btn btn-good" disabled={saving} onClick={() => void setArchive(false)}>Вернуть из архива</button>
+            : <button className="btn" disabled={saving} onClick={() => void setArchive(true)}>В архив (причина: {NO_ADS_REASON_LABEL[reason] ?? reason})</button>}
         </div>
       </aside>
     </div>
@@ -1300,7 +1361,7 @@ function Board({ mp }: { mp: Ads2Mp }) {
       {data && (
         <Fragment key={`${mp}-${days}`}>
           {tab === 'overview' && <Overview d={data} openProduct={setProductKey} />}
-          {tab === 'products' && <Products d={data} openProduct={setProductKey} />}
+          {tab === 'products' && <Products d={data} openProduct={setProductKey} onChanged={load} setToast={setToast} />}
           {tab === 'campaigns' && <Campaigns d={data} ask={ask} openId={openCamp} setOpenId={setOpenCamp} />}
           {tab === 'competitors' && <Competitors mp={mp} />}
           {tab === 'autopilot' && <Autopilot d={data} setToast={setToast} reload={load} />}

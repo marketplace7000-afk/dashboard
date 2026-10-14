@@ -5,7 +5,7 @@
  * Хост присылает сырые ответы кабинета; здесь храним снимок (ads.sqlite,
  * последние 30 на площадку) и разбираем последний для вкладки «Конкуренты».
  */
-import { adsDb, type AdMp } from './store';
+import { adsDb, listFlags, type AdMp } from './store';
 import { DEFAULT_AGENT_SETTINGS } from '../../../shared/agents';
 import type { Ads2Competitors, Ads2OzMarketItem, Ads2WatchLink, Ads2WatchProduct, Ads2WbPosItem } from '../../../shared/ads2';
 import {
@@ -345,6 +345,9 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
   // архив без остатка и продаж не показываем — привязать к нему всё равно можно через поле «Наш товар»
   for (const [k, v] of byKey) if (v.id && v.active) keys.add(k);
   keys.delete('');
+  // архив «Рекламы» (самовыкуп, дубли) здесь не показываем — по номеру товара на площадке
+  const archived = new Set(listFlags().filter(f => f.mp === mp && f.archived).map(f => f.sku));
+  for (const k of [...keys]) { const id = byKey.get(k)?.id || fromSnap.get(k)?.id; if (id && archived.has(String(id))) keys.delete(k); }
   const watch: Ads2WatchProduct[] = [...keys].map(key => {
     const cat = byKey.get(key)?.id ? byKey.get(key) : fromSnap.get(key) ?? byKey.get(key);
     const ourId = cat?.id ?? '';

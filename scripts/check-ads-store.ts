@@ -139,6 +139,13 @@ async function main() {
     store.setFlag('wb', '923646381', false, null, null, 'manager');
     check('отметка снимается', store.isNoAds('wb', '923646381'), false);
 
+    store.setFlag('ozon', '5933182946', true, 'phase_out', null, 'manager');
+    check('архив пачкой', store.setArchived('ozon', ['5933182946', '5933182510', '5933182510'], true, 'self_buyout', 'manager'), 2);
+    const af = () => store.listFlags().filter(x => x.mp === 'ozon').map(x => `${x.sku}:${x.archived}:${x.no_ads}:${x.reason}`).sort();
+    check('архив = скрыт + «не рекламировать», прежняя причина сохраняется', af(), ['5933182510:true:true:self_buyout', '5933182946:true:true:phase_out']);
+    store.setArchived('ozon', ['5933182510'], false, null, 'manager');
+    check('возврат снимает только архив', af(), ['5933182510:false:true:self_buyout', '5933182946:true:true:phase_out']);
+
     store.logChange({ mp: 'wb', campaign_id: '40772131', sku: '923646381', actor: 'autopilot', action: 'bid',
       before: { search: 87000 }, after: { search: 95000 }, reason: 'позиция 3 → 7', status: 'proposed' });
     check('журнал пишет и читает JSON', store.listChanges(5)[0]?.after, { search: 95000 });

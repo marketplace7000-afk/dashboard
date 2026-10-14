@@ -201,6 +201,7 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14): Promise<Ads2Overvie
       marginPct: pv?.marginPct ?? null, marginRub: pv?.marginRub ?? null,
       campaigns: adSku ? campsBySku.get(adSku) ?? [] : [],
       flag: flag?.no_ads ? { reason: flag.reason ?? 'other', note: flag.note } : null,
+      archived: !!flag?.archived,
       issues: [],
       series: {
         orders: period.map(i => rnp.facts[key]?.ordered_cnt?.[i] ?? null),
@@ -210,13 +211,15 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14): Promise<Ads2Overvie
   }
 
   // ── Узкие места ───────────────────────────────────────────────────────────
-  const medPdp = median(products.filter(p => (p.cardViews ?? 0) >= 100 && p.pdpToCart != null).map(p => p.pdpToCart!));
-  const medCart = median(products.filter(p => (p.carts ?? 0) >= 20 && p.cartToOrder != null).map(p => p.cartToOrder!));
+  const work = products.filter(p => !p.archived); // архив (самовыкуп, дубли) не портит медианы
+  const medPdp = median(work.filter(p => (p.cardViews ?? 0) >= 100 && p.pdpToCart != null).map(p => p.pdpToCart!));
+  const medCart = median(work.filter(p => (p.carts ?? 0) >= 20 && p.cartToOrder != null).map(p => p.cartToOrder!));
   const target = ADS_BUDGET_SHARE * 100;
   for (const p of products) {
     const is: Ads2Issue[] = [];
     const running = p.campaigns.some(c => c.status === 'active');
     if (p.flag && running) is.push({ code: 'flagged_but_running', level: 'critical', text: `Отмечен «Не рекламировать» (${NO_ADS_REASON_LABEL[p.flag.reason] ?? p.flag.reason}), но реклама идёт` });
+    if (p.archived) { p.issues = is; continue; } // в архиве — только сигнал «реклама идёт», остальное не нужно
     if (p.daysOfStock != null && p.daysOfStock < 3 && p.spend > 0) is.push({ code: 'stock_critical', level: 'critical', text: `Остатка на ${p.daysOfStock} дн — реклама разгонит спрос, которого нечем закрыть` });
     else if (p.daysOfStock != null && p.daysOfStock < 7 && p.spend > 0) is.push({ code: 'stock_low', level: 'warn', text: `Остатка на ${p.daysOfStock} дн — не повышать ставки до поставки` });
     if (p.spend >= 500 && p.orders === 0) is.push({ code: 'spend_no_orders', level: 'critical', text: `Расход ${Math.round(p.spend)} ₽ без единого заказа` });

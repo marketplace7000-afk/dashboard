@@ -358,6 +358,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (req.method === 'POST') {
           const b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
           if (b.mp !== 'wb' && b.mp !== 'ozon') return res.status(400).json({ ok: false, error: 'mp: wb или ozon' });
+          // архив: {mp, skus:[…], archive: true|false, reason} — пачкой, для карточек под самовыкуп
+          if (typeof b.archive === 'boolean') {
+            const skus: string[] = Array.isArray(b.skus) ? b.skus.map(String) : b.sku ? [String(b.sku)] : [];
+            if (!skus.length) return res.status(400).json({ ok: false, error: 'нужен skus' });
+            const n = store.setArchived(b.mp, skus, b.archive, b.reason ?? null, 'manager');
+            store.logChange({ mp: b.mp, sku: skus.slice(0, 20).join(', ') + (skus.length > 20 ? ` … ещё ${skus.length - 20}` : ''), actor: 'manager',
+              action: b.archive ? 'archive_on' : 'archive_off', after: { count: n, reason: b.archive ? b.reason : null }, status: 'applied' });
+            return res.status(200).json({ ok: true, count: n });
+          }
           if (!b.sku) return res.status(400).json({ ok: false, error: 'нужен sku' });
           const flag = store.setFlag(b.mp, String(b.sku), !!b.noAds, b.reason ?? null, b.note ? String(b.note).slice(0, 300) : null, 'manager');
           store.logChange({ mp: b.mp, sku: String(b.sku), actor: 'manager', action: flag.no_ads ? 'no_ads_on' : 'no_ads_off',

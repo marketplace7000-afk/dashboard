@@ -67,6 +67,8 @@ export type Ads2Product = {
   price: number | null; marginPct: number | null; marginRub: number | null;
   campaigns: { id: string; name: string; status: string }[];
   flag: { reason: string; note: string | null } | null;
+  /** В архиве «Рекламы» (самовыкуп, дубли): скрыт с экранов, автопилот не трогает. */
+  archived: boolean;
   issues: Ads2Issue[];
   /** По дням периода. */
   series: { orders: Array<number | null>; spend: Array<number | null> };

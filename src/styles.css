@@ -1630,3 +1630,10 @@ code {
   .ad2-drawer { padding: 14px 16px 24px; }
   .ad2-search { max-width: none; flex-basis: 100%; }
 }
+
+/* Реклама · архив товаров (14.10) */
+.ad2-col-chk { width: 34px; text-align: center; }
+.ad2-col-chk input { width: 16px; height: 16px; cursor: pointer; }
+.ad2-row-sel td { background: var(--accent-soft, rgba(37, 99, 235, .08)); }
+.ad2-selbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--surface-2, rgba(127, 127, 127, .08)); }
+.ad2-selbar .select { width: auto; }

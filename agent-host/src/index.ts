@@ -11,9 +11,10 @@ import * as api from './api';
 import { ensureChrome } from './chrome';
 import { runShowcasePrices } from './scenarios/showcasePrices';
 import { runOzonReviews } from './scenarios/ozonReviews';
+import { runCabinetRecon } from './scenarios/cabinetRecon';
 import type { AgentTaskType } from '../../shared/agents';
 
-const SUPPORTED: AgentTaskType[] = ['showcase_prices', 'ozon_reviews'];
+const SUPPORTED: AgentTaskType[] = ['showcase_prices', 'ozon_reviews', 'cabinet_recon'];
 
 let running = false;
 let stop = false;
@@ -39,6 +40,8 @@ async function tick(): Promise<void> {
       await runShowcasePrices(task, settings);
     } else if (task.type === 'ozon_reviews') {
       await runOzonReviews(task, settings);
+    } else if (task.type === 'cabinet_recon') {
+      await runCabinetRecon(task, settings);
     } else {
       await api.fail(task.id, { error: `сценарий ${task.type} этим хостом не поддерживается`, retryable: false });
     }

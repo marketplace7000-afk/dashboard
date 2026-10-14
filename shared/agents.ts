@@ -14,7 +14,7 @@
 
 export type Marketplace = 'wb' | 'ozon';
 
-export type AgentTaskType = 'showcase_prices' | 'competitor_watch' | 'funnel_compare' | 'ozon_reviews';
+export type AgentTaskType = 'showcase_prices' | 'competitor_watch' | 'funnel_compare' | 'ozon_reviews' | 'cabinet_recon';
 
 export type AgentTaskStatus = 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -74,6 +74,7 @@ export const TASK_TYPE_TITLES: Record<AgentTaskType, string> = {
   competitor_watch: 'Мониторинг конкурентов',
   funnel_compare: 'Воронка продаж',
   ozon_reviews: 'Отзывы Ozon',
+  cabinet_recon: 'Разведка кабинета',
 };
 
 export const SCENARIO_STAGES: Record<AgentTaskType, StageDef[]> = {
@@ -102,6 +103,13 @@ export const SCENARIO_STAGES: Record<AgentTaskType, StageDef[]> = {
   ozon_reviews: [
     { stage: 'open_cabinet', title: 'Кабинет Ozon',        counted: false },
     { stage: 'reviews_list', title: 'Отзывы без ответа',   counted: true  },
+    { stage: 'ingest',       title: 'Отправка в дашборд',  counted: false },
+  ],
+  // Агент 3 «Реклама»: какие запросы делает кабинет в разделах аналитики и как
+  // устроены ответы — основа для постоянного сбора конкурентов и воронки (14.10.2026).
+  cabinet_recon: [
+    { stage: 'open_cabinet', title: 'Кабинет',             counted: false },
+    { stage: 'discover',     title: 'Разделы аналитики',   counted: true  },
     { stage: 'ingest',       title: 'Отправка в дашборд',  counted: false },
   ],
 };

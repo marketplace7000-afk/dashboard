@@ -84,6 +84,14 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     return;
   }
 
+  // Разведка кабинета (Агент 3, сценарий cabinet_recon) — отчёт о запросах кабинета.
+  if (what === 'recon-ingest') {
+    const { saveRecon } = await import('./agentRecon');
+    const r = saveRecon(b?.marketplace === 'ozon' ? 'ozon' : 'wb', Array.isArray(b?.pages) ? b.pages : []);
+    res.status(200).json({ ok: true, ...r });
+    return;
+  }
+
   if (what === 'tasks' && idStr === 'claim') {
     maintainQueue();
     const name = String(b?.name || 'unknown');
@@ -175,6 +183,14 @@ export async function handleAgentsPanel(req: VercelRequest, res: VercelResponse,
       return;
     }
     res.status(200).json({ ok: true, schedules: listSchedules() });
+    return;
+  }
+
+  // Отчёты разведки кабинета: список или один отчёт целиком.
+  if (what === 'recon') {
+    const { listRecon, readRecon } = await import('./agentRecon');
+    if (idStr) { const r = readRecon(idStr); res.status(r ? 200 : 404).json(r ? { ok: true, report: r } : { ok: false, error: 'not_found' }); return; }
+    res.status(200).json({ ok: true, reports: listRecon() });
     return;
   }
 

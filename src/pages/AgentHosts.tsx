@@ -132,6 +132,14 @@ const AGENTS: AgentDef[] = [
     lanes: [{ type: 'ozon_reviews', mp: 'ozon', label: 'Отзывы Ozon из кабинета', short: 'Отзывы Ozon', color: MP_COLOR.ozon }],
     server: true,
   },
+  {
+    num: 3, title: 'Реклама',
+    about: 'Кампании, ставки и статистику рекламы собирает сервер через API, автопилот — в разделе «Реклама». В Chrome агента — то, чего нет в API: разведка разделов аналитики кабинетов (основа для сбора конкурентов и воронки).',
+    lanes: [
+      { type: 'cabinet_recon', mp: 'wb', label: 'Разведка кабинета WB', short: 'Разведка WB', color: MP_COLOR.wb },
+      { type: 'cabinet_recon', mp: 'ozon', label: 'Разведка кабинета Ozon', short: 'Разведка Ozon', color: MP_COLOR.ozon },
+    ],
+  },
 ];
 
 const ALL_LANES = AGENTS.flatMap(a => a.lanes.map(l => ({ ...l, agent: a })));

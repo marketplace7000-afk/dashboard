@@ -108,6 +108,14 @@ export async function ingest(path: 'wb-showcase-ingest' | 'ozon-showcase-ingest'
   } catch (e) { localLog(`[api] ingest не прошёл: ${(e as Error).message}`); return false; }
 }
 
+/** Отчёт «разведки кабинета» (Агент 3) → дашборд: какие запросы делает кабинет и как устроены ответы. */
+export async function reconIngest(marketplace: 'wb' | 'ozon', pages: unknown[]): Promise<boolean> {
+  try {
+    const r = await call<{ ok: boolean }>(`/api/agent/recon-ingest`, { marketplace, pages });
+    return r.status === 200 && !!r.json?.ok;
+  } catch (e) { localLog(`[api] recon-ingest не прошёл: ${(e as Error).message}`); return false; }
+}
+
 /** Отзывы Ozon из кабинета → дашборд (раздел «Отзывы и вопросы»). complete = список полный. */
 export async function reviewsIngest(reviews: unknown[], complete: boolean): Promise<boolean> {
   try {

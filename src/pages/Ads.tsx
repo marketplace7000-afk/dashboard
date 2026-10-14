@@ -750,7 +750,8 @@ function PosDyn({ v }: { v: number | null }) {
 }
 function PctDyn({ v }: { v: number | null }) {
   if (v == null || v === 0) return null;
-  return <span className={`ad2-dyn ${v > 0 ? 'good' : 'bad'}`}>{v > 0 ? '+' : ''}{nf0.format(v)}%</span>;
+  // от почти нулевой базы динамика бывает «+372 277%» — это просто «новый рост»
+  return <span className={`ad2-dyn ${v > 0 ? 'good' : 'bad'}`}>{v > 999 ? '>+999' : `${v > 0 ? '+' : ''}${nf0.format(v)}`}%</span>;
 }
 
 function MiniLines({ s }: { s: { date: string; my: number | null; competitor: number | null; best: number | null }[] }) {
@@ -853,8 +854,9 @@ function Watch({ mp, d, setD }: { mp: Ads2Mp; d: Ads2Competitors; setD: (x: Ads2
                             {l.note && <div className="muted ad2-small">{l.source === 'manual' ? 'добавлен вручную · ' : ''}{l.note}</div>}
                             {!l.note && l.source === 'manual' && <div className="muted ad2-small">добавлен вручную</div>}</td>
                           <td><span className={`chip ${W_STATUS[l.status].cls} ad2-chipsm`}>{W_STATUS[l.status].label}</span></td>
-                          <td className="ad2-nowrap">{rub(l.price)} {diff(l.price, our?.price ?? null)}</td>
-                          <td className="ad2-nowrap">★ {l.rating ?? '–'} · {num(l.feedbacks)}</td>
+                          <td className="ad2-nowrap" title="Разница с нашей ценой: зелёным — конкурент дороже нас, красным — дешевле">
+                            {l.price == null && l.stock === 0 ? <span className="muted">нет в наличии</span> : <>{rub(l.price)} {diff(l.price, our?.price ?? null)}</>}</td>
+                          <td className="ad2-nowrap">{!l.rating && !l.feedbacks ? (l.rating === 0 ? <span className="muted">нет отзывов</span> : '–') : <>★ {l.rating ?? '–'} · {num(l.feedbacks)}</>}</td>
                           <td className="ad2-nowrap">{mp === 'wb' ? <>{num(l.orders)} <PctDyn v={l.ordersDyn} /></> : <>{num(l.orders)} / {l.gmv != null ? kRub(l.gmv) : '–'}</>}</td>
                           <td className="ad2-nowrap">{mp === 'wb' ? <>{num(l.avgPos)} · {pct(l.ctr)}</> : pct(l.drr)}</td>
                           <td className="ad2-nowrap">{l.inAds == null ? '–' : l.inAds ? 'да' : 'нет'} · {l.inPromo == null ? '–' : l.inPromo ? 'да' : 'нет'}</td>
@@ -968,7 +970,7 @@ function Competitors({ mp }: { mp: Ads2Mp }) {
           {o.positions.map(p => (
             <div key={p.category2Id} className="card ad2-kpi">
               <div className="card-title">Место среди продавцов: {p.name}</div>
-              <div className="ad2-kpi-v">{num(p.myPosition)} <span className="muted ad2-small">из {num(p.sellers)}</span> <PosDyn v={p.myPositionDyn} /></div>
+              <div className="ad2-kpi-v">{p.myPosition ? <>{num(p.myPosition)} <span className="muted ad2-small">из {num(p.sellers)}</span> <PosDyn v={p.myPositionDyn} /></> : <span className="muted ad2-small">нет продаж за период · продавцов {num(p.sellers)}</span>}</div>
               <MiniLines s={p.series} />
               <div className="ad2-kpi-sub"><span className="ad2-lg my">мы</span> <span className="ad2-lg comp">ближайший: {p.competitor ?? '—'}</span> <span className="ad2-lg best">лидер</span>
                 {p.percentDiff != null && <> · у ближайшего выручка больше на {nf0.format(p.percentDiff)}%</>}</div>

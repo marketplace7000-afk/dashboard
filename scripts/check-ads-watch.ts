@@ -65,13 +65,18 @@ check('удалить', editWatch({ mp: 'wb', sku: 'SOTA-RGB', action: 'remove',
 check('агенту — подтверждённые и предложенные, без отклонённых', watchParams('wb').watch.sort(), [111111111, 321878641, 390744732, 832682672]);
 
 const ozData = { markets: [{ category3Id: '91915', items: [
-  { sku: '3330519032', name: 'Адаптер дешёвый', avgPrice: 1528, sellerId: '1', category3: 'Устройство головное', gmvSum: 1e6 },
-  { sku: '4392959400', name: 'TBox Ambient', avgPrice: 12851, sellerId: '2', category3: 'Устройство головное', gmvSum: 9e5 },
-  { sku: '5555555555', name: 'Бокс конкурента', avgPrice: 17000, sellerId: '3', category3: 'Устройство головное', gmvSum: 8e5, drr: 6.5, soldCount: 40 },
-  { sku: '3154491355', name: 'Наш Ultra 2', article: 'CARLINKIT-ULTRA2-KRUG-8-128', avgPrice: 19741, sellerId: '466884', category3: 'Устройство головное' },
+  { sku: '3330519032', name: 'Беспроводной адаптер CarPlay и Android Auto 2-в-1', avgPrice: 1528, sellerId: '1', category3: 'Устройство головное', gmvSum: 1e6 },
+  { sku: '4392959400', name: 'блютуз адаптер для авто CarPlay Carlinkit TBox Ambient', avgPrice: 12851, sellerId: '2', category3: 'Устройство головное', gmvSum: 9e5 },
+  { sku: '6666666666', name: 'Магнитола 9 дюймов андроид Урал Шторм 6+128ГБ', avgPrice: 18920, sellerId: '4', category3: 'Устройство головное', gmvSum: 8.5e5 },
+  { sku: '5555555555', name: 'Carlinkit Tbox Ultra 2в1 Сarplay Android auto бокс', avgPrice: 17000, sellerId: '3', category3: 'Устройство головное', gmvSum: 8e5, drr: 6.5, soldCount: 40 },
+  { sku: '3154491355', name: 'Carlinkit Ultra 2 AI Box 8/128 ГБ, Android 15, CarPlay и Android Auto', article: 'CARLINKIT-ULTRA2-KRUG-8-128', avgPrice: 19741, sellerId: '466884', category3: 'Устройство головное' },
 ] }] };
 check('Ozon: лидеры только в коридоре цены (½–2× нашей)', autoSuggest('ozon', ozData), 1);
-check('Ozon: дешёвый адаптер не предложен', getLinks('CARLINKIT-ULTRA2-KRUG-8-128', 'ozon').map(l => `${l.nmId}:${l.status}`), ['4392959400:active', '5555555555:suggested']);
+check('Ozon: дешёвый адаптер и магнитола не предложены', getLinks('CARLINKIT-ULTRA2-KRUG-8-128', 'ozon').map(l => `${l.nmId}:${l.status}`), ['4392959400:active', '5555555555:suggested']);
+const ozNext = { markets: [{ ...ozData.markets[0], items: ozData.markets[0].items.filter(x => x.sku !== '5555555555') }] };
+autoSuggest('ozon', ozNext);
+check('Ozon: выпавший из рынка нетронутый лидер убран, подтверждённый остался', getLinks('CARLINKIT-ULTRA2-KRUG-8-128', 'ozon').map(l => `${l.nmId}:${l.status}`), ['4392959400:active']);
+autoSuggest('ozon', ozData);
 
 console.log('Сборка для вкладки');
 const w = buildWatch('wb', wbData);

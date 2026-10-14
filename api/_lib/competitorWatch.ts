@@ -156,14 +156,20 @@ export function addLink(
  * не трогаем, а у товара не больше `cap` живых конкурентов — 5 сильнейших, как
  * просил клиент. Возвращает, сколько добавлено.
  */
-export function suggestLinks(mp: WatchMp, sku: string, cands: { id: number; title?: string; brand?: string; note?: string }[], cap = 5): number {
+export function suggestLinks(mp: WatchMp, sku: string, cands: { id: number; title?: string; brand?: string; note?: string }[], cap = 5, replace = false): number {
   const s = read();
   const key = norm(sku);
   if (!key) return 0;
   const b = bucket(s, mp);
   const entry = b[key] ?? { links: [] };
+  // replace: нетронутые менеджером авто-предложения, которых нет в свежем списке, уходят
+  // (рынок Ozon меняется каждую неделю); подтверждённые, ручные и «не наш» остаются.
+  const fresh = new Set(cands.map(c => c.id));
+  const before = entry.links.length;
+  if (replace) entry.links = entry.links.filter(l => !(l.source === 'auto' && l.status === 'suggested' && !fresh.has(l.nmId)));
   let live = entry.links.filter(l => l.status !== 'ignored').length;
   let n = 0;
+  if (entry.links.length !== before) { b[key] = entry; s.updatedAt = Date.now(); write(s); }
   for (const c of cands) {
     if (live >= cap) break;
     if (!Number.isFinite(c.id) || c.id <= 0 || entry.links.some(l => l.nmId === c.id)) continue;

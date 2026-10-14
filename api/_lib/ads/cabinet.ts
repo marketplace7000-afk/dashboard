@@ -54,6 +54,18 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
 
 const up = (s: unknown) => String(s ?? '').trim().toUpperCase();
 
+const WORD_STOP = new Set(['подар', 'набор', 'компл', 'новый', 'новин', 'качес', 'лучши', 'товар', 'black', 'white', 'черны', 'белый']);
+/** Значимые слова названия: от 4 букв, без цифр, по первым 5 буквам (грубая основа: «адаптер/адаптера»). */
+export function titleWords(s: string): Set<string> {
+  const out = new Set<string>();
+  for (const w of s.toLowerCase().replace(/ё/g, 'е').split(/[^a-zа-я0-9]+/)) {
+    if (w.length < 4 || /\d/.test(w)) continue;
+    const st = w.slice(0, 5);
+    if (!WORD_STOP.has(st)) out.add(st);
+  }
+  return out;
+}
+
 /** Наш справочник: артикул продавца ↔ номер на площадке (WB nmID, Ozon SKU). */
 function ourCatalog(mp: AdMp): { byKey: Map<string, { id: string; name: string; photo: string }>; byId: Map<string, string> } {
   const byKey = new Map<string, { id: string; name: string; photo: string }>();
@@ -97,9 +109,16 @@ export function autoSuggest(mp: AdMp, data: any): number {
       if (!key) continue;
       // Категория широкая (в «Устройство головное» и адаптер за 1,5 тыс., и бокс за 20 тыс.),
       // поэтому конкурент — лидер по выручке в коридоре цены нашего товара: от половины до двух цен.
+      // Плюс хотя бы одно общее значимое слово в названии: иначе к адаптеру CarPlay попадают магнитолы.
       const our = num(o.avgPrice);
-      const leaders = others.filter((x: any) => { const p = num(x.avgPrice); return !our || (p != null && p >= our / 2 && p <= our * 2); }).slice(0, 5);
-      n += suggestLinks('ozon', key, leaders.map((x: any) => ({ id: Number(x.sku), title: String(x.name ?? x.skuName ?? ''), brand: String(x.brand ?? ''), note: `лидер Ozon «${String(x.category3 ?? '')}», цена близка к нашей` })));
+      const ourWords = titleWords(String(o.name ?? o.skuName ?? ''));
+      const leaders = others
+        .filter((x: any) => { const p = num(x.avgPrice); return !our || (p != null && p >= our / 2 && p <= our * 2); })
+        .map((x: any, i: number) => ({ x, i, common: Math.min(3, [...titleWords(String(x.name ?? x.skuName ?? ''))].filter(w => ourWords.has(w)).length) }))
+        .filter(c => !ourWords.size || c.common > 0)
+        .sort((a, b) => b.common - a.common || a.i - b.i)
+        .slice(0, 5).map(c => c.x);
+      n += suggestLinks('ozon', key, leaders.map((x: any) => ({ id: Number(x.sku), title: String(x.name ?? x.skuName ?? ''), brand: String(x.brand ?? ''), note: `лидер Ozon «${String(x.category3 ?? '')}», цена и название близки к нашим` })), 5, true);
     }
   }
   return n;
@@ -214,7 +233,9 @@ export function parseOzon(data: any, ourSellerId: string): NonNullable<Ads2Compe
     };
   });
   const positions = (data?.positions ?? []).map((p: any) => {
-    const last = (p.days ?? []).at(-1) ?? {};
+    // В последний день место бывает 0 (продаж ещё нет) — берём последний день с местом.
+    const days = p.days ?? [];
+    const last = [...days].reverse().find((d: any) => Number(d?.my_position) > 0) ?? days.at(-1) ?? {};
     const ch = p.chart ?? {};
     const byDate = new Map<string, { my: number | null; competitor: number | null; best: number | null }>();
     const put = (arr: any[], k: 'my' | 'competitor' | 'best') => {
@@ -318,6 +339,8 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     if ((ourSeller && String(x.sellerId) === ourSeller) || x.blockedAsYourGood) fromSnap.set(up(x.article), { id: String(x.sku ?? ''), name: String(x.name ?? ''), photo: String(x.photo ?? '') });
   }
   for (const k of fromSnap.keys()) keys.add(k);
+  // и весь наш справочник площадки: «Все товары» — это все товары, а не только попавшие в снимок кабинета
+  for (const [k, v] of byKey) if (v.id) keys.add(k);
   keys.delete('');
   const watch: Ads2WatchProduct[] = [...keys].map(key => {
     const cat = byKey.get(key)?.id ? byKey.get(key) : fromSnap.get(key) ?? byKey.get(key);

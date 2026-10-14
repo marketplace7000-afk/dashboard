@@ -519,7 +519,8 @@ function ProductDrawer({ d, p, onClose, onChanged, setToast, openCampaign }: {
           <div><span className="muted">Заказы</span><b>{num(p.orders)} · {kRub(p.revenue)}</b></div>
           <div><span className="muted">Реклама</span><b>{rub(p.spend)} · ДРР {pct(p.drr)}</b></div>
           <div><span className="muted">Из рекламы</span><b>{num(p.advOrders)} зак · {pct(p.advShare)}</b></div>
-          <div><span className="muted">Остаток</span><b>{num(p.stock)} шт · {p.daysOfStock == null ? '–' : `${p.daysOfStock} дн`}</b></div>
+          <div title="К продаже = наличие − резерв, по API площадки; снимок раз в день (РНП)"><span className="muted">Остаток к продаже</span><b>{num(p.stock)} шт · {p.daysOfStock == null ? '–' : `${p.daysOfStock} дн`}</b>
+            <span className="muted ad2-small">FBO {num(p.stockFbo)} · FBS {num(p.stockFbs)}{p.outSince ? ` · нет с ${ddmm(p.outSince)}` : ''}</span></div>
           <div><span className="muted">Цена · маржа</span><b>{rub(p.price)} · {pct(p.marginPct)}</b></div>
           <div><span className="muted">Позиция в поиске</span><b>{p.avgPos == null ? '–' : nf1.format(p.avgPos)}</b></div>
         </div>

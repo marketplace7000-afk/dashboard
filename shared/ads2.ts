@@ -62,6 +62,10 @@ export type Ads2Product = {
   orders: number; revenue: number;
   spend: number; drr: number | null; advOrders: number; advShare: number | null;
   stock: number | null; daysOfStock: number | null;
+  /** Остаток к продаже (наличие − резерв) по схемам, последний снимок РНП. */
+  stockFbo: number | null; stockFbs: number | null;
+  /** Нет остатка с этой даты (YYYY-MM-DD) и сколько ушло на рекламу с тех пор. */
+  outSince: string | null; spendSinceOut: number;
   cardViews: number | null; carts: number | null; pdpToCart: number | null; cartToOrder: number | null;
   avgPos: number | null;
   price: number | null; marginPct: number | null; marginRub: number | null;

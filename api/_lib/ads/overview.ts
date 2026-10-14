@@ -60,6 +60,7 @@ function sumIdx(rnp: RnpResponse, key: string, metric: string, idxs: number[]): 
   for (const i of idxs) { const v = arr[i]; if (v != null) s = (s ?? 0) + v; }
   return s;
 }
+const num0 = (v: number | null) => (v == null ? '–' : String(Math.round(v)));
 function lastIdx(rnp: RnpResponse, key: string, metric: string, idxs: number[]): number | null {
   const arr = rnp.facts[key]?.[metric];
   if (!arr) return null;
@@ -178,6 +179,18 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14): Promise<Ads2Overvie
     const revenue = sumIdx(rnp, key, 'ordered_amount', period) ?? 0;
     const spend = sumIdx(rnp, key, 'adv_expenses', period) ?? 0;
     const stock = lastIdx(rnp, key, 'stocks', period);
+    // Если остатка нет — с какого дня (последний день с остатком + 1) и сколько ушло на рекламу с тех пор.
+    let outSince: string | null = null, spendSinceOut = 0;
+    if (stock === 0) {
+      const st = rnp.facts[key]?.stocks ?? [];
+      for (let j = period.length - 1; j >= 0; j--) {
+        const v = st[period[j]];
+        if (v == null) continue;
+        if (v > 0) break;
+        outSince = rnp.dates[period[j]];
+        spendSinceOut += rnp.facts[key]?.adv_expenses?.[period[j]] ?? 0;
+      }
+    }
     if (!orders && !spend && !stock) continue;
     const adSku = mp === 'wb' ? key : (ri?.extId ?? null);
     const advOrders = sumIdx(rnp, key, 'adv_orders', period) ?? 0;
@@ -193,6 +206,8 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14): Promise<Ads2Overvie
       link: adSku ? (mp === 'wb' ? `https://www.wildberries.ru/catalog/${adSku}/detail.aspx` : `https://www.ozon.ru/product/${adSku}/`) : null,
       orders, revenue: r2(revenue), spend: r2(spend), drr: spend > 0 ? pct(spend, revenue) : null, advOrders, advShare: orders > 0 ? pct(advOrders, orders) : null,
       stock, daysOfStock: stock != null && ord7 > 0 ? Math.round(stock / (ord7 / 7)) : null,
+      stockFbo: lastIdx(rnp, key, 'stocks_fbo', period), stockFbs: lastIdx(rnp, key, 'stocks_fbs', period),
+      outSince, spendSinceOut: r2(spendSinceOut),
       cardViews, carts,
       pdpToCart: cardViews && carts != null ? pct(carts, cardViews) : null,
       cartToOrder: carts ? pct(orders, carts) : null,
@@ -220,8 +235,13 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14): Promise<Ads2Overvie
     const running = p.campaigns.some(c => c.status === 'active');
     if (p.flag && running) is.push({ code: 'flagged_but_running', level: 'critical', text: `Отмечен «Не рекламировать» (${NO_ADS_REASON_LABEL[p.flag.reason] ?? p.flag.reason}), но реклама идёт` });
     if (p.archived) { p.issues = is; continue; } // в архиве — только сигнал «реклама идёт», остальное не нужно
-    if (p.daysOfStock != null && p.daysOfStock < 3 && p.spend > 0) is.push({ code: 'stock_critical', level: 'critical', text: `Остатка на ${p.daysOfStock} дн — реклама разгонит спрос, которого нечем закрыть` });
-    else if (p.daysOfStock != null && p.daysOfStock < 7 && p.spend > 0) is.push({ code: 'stock_low', level: 'warn', text: `Остатка на ${p.daysOfStock} дн — не повышать ставки до поставки` });
+    const mpName = mp === 'wb' ? 'WB' : 'Ozon';
+    if (p.stock === 0 && p.spend > 0) {
+      const since = p.outSince ? ` с ${p.outSince.slice(8, 10)}.${p.outSince.slice(5, 7)}` : '';
+      is.push({ code: 'stock_critical', level: 'critical', text: `Нет остатка${since}: ${mpName} отдаёт 0 к продаже (FBO ${p.stockFbo ?? 0}, FBS ${p.stockFbs ?? 0}, за вычетом резерва) — ${p.spendSinceOut > 0 ? `а реклама потратила ${Math.round(p.spendSinceOut)} ₽ с тех пор; ` : ''}рекламу держать на паузе до поставки` });
+    }
+    else if (p.daysOfStock != null && p.daysOfStock < 3 && p.spend > 0) is.push({ code: 'stock_critical', level: 'critical', text: `Остатка на ${p.daysOfStock} дн (${num0(p.stock)} шт: FBO ${p.stockFbo ?? 0}, FBS ${p.stockFbs ?? 0}) — реклама разгонит спрос, которого нечем закрыть` });
+    else if (p.daysOfStock != null && p.daysOfStock < 7 && p.spend > 0) is.push({ code: 'stock_low', level: 'warn', text: `Остатка на ${p.daysOfStock} дн (${num0(p.stock)} шт) — не повышать ставки до поставки` });
     if (p.spend >= 500 && p.orders === 0) is.push({ code: 'spend_no_orders', level: 'critical', text: `Расход ${Math.round(p.spend)} ₽ без единого заказа` });
     else if (p.drr != null && p.drr > target * 2 && p.spend >= 300) is.push({ code: 'drr_high', level: 'warn', text: `ДРР ${p.drr}% — больше чем вдвое выше нормы ${target}%` });
     if (medPdp != null && (p.cardViews ?? 0) >= 100 && p.pdpToCart != null && p.pdpToCart < medPdp * 0.6) {

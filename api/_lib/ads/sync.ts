@@ -120,6 +120,26 @@ export function parseWbFullstats(json: unknown): StatDayRow[] {
   return [...acc.values()];
 }
 
+/**
+ * Разбор /api/advert/v0/daily-limits. Принимаем и корневой массив, и обёртки
+ * (adverts / limits / data), id — advertId | advert_id | id, суммы — в копейках.
+ */
+export function parseWbDailyLimits(json: unknown): { id: string; enabled: boolean; limitRub: number | null; spentTodayRub: number | null }[] {
+  const j: any = json;
+  const list: any[] = Array.isArray(j) ? j : (j?.adverts ?? j?.limits ?? j?.data?.adverts ?? j?.data ?? []);
+  if (!Array.isArray(list)) return [];
+  const kop = (v: unknown) => (v == null ? null : num(v) / 100);
+  return list
+    .map(a => ({ a, id: a?.advertId ?? a?.advert_id ?? a?.id }))
+    .filter(x => x.id != null)
+    .map(({ a, id }) => ({
+      id: String(id),
+      enabled: !!(a.enabled ?? a.is_enabled ?? a.isEnabled ?? (a.dailyLimit ?? a.daily_limit ?? a.limit) != null),
+      limitRub: kop(a.dailyLimit ?? a.daily_limit ?? a.limit),
+      spentTodayRub: kop(a.spentToday ?? a.spent_today ?? a.spent),
+    }));
+}
+
 async function syncWbCampaigns(): Promise<string> {
   const up = wbUpstream('promotion');
   if (!up.headers.Authorization) return 'WB: нет ключа Продвижения';
@@ -137,12 +157,13 @@ async function syncWbCampaigns(): Promise<string> {
     const ids = cpc.slice(i, i + 100).join(',');
     const lr = await fetchWithRetry(`${up.base}/api/advert/v0/daily-limits?advertIds=${ids}`, { method: 'GET', headers: up.headers }, { maxRetries: 1 });
     if (!lr.ok) { limitsNote = ` (лимиты: ответ ${lr.status}${lr.status === 401 || lr.status === 403 ? ' — нужен персональный ключ' : ''})`; break; }
-    const lj: any = await lr.json().catch(() => null);
-    const rows = (lj?.adverts ?? []).map((a: any) => ({
-      id: String(a.advertId), enabled: !!a.enabled,
-      limitRub: a.dailyLimit == null ? null : num(a.dailyLimit) / 100,
-      spentTodayRub: a.spentToday == null ? null : num(a.spentToday) / 100,
-    }));
+    const text = await lr.text().catch(() => '');
+    let lj: any = null;
+    try { lj = JSON.parse(text); } catch { /* разбор ниже вернёт пусто */ }
+    const rows = parseWbDailyLimits(lj);
+    // На проде 14.10 ответ 200 дал 0 строк — форма ответа не та, что ждали.
+    // Пока не сверим, печатаем начало ответа в итог сбора (он идёт в журнал).
+    if (!rows.length && !limitsNote) limitsNote = ` (лимиты: 200, но не разобраны: ${text.slice(0, 300)})`;
     upsertDailyLimits('wb', rows);
     limits += rows.length;
   }
@@ -171,8 +192,20 @@ const OZ_STATUS: Record<string, string> = {
   CAMPAIGN_STATE_RUNNING: 'active', CAMPAIGN_STATE_STOPPED: 'out_of_budget', CAMPAIGN_STATE_INACTIVE: 'paused',
   CAMPAIGN_STATE_PLANNED: 'planned', CAMPAIGN_STATE_ARCHIVED: 'archived', CAMPAIGN_STATE_FINISHED: 'finished',
 };
-/** Деньги Performance API — в миллионных долях рубля (1 000 000 = 1 ₽). */
-const micro = (v: unknown) => { const n = numOrNull(v); return n == null ? null : Math.round(n / 10_000) / 100; };
+/**
+ * Деньги Performance API — в миллионных долях рубля (1 000 000 = 1 ₽).
+ * Ставки товаров тоже: на проде 14.10 bid "8000000" = 8 ₽. Ставка 0 —
+ * у кампаний с автостратегией (MAX_CLICKS, TOP_MAX_CLICKS): её ведёт Ozon.
+ */
+export const micro = (v: unknown) => { const n = numOrNull(v); return n == null ? null : Math.round(n / 10_000) / 100; };
+
+/** Тип оплаты: поле paymentType Ozon в списке не отдаёт — выводим из объекта рекламы. */
+function ozPayment(c: any): string | null {
+  if (c?.paymentType) return String(c.paymentType).toLowerCase();
+  if (c?.advObjectType === 'SKU') return 'cpc';
+  if (c?.advObjectType === 'SEARCH_PROMO' || c?.advObjectType === 'ALL_SKU_PROMO') return 'cpo';
+  return null;
+}
 
 export function parseOzonCampaigns(json: unknown): CampaignRow[] {
   const list: any[] = Array.isArray((json as any)?.list) ? (json as any).list : [];
@@ -181,7 +214,7 @@ export function parseOzonCampaigns(json: unknown): CampaignRow[] {
     name: c.title ?? null,
     status: OZ_STATUS[c.state] ?? c.state ?? null,
     status_code: null,
-    payment: c.paymentType ? String(c.paymentType).toLowerCase() : null,
+    payment: ozPayment(c),
     bid_type: c.productAutopilotStrategy ?? null,
     placements: c.placement ?? null,
     daily_limit: micro(c.dailyBudget), daily_limit_on: null, spent_today: null,

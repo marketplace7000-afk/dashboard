@@ -20,7 +20,7 @@ import { join } from 'node:path';
 process.env.CACHE_DIR = mkdtempSync(join(tmpdir(), 'av-check-ads2-'));
 
 import { gate, note, ruleFor, gatewayStatus, GatewayBusy, _resetGatewayForTests } from '../api/_lib/gateway';
-import { parseWbAdverts, parseWbFullstats, parseOzonCampaigns } from '../api/_lib/ads/sync';
+import { parseWbAdverts, parseWbFullstats, parseOzonCampaigns, parseWbDailyLimits, micro } from '../api/_lib/ads/sync';
 import * as store from '../api/_lib/ads/store';
 
 let failed = 0;
@@ -96,6 +96,16 @@ async function main() {
     weeklyBudget: '7000000000', productAutopilotStrategy: 'TARGET_CIR', placement: ['PLACEMENT_SEARCH_AND_CATEGORY'] }] });
   check('недельный бюджет из миллионных долей рубля', oz[0].weekly_budget, 7000);
   check('статус и стратегия', [oz[0].status, oz[0].bid_type, oz[0].payment], ['active', 'TARGET_CIR', 'cpc']);
+  // Прод 14.10: paymentType в списке нет — оплата выводится из объекта рекламы.
+  const oz2 = parseOzonCampaigns({ list: [{ id: '1', state: 'CAMPAIGN_STATE_RUNNING', advObjectType: 'SKU' }, { id: '2', state: 'CAMPAIGN_STATE_INACTIVE', advObjectType: 'SEARCH_PROMO' }] });
+  check('оплата без paymentType: SKU → cpc, «Оплата за заказ» → cpo', oz2.map(c => c.payment), ['cpc', 'cpo']);
+  check('ставка Ozon "8000000" = 8 ₽', micro('8000000'), 8);
+
+  console.log('Дневные лимиты WB');
+  const lim = { id: '40898103', enabled: true, limitRub: 700, spentTodayRub: 120.5 };
+  check('обёртка adverts', parseWbDailyLimits({ adverts: [{ advertId: 40898103, enabled: true, dailyLimit: 70000, spentToday: 12050 }] }), [lim]);
+  check('корневой массив, snake_case', parseWbDailyLimits([{ advert_id: 40898103, is_enabled: true, daily_limit: 70000, spent_today: 12050 }]), [lim]);
+  check('мусор → пусто', parseWbDailyLimits({ error: 'x' }), []);
 
   console.log('Хранилище');
   store._useAdsDbForTests(':memory:');

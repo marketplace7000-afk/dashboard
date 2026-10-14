@@ -89,3 +89,36 @@ export const NO_ADS_REASON_LABEL: Record<string, string> = {
 };
 
 export type Ads2ActionKind = 'pause' | 'start' | 'bid' | 'daily_limit' | 'weekly_budget';
+
+// ─── Автопилот, этап 2 «советник» (14.10.2026) ──────────────────────────────
+
+/** off — выключен; confirm — готовит предложения, применяет менеджер. Режим «сам» — этап 3. */
+export type Ads2AutopilotMode = 'off' | 'confirm';
+
+/** task — задача команде (карточка/цена), new_campaign — кандидат на кампанию: без команды площадке. */
+export type Ads2ProposalKind = 'bid' | 'pause' | 'daily_limit' | 'weekly_budget' | 'task' | 'new_campaign';
+
+export type Ads2EffectSide = { spend: number; orders: number; drr: number | null; perDay: number } | null;
+
+export type Ads2Proposal = {
+  id: number; createdAt: number; mp: Ads2Mp;
+  campaignId: string | null; campaignName: string | null;
+  sku: string | null; productName: string | null; article: string | null; photo: string | null;
+  kind: Ads2ProposalKind; placement: 'search' | 'recommendations' | 'combined' | null;
+  /** Рубли: ставка, лимит или бюджет до и после. */
+  fromValue: number | null; toValue: number | null;
+  rule: string; level: 'critical' | 'warn' | 'growth' | 'info';
+  title: string; reason: string; fp: string;
+  status: 'pending' | 'applied' | 'rejected' | 'failed' | 'expired' | 'superseded';
+  decidedAt: number | null; decidedBy: string | null; note: string | null;
+  result: { message?: string; error?: string } | null;
+  /** Замер: 3 дня до решения и до 3 дней после. */
+  effect: { days: number; before: Ads2EffectSide; after: Ads2EffectSide } | null;
+};
+
+export type Ads2AutopilotState = {
+  mode: Ads2AutopilotMode; since: number | null; confirmUntil: number | null;
+  lastRun: { at: number; result: string[] } | null;
+  counts14d: Record<string, number>;
+  expireHours: number;
+};

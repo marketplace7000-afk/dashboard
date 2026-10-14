@@ -693,6 +693,12 @@ export async function handleCron(req: VercelRequest, res: VercelResponse) {
         const { collectRnp } = await import('./rnp');
         await collectRnp().catch(e => console.warn('[warm-extras] РНП не собрана:', (e as Error)?.message));
 
+        // «Реклама 2.0», этап 2: автопилот-советник пересчитывает предложения по свежей РНП.
+        try {
+          const { runAutopilot } = await import('./ads/autopilot');
+          console.warn('[warm-extras] автопилот рекламы:', await runAutopilot());
+        } catch (e) { console.warn('[warm-extras] автопилот рекламы не отработал:', (e as Error)?.message); }
+
         // Цены закреплённых конкурентов — раз в проход. Идёт последним: WB
         // лимитирует по IP, и эта задача не должна мешать прогреву кабинета.
         // Витрина WB по своим товарам — тем же батчем, что и конкуренты.

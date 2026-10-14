@@ -314,6 +314,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }, 'manager');
         return res.status(200).json(r);
       }
+      // Этап 2 (14.10.2026): автопилот-советник.
+      //   GET  autopilot?mp=&history=1   — состояние и предложения (или решённые с замером)
+      //   POST autopilot {run: true} | {mode} | {id, decision: apply|reject, note?, confirmBig?}
+      if (what === 'autopilot') {
+        const ap = await import('./_lib/ads/autopilot');
+        const mp = req.query.mp === 'wb' || req.query.mp === 'ozon' ? req.query.mp : null;
+        if (req.method === 'POST') {
+          const b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
+          if (b.mode) ap.setAutopilotMode(b.mode);
+          else if (b.run) await ap.runAutopilot();
+          else if (b.id != null) {
+            if (b.decision !== 'apply' && b.decision !== 'reject') return res.status(400).json({ ok: false, error: 'decision: apply или reject' });
+            return res.status(200).json(await ap.decideProposal(Number(b.id), b.decision, 'менеджер',
+              b.note ? String(b.note).slice(0, 300) : null, !!b.confirmBig));
+          }
+        }
+        return res.status(200).json({
+          ok: true, state: await ap.autopilotState(),
+          proposals: await ap.listProposals(mp as any, req.query.history === '1'),
+        });
+      }
       if (what === 'campaigns') {
         const mp = req.query.mp === 'wb' || req.query.mp === 'ozon' ? req.query.mp : undefined;
         return res.status(200).json({ ok: true, campaigns: store.listCampaigns(mp as any) });

@@ -336,8 +336,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       // Конкуренты и позиции из аналитики кабинетов (Агент 3 на ПК, 14.10.2026).
+      //   POST competitors {mp, sku, action: add|approve|ignore|restore|remove, link?, id?} — правка привязок менеджером
       if (what === 'competitors') {
-        const { getCompetitors } = await import('./_lib/ads/cabinet');
+        const { getCompetitors, editWatch } = await import('./_lib/ads/cabinet');
+        if (req.method === 'POST') {
+          const b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
+          const r = editWatch(b);
+          if (!r.ok) return res.status(400).json(r);
+          return res.status(200).json(getCompetitors(b.mp === 'ozon' ? 'ozon' : 'wb'));
+        }
         return res.status(200).json(getCompetitors(req.query.mp === 'ozon' ? 'ozon' : 'wb'));
       }
       if (what === 'campaigns') {

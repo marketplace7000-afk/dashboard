@@ -6,3 +6,5 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 process.env.CACHE_DIR = mkdtempSync(join(tmpdir(), 'av-check-ads2-'));
+// Привязки конкурентов (api/_lib/competitorWatch.ts) — тоже во временную папку.
+process.env.COMPETITORS_FILE = join(process.env.CACHE_DIR, 'competitors.json');

@@ -1475,6 +1475,8 @@ code {
 .ad2-prod-t { display: grid; min-width: 0; font-size: 14px; }
 .ad2-prod-t > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ad2-prod-t .muted { font-size: 12.5px; }
+.ad2-prod-t a { color: var(--text); text-decoration: none; }
+.ad2-prod-t a:hover { color: var(--accent); text-decoration: underline; }
 .ad2-link { border: none; background: none; padding: 0; color: var(--text); font: inherit; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ad2-link:hover { color: var(--accent); text-decoration: underline; }
 
@@ -1594,9 +1596,23 @@ code {
 .ad2-cmpnm span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ad2-cmpnm.ours { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 .ad2-field { display: grid; gap: 6px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+/* Конкуренты по товарам: привязки менеджеров */
+.ad2-watch-add { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 4px 0 8px; }
+.ad2-watch-q { margin-left: auto; width: 240px; max-width: 100%; }
+.ad2-watch-prod { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-top: 10px; display: grid; gap: 8px; min-width: 0; }
+.ad2-watch-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ad2-watch-head .ad2-prod { flex: 1 1 260px; min-width: 0; }
+.ad2-watch-our { color: var(--muted); }
+.ad2-watch-btns { white-space: nowrap; }
+.ad2-watch-btns .btn + .btn { margin-left: 6px; }
+.ad2-row-muted td { opacity: .55; }
+.ad2-ok { color: var(--good); }
+.ad2-err { color: var(--bad); }
 @media (max-width: 640px) {
   .ad2-prop { flex-direction: column; }
   .ad2-prop-btns { flex-direction: row; }
+  .ad2-watch-add { grid-template-columns: 1fr; }
+  .ad2-watch-q { margin-left: 0; width: 100%; }
 }
 
 @media (max-width: 1100px) {

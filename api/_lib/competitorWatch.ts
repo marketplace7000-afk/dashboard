@@ -43,8 +43,16 @@ export type CompetitorLink = {
 /** Ключ — НАШ артикул продавца (vendorCode, в верхнем регистре). */
 export type WatchStore = {
   items: Record<string, { nmId?: number; links: CompetitorLink[] }>;
+  /**
+   * Ozon (с 14.10.2026, «Реклама» → «Конкуренты»): ключ — наш артикул (offer_id),
+   * в `nmId` ссылки лежит SKU товара конкурента на Ozon. Отдельная ветка, чтобы
+   * репрайсер WB и сбор цен card.wb.ru (они читают `items`) не видели чужие номера.
+   */
+  ozon?: Record<string, { links: CompetitorLink[] }>;
   updatedAt: number;
 };
+
+export type WatchMp = 'wb' | 'ozon';
 
 const EMPTY: WatchStore = { items: {}, updatedAt: 0 };
 let cache: WatchStore | null = null;
@@ -75,13 +83,27 @@ function write(s: WatchStore): void {
 
 const norm = (sku: string) => String(sku ?? '').trim().toUpperCase();
 
+/** Ветка хранилища площадки. */
+function bucket(s: WatchStore, mp: WatchMp): Record<string, { nmId?: number; links: CompetitorLink[] }> {
+  if (mp === 'wb') return s.items;
+  if (!s.ozon) s.ozon = {};
+  return s.ozon;
+}
+
 export function getWatchList(): WatchStore {
   return read();
 }
 
 /** Привязки одного товара. Пустой массив, если ничего не заводили. */
-export function getLinks(sku: string): CompetitorLink[] {
-  return read().items[norm(sku)]?.links ?? [];
+export function getLinks(sku: string, mp: WatchMp = 'wb'): CompetitorLink[] {
+  return bucket(read(), mp)[norm(sku)]?.links ?? [];
+}
+
+/** Все привязки площадки: наш артикул → конкуренты. */
+export function getAllLinks(mp: WatchMp): Record<string, CompetitorLink[]> {
+  const out: Record<string, CompetitorLink[]> = {};
+  for (const [k, v] of Object.entries(bucket(read(), mp))) if (v.links?.length) out[k] = v.links;
+  return out;
 }
 
 /**
@@ -92,13 +114,15 @@ export function getLinks(sku: string): CompetitorLink[] {
 export function addLink(
   sku: string,
   nmId: number,
-  opts: { source?: WatchSource; title?: string; brand?: string; note?: string } = {},
+  opts: { source?: WatchSource; title?: string; brand?: string; note?: string; mp?: WatchMp } = {},
 ): CompetitorLink[] {
   const s = read();
+  const mp = opts.mp ?? 'wb';
   const key = norm(sku);
-  if (!key || !Number.isFinite(nmId) || nmId <= 0) return getLinks(sku);
+  if (!key || !Number.isFinite(nmId) || nmId <= 0) return getLinks(sku, mp);
 
-  const entry = s.items[key] ?? { links: [] };
+  const b = bucket(s, mp);
+  const entry = b[key] ?? { links: [] };
   const source = opts.source ?? 'manual';
   const existing = entry.links.find(l => l.nmId === nmId);
 
@@ -120,26 +144,50 @@ export function addLink(
       addedAt: Date.now(),
     });
   }
-  s.items[key] = entry;
+  b[key] = entry;
   s.updatedAt = Date.now();
   write(s);
   return entry.links;
 }
 
-/** Сменить статус: одобрить авто-находку или убрать конкурента из расчёта. */
-export function setLinkStatus(sku: string, nmId: number, status: WatchStatus): CompetitorLink[] {
+/**
+ * Предложить найденных системой (из сравнений WB, из топа рынка Ozon). Только
+ * новые номера: уже привязанных, одобренных или отклонённых («Не мой конкурент»)
+ * не трогаем, а у товара не больше `cap` живых конкурентов — 5 сильнейших, как
+ * просил клиент. Возвращает, сколько добавлено.
+ */
+export function suggestLinks(mp: WatchMp, sku: string, cands: { id: number; title?: string; brand?: string; note?: string }[], cap = 5): number {
   const s = read();
-  const entry = s.items[norm(sku)];
+  const key = norm(sku);
+  if (!key) return 0;
+  const b = bucket(s, mp);
+  const entry = b[key] ?? { links: [] };
+  let live = entry.links.filter(l => l.status !== 'ignored').length;
+  let n = 0;
+  for (const c of cands) {
+    if (live >= cap) break;
+    if (!Number.isFinite(c.id) || c.id <= 0 || entry.links.some(l => l.nmId === c.id)) continue;
+    entry.links.push({ nmId: c.id, source: 'auto', status: 'suggested', title: c.title, brand: c.brand, note: c.note, addedAt: Date.now() });
+    live++; n++;
+  }
+  if (n) { b[key] = entry; s.updatedAt = Date.now(); write(s); }
+  return n;
+}
+
+/** Сменить статус: одобрить авто-находку или убрать конкурента из расчёта. */
+export function setLinkStatus(sku: string, nmId: number, status: WatchStatus, mp: WatchMp = 'wb'): CompetitorLink[] {
+  const s = read();
+  const entry = bucket(s, mp)[norm(sku)];
   if (!entry) return [];
   const link = entry.links.find(l => l.nmId === nmId);
   if (link) { link.status = status; s.updatedAt = Date.now(); write(s); }
   return entry.links;
 }
 
-export function removeLink(sku: string, nmId: number): CompetitorLink[] {
+export function removeLink(sku: string, nmId: number, mp: WatchMp = 'wb'): CompetitorLink[] {
   const s = read();
   const key = norm(sku);
-  const entry = s.items[key];
+  const entry = bucket(s, mp)[key];
   if (!entry) return [];
   entry.links = entry.links.filter(l => l.nmId !== nmId);
   s.updatedAt = Date.now();
@@ -156,6 +204,31 @@ export function parseNmId(input: string): number | null {
   // «nm1271418370» или просто число
   const bare = /(\d{4,})/.exec(s.replace(/^nm/i, ''));
   return bare ? Number(bare[1]) : null;
+}
+
+/**
+ * SKU Ozon из ссылки или числа. Ссылки бывают вида
+ * ozon.ru/product/nazvanie-tovara-3330519032/?at=…, ozon.ru/product/3330519032,
+ * ozon.ru/context/detail/id/3330519032 — номер всегда последний перед «/» или «?».
+ */
+export function parseOzonSku(input: string): number | null {
+  const s = String(input ?? '').trim();
+  const fromUrl = /ozon\.ru\/(?:product|context\/detail\/id)\/(?:[^/?#]*?-)?(\d{5,})(?:[/?#]|$)/i.exec(s);
+  if (fromUrl) return Number(fromUrl[1]);
+  if (/^https?:|ozon\.|wildberries/i.test(s)) return null;
+  const bare = /^\s*(\d{5,})\s*$/.exec(s);
+  return bare ? Number(bare[1]) : null;
+}
+
+/** Номера конкурентов площадки, которых агенту снимать: подтверждённые и предложенные. */
+export function watchedIds(mp: WatchMp, limit = 80): number[] {
+  const out = new Set<number>();
+  for (const st of ['active', 'suggested'] as const) {
+    for (const entry of Object.values(bucket(read(), mp))) {
+      for (const l of entry.links) if (l.status === st) out.add(l.nmId);
+    }
+  }
+  return [...out].slice(0, limit);
 }
 
 /** Все артикулы конкурентов, за которыми реально следим (без предложенных). */

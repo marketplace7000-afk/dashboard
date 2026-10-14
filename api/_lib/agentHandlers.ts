@@ -122,6 +122,12 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
       const top = await ozonTopTypeIds(8).catch(() => []);
       task.params = { ...task.params, company_id: String(process.env.OZON_CLIENT_ID || '').trim(), categories: top.map(t => t.typeId) };
     }
+    // Конкуренты, привязанные к товарам (менеджерами или предложенные системой), и наши
+    // товары с привязками — агент снимает их карточки на витрине для сравнения.
+    if (task.type === 'competitor_watch') {
+      const { watchParams } = await import('./ads/cabinet');
+      task.params = { ...task.params, ...watchParams(task.params.marketplace === 'ozon' ? 'ozon' : 'wb') };
+    }
     res.status(200).json({ task, settings: getSettings() });
     return;
   }

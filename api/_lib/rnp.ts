@@ -152,6 +152,16 @@ export function rnpProductLookup(mp: RnpMp, q: { sku?: string | null; offerId?: 
   } catch { return null; }
 }
 
+/** Весь справочник товаров площадки (WB: sku = nmID; Ozon: sku = артикул, extId = SKU). */
+export function rnpItems(mp: RnpMp): { sku: string; article: string; name: string; photo: string; extId: string }[] {
+  const d = getDb();
+  if (!d) return [];
+  try {
+    return (d.prepare('SELECT sku, article, name, photo, ext_id FROM rnp_item WHERE mp = ?').all(mp) as any[])
+      .map(r => ({ sku: String(r.sku), article: String(r.article || ''), name: String(r.name || ''), photo: String(r.photo || ''), extId: String(r.ext_id || '') }));
+  } catch { return []; }
+}
+
 function upsertItems(mp: RnpMp, items: RnpItem[]): void {
   const d = getDb();
   if (!d || !items.length) return;

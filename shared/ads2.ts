@@ -101,7 +101,7 @@ export type Ads2WbPosItem = {
   bad: string[];
 };
 
-export type Ads2WbCompSet = { date: string; free: boolean; nms: { nmId: string; name: string; photo: string; ours: boolean }[] };
+export type Ads2WbCompSet = { date: string; free: boolean; opened: boolean; nms: { nmId: string; name: string; photo: string; ours: boolean }[] };
 
 export type Ads2OzMarketItem = {
   rank: number; sku: string; name: string; link: string; photo: string; seller: string; ours: boolean;
@@ -109,10 +109,33 @@ export type Ads2OzMarketItem = {
   convSearch: number | null; convPdp: number | null; drr: number | null; daysInPromo: number | null; daysWithTrafarets: number | null;
 };
 
+/**
+ * Конкурент, привязанный к нашему товару (или сам наш товар — строка «мы» для сравнения).
+ * Источники цифр: карточка на витрине (цена, рейтинг, отзывы, остаток) — каждую ночь;
+ * WB «Сравнение карточек» за 30 дней (заказы, позиция, CTR) — если конкурент есть в открытом наборе;
+ * Ozon «Товары на Ozon» (выручка за неделю, ДРР) — если конкурент в топ-50 своей категории.
+ */
+export type Ads2WatchLink = {
+  id: string; url: string;
+  source: 'manual' | 'auto'; status: 'active' | 'suggested' | 'ignored';
+  title: string; brand: string; seller: string; note: string; photo: string;
+  price: number | null; rating: number | null; feedbacks: number | null; stock: number | null;
+  orders: number | null; ordersDyn: number | null; avgPos: number | null; ctr: number | null; openCard: number | null;
+  inAds: boolean | null; inPromo: boolean | null;
+  gmv: number | null; drr: number | null;
+};
+
+/** Наш товар (ключ — наш артикул продавца) и его конкуренты. */
+export type Ads2WatchProduct = { key: string; ourId: string; name: string; photo: string; our: Ads2WatchLink | null; links: Ads2WatchLink[] };
+
 export type Ads2Competitors = {
   ok: true; mp: Ads2Mp; at: number | null;
   /** Нет снимка — задание ещё не отработало. */
   empty: boolean;
+  /** Привязки конкурентов к товарам: правят менеджеры (добавить по ссылке/артикулу, подтвердить, «не тот»). */
+  watch: Ads2WatchProduct[];
+  /** Наши товары для выбора при добавлении: артикул и название. */
+  catalog: { key: string; name: string }[];
   wb?: {
     period: { start: string; end: string } | null;
     summary: { avgPos: number | null; avgPosDyn: number | null; medianPos: number | null; visibility: number | null; advertised: number | null; total: number | null };

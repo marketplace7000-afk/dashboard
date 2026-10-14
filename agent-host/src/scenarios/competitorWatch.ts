@@ -7,13 +7,16 @@
  *
  *   WB   «Поисковые запросы: ваши товары» — средняя позиция, показы, CTR, заказы по
  *        каждой нашей карточке (7 дней против прошлых 7) и факторы ранжирования;
- *        «Сравнение карточек» — список наборов «наш товар + конкуренты» и лимит.
- *        Отчёты сравнений пока не открываем: платное открытие — по лимиту владельца
- *        (wb_comparisons_month_limit), формат запроса ещё не снят.
+ *        «Сравнение карточек» — список наборов «наш товар + конкуренты», лимит и
+ *        отчёты (30 дней) по наборам, которые открываются бесплатно (status.available).
+ *        Платное открытие (wb_comparisons_month_limit, 130/мес) — когда будет снят
+ *        запрос создания сравнения; истёкшие наборы кабинет без списания не отдаёт.
  *        Аналитика WB требует заголовков сессии (authorizev3, seller-lk): берём их
  *        из собственного запроса страницы, держим только в памяти, никуда не пишем.
  *   Ozon «Товары на Ozon» по нашим категориям (топ-50 по выручке за неделю) и
  *        «Конкурентная позиция» (наше место среди продавцов, ближайший конкурент).
+ *   Обе  карточки конкурентов, привязанных к нашим товарам (params.watch — сервер
+ *        заполняет при выдаче), и наших товаров (params.ours) на витрине покупателя.
  *
  * Этапы (shared/agents SCENARIO_STAGES.competitor_watch): open_cabinet → collect → ingest
  */
@@ -78,9 +81,99 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
   if (lim.error) errors.push(lim.error);
   const hist = await j('/v1/competitor-comparison/history', { orderBy: { field: 'date', mode: 'desc' }, limit: 50, offset: 0 });
   if (hist.error) errors.push(hist.error);
+  // Отчёты сравнений: только наборы со status.available — их открытие лимит не тратит
+  // (проверено 14.10: счётчик comparisonsThisMonth не меняется). Истёкший набор кабинет
+  // не отдаёт без списания (RequiresLimitCharge) — такие не трогаем.
+  const compDetails = [];
+  const sets = ((hist.json && hist.json.data) || []).filter(h => h && h.status && h.status.available).slice(0, 12);
+  for (const h of sets) {
+    const scope = (h.nms || []).map(n => n.nmID);
+    const r = await j('/v4/competitor-comparison/nms/detail', { period: { start: d(29), end: d(0) }, id: h.ID,
+      searchQueriesRequest: { limit: 5, offset: 0, orderBy: { field: 'frequency', mode: 'desc', nmID: scope[0] }, scopeNmIDs: scope }, sizeDetails: true });
+    const det = r.json && !r.json.error && r.json.data;
+    if (!det) { errors.push(r.error || ('сравнение ' + h.date + ': ' + JSON.stringify(r.json && r.json.additionalErrors || '').slice(0, 120))); continue; }
+    const c = x => x && typeof x === 'object' ? x.current : x;
+    const dy = x => x && typeof x === 'object' ? x.dynamics : null;
+    compDetails.push({ id: h.ID, date: h.date,
+      nms: (det.commonParams || []).map(p => ({ nmId: p.nmId, name: p.nmName, brand: p.brandName, photo: p.mainPhoto,
+        minPrice: p.minPrice, medianPrice: p.medianPrice, rating: p.feedbacksRating, feedbacks: c(p.feedbacksCount),
+        avgPos: c(p.avgPosition), avgPosDyn: dy(p.avgPosition), openCard: c(p.openCard), orders: c(p.orders), ordersDyn: dy(p.orders),
+        ctr: c(p.CTR), views: c(p.viewCount), buyoutPercent: c(p.buyoutPercent), inAds: !!p.inAdvertising, inPromo: !!(p.promo && p.promo.inPromo) })),
+      queries: (det.searchQueries || []).map(q => ({ text: q.text, freq: c(q.frequency) })) });
+    await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500));
+  }
   return { period: { start: d(7), end: d(1) }, report: data, recommendations: reco,
-    comparisons: { limits: lim.json && lim.json.data || null, history: hist.json && hist.json.data || null }, errors: errors };
+    comparisons: { limits: lim.json && lim.json.data || null, history: hist.json && hist.json.data || null }, compDetails: compDetails, errors: errors };
 })(${JSON.stringify(auth)})`;
+
+// Карточки WB на витрине пачкой — повтор собственного запроса страницы товара
+// (/__internal/card/cards/v4/detail) с нашими номерами. Цены там в копейках.
+const WB_CARDS = (url: string, headers: Record<string, string>, ids: number[]) => `(async (U, H, IDS) => {
+  const out = [], errors = [];
+  for (let i = 0; i < IDS.length; i += 40) {
+    const u = U.replace(/([?&])nm=[^&]*/, '$1nm=' + IDS.slice(i, i + 40).join(';'));
+    try {
+      const r = await fetch(u, { credentials: 'include', headers: H });
+      if (!r.ok) { errors.push('витрина WB ' + r.status); continue; }
+      const j = await r.json();
+      for (const p of (j.products || (j.data && j.data.products) || [])) {
+        const sz = (p.sizes || []).find(s => s.price) || {};
+        out.push({ id: p.id, name: p.name, brand: p.brand, supplier: p.supplier, rating: p.reviewRating, feedbacks: p.feedbacks,
+          price: sz.price ? Math.round(sz.price.product / 100) : null, basic: sz.price ? Math.round(sz.price.basic / 100) : null, qty: p.totalQuantity });
+      }
+    } catch (e) { errors.push('витрина WB: ' + e.message); }
+    await new Promise(r => setTimeout(r, 1500 + Math.random() * 1000));
+  }
+  return { cards: out, errors: errors };
+})(${JSON.stringify(url)}, ${JSON.stringify(headers)}, ${JSON.stringify(ids)})`;
+
+/** WB: открыть страницу первого товара на витрине, взять заголовки её запроса карточки и снять все номера. */
+async function wbShowcaseCards(page: Page, ids: number[]): Promise<{ cards: any[]; errors: string[] }> {
+  if (!ids.length) return { cards: [], errors: [] };
+  let req: { url: string; headers: Record<string, string> } | null = null;
+  page.on('request', rq => {
+    if (req || !/__internal\/card\/cards\/v4\/detail/.test(rq.url())) return;
+    void rq.allHeaders().then(h => {
+      if (req) return;
+      const keep: Record<string, string> = {};
+      for (const [k, v] of Object.entries(h)) if (!/^(:|host|cookie|content-length|accept-encoding|connection|sec-|user-agent|referer)/i.test(k)) keep[k] = v;
+      req = { url: rq.url(), headers: keep };
+    }).catch(() => {});
+  });
+  await page.goto(`https://www.wildberries.ru/catalog/${ids[0]}/detail.aspx`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  for (let i = 0; i < 15 && !req; i++) await sleep(1000);
+  if (!req) return { cards: [], errors: ['витрина WB не сделала запрос карточки — карточки конкурентов не сняты'] };
+  const r = req as { url: string; headers: Record<string, string> };
+  return await page.evaluate(WB_CARDS(r.url, r.headers, ids)) as { cards: any[]; errors: string[] };
+}
+
+/** Ozon: карточки по SKU через страничный API витрины (как у покупателя). Цены — строки «1 528 ₽». */
+async function ozonShowcaseCards(page: Page, ids: number[], settings: AgentSettings): Promise<{ cards: any[]; errors: string[] }> {
+  const cards: any[] = [], errors: string[] = [];
+  const rub = (s: unknown) => { const n = Number(String(s ?? '').replace(/[^\d,.]/g, '').replace(',', '.')); return Number.isFinite(n) && n > 0 ? Math.round(n) : null; };
+  const pick = (ws: Record<string, string>, re: RegExp): any => {
+    const k = Object.keys(ws).find(x => re.test(x));
+    if (!k) return null;
+    try { return JSON.parse(ws[k]); } catch { return null; }
+  };
+  for (const sku of ids) {
+    try {
+      const r = await page.context().request.get(`https://www.ozon.ru/api/entrypoint-api.bx/page/json/v2?url=${encodeURIComponent(`/product/${sku}/`)}`, { timeout: 30_000 });
+      if (!r.ok()) { errors.push(`витрина Ozon ${sku}: ${r.status()}`); if (r.status() === 403 || r.status() === 429) break; continue; }
+      const j: any = await r.json();
+      const ws: Record<string, string> = j?.widgetStates ?? {};
+      const price = pick(ws, /^webPrice-/), head = pick(ws, /^webProductHeading-/), score = pick(ws, /^webReviewProductScore-/),
+        sticky = pick(ws, /^webStickyProducts-/), sale = pick(ws, /^webSale-/);
+      cards.push({
+        id: sku, name: head?.title ?? sticky?.name ?? '', seller: sticky?.seller?.name ?? '', photo: sticky?.coverImageUrl ?? '',
+        price: rub(price?.cardPrice) ?? rub(price?.price), priceNoCard: rub(price?.price), originalPrice: rub(price?.originalPrice),
+        rating: score?.totalScore ?? null, reviews: score?.reviewsCount ?? null, available: price?.isAvailable ?? sale?.offer?.isAvailable ?? null,
+      });
+    } catch (e) { errors.push(`витрина Ozon ${sku}: ${(e as Error).message.slice(0, 80)}`); }
+    await sleep(randBetween(settings.page_pause_ms));
+  }
+  return { cards, errors };
+}
 
 const OZ_COLLECT = (companyId: string, ourCats: string[]) => `(async (CID, OUR) => {
   const HD = { 'Content-Type': 'application/json', 'x-o3-app-name': 'seller-ui', 'x-o3-company-id': CID, 'x-o3-language': 'ru' };
@@ -154,6 +247,16 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
       data = await page.evaluate(OZ_COLLECT(cid, cats));
       const items = (data?.markets ?? []).reduce((s: number, m: any) => s + (m.items?.length ?? 0), 0);
       await api.progress(task.id, stage(1, `Категорий ${data?.markets?.length ?? 0}, товаров рынка ${items}`, { items_done: items, items_total: items }), true);
+    }
+    // Карточки привязанных конкурентов и наших товаров на витрине (цена, рейтинг, отзывы, остаток).
+    const ids = [...new Set([...(task.params.ours as number[] ?? []), ...(task.params.watch as number[] ?? [])].map(Number).filter(n => n > 0))]
+      .slice(0, mp === 'wb' ? 200 : 60);
+    if (data && ids.length) {
+      await api.progress(task.id, stage(1, `Карточки конкурентов на витрине: ${ids.length}`), true);
+      const sc = mp === 'wb' ? await wbShowcaseCards(page, ids) : await ozonShowcaseCards(page, ids, settings);
+      data.cards = sc.cards;
+      data.errors = [...(data.errors ?? []), ...sc.errors.slice(0, 5)];
+      await api.progress(task.id, stage(1, `Карточек снято: ${sc.cards.length} из ${ids.length}`, { items_done: sc.cards.length, items_total: ids.length }), true);
     }
     for (const e of (data?.errors ?? []).slice(0, 5)) await api.log(task.id, 'warn', `кабинет ответил ошибкой: ${String(e).slice(0, 200)}`);
 

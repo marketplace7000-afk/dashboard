@@ -51,15 +51,15 @@ export const RNP_METRICS: RnpMetric[] = [
   { key: 'spp_disc', label: 'СПП, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', mps: [] },
   { key: 'spp_base', label: 'Цена продавца по заказам, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', mps: [] },
 
-  // ── Воронка (Ozon отдаёт по дням и товарам; у WB по дням — только рекламная часть) ──
+  // ── Воронка (Ozon — v1/analytics/data; WB с 14.10.2026 — sales-funnel/products/history: переходы и корзины, история с этой даты) ──
   { key: 'hits_view', label: 'Показы', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: ['ozon'] },
   { key: 'hits_view_search', label: 'Показы в поиске и каталоге', short: 'Показы в поиске', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: ['ozon'] },
   { key: 'session_view', label: 'Посетители', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: ['ozon'] },
-  { key: 'session_view_pdp', label: 'Посетители карточки', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: ['ozon'] },
-  { key: 'hits_tocart', label: 'Корзина', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: ['ozon'] },
-  { key: 'pct_pdp_to_cart', label: '% в корзину', group: 'Воронка', unit: 'pct', kind: 'ratio', num: 'hits_tocart', den: 'session_view_pdp', scale: 100, better: 'up', mps: ['ozon'],
+  { key: 'session_view_pdp', label: 'Посетители карточки', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: BOTH },
+  { key: 'hits_tocart', label: 'Корзина', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: BOTH },
+  { key: 'pct_pdp_to_cart', label: '% в корзину', group: 'Воронка', unit: 'pct', kind: 'ratio', num: 'hits_tocart', den: 'session_view_pdp', scale: 100, better: 'up', mps: BOTH,
     hint: 'Корзины ÷ посетители карточки' },
-  { key: 'pct_cart_to_order', label: '% заказов из корзины', group: 'Воронка', unit: 'pct', kind: 'ratio', num: 'ordered_cnt', den: 'hits_tocart', scale: 100, better: 'up', mps: ['ozon'] },
+  { key: 'pct_cart_to_order', label: '% заказов из корзины', group: 'Воронка', unit: 'pct', kind: 'ratio', num: 'ordered_cnt', den: 'hits_tocart', scale: 100, better: 'up', mps: BOTH },
   { key: 'pct_session_to_order', label: 'CR в заказ, %', group: 'Воронка', unit: 'pct', kind: 'ratio', num: 'ordered_cnt', den: 'session_view', scale: 100, better: 'up', mps: ['ozon'],
     hint: 'Заказы ÷ посетители' },
   { key: 'avg_position', label: 'Средняя позиция в поиске', short: 'Позиция', group: 'Воронка', unit: 'num', kind: 'ratio', num: 'pos_wsum', den: 'pos_weight', better: 'down', mps: BOTH,

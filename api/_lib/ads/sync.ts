@@ -241,8 +241,10 @@ async function syncOzonCampaigns(): Promise<string> {
   let fetched = 0, failed = 0;
   // Товары и ставки — только у товарных кампаний «Оплата за клик». У «Оплаты за
   // заказ» товары живут в отдельном методе (search_promo), их добавим на этапе 1.
-  for (const c of live.filter(x => (x.raw as any)?.advObjectType === 'SKU').slice(0, 40)) {
-    const pr = await ozPerf(`api/client/campaign/${c.id}/v2/products`, token);
+  // 14.10: было не больше 40 кампаний за проход — при 44 товарных часть терялась.
+  // Лимит Performance — 100 000 запросов в сутки, полсотни запросов не в счёт.
+  for (const c of live.filter(x => (x.raw as any)?.advObjectType === 'SKU')) {
+    const pr = await ozPerf(`api/client/campaign/${c.id}/v2/products?page=1&pageSize=100`, token);
     if (!pr.ok) { failed++; continue; }
     const pj: any = await pr.json().catch(() => null);
     for (const p of (pj?.products ?? [])) {
@@ -256,7 +258,58 @@ async function syncOzonCampaigns(): Promise<string> {
     fetched++;
   }
   saveCampaigns('ozon', live, items);
-  return `Ozon: кампаний ${live.length} (всего ${all.length}), со ставками ${fetched}${failed ? `, не ответили ${failed}` : ''}, товаров ${items.length}`;
+  const stats = await syncOzonStats(token, live.filter(x => (x.raw as any)?.advObjectType === 'SKU' && x.status !== 'planned').map(x => x.id))
+    .catch(e => `статистика: сбой ${(e as Error).message.slice(0, 120)}`);
+  return `Ozon: кампаний ${live.length} (всего ${all.length}), со ставками ${fetched}${failed ? `, не ответили ${failed}` : ''}, товаров ${items.length} · ${stats}`;
+}
+
+/**
+ * Разбор POST /api/client/statistics/products/sku: строки «кампания × товар × день».
+ * Деньги здесь — рубли строкой (не миллионные доли), числа могут прийти с запятой.
+ */
+export function parseOzonSkuStats(json: unknown): StatDayRow[] {
+  const rows: any[] = Array.isArray((json as any)?.rows) ? (json as any).rows : [];
+  const n = (v: unknown) => num(typeof v === 'string' ? v.replace(/\s/g, '').replace(',', '.') : v);
+  const acc = new Map<string, StatDayRow>();
+  for (const r of rows) {
+    const cid = r?.campaignId ?? r?.campaign_id;
+    const date = String(r?.date ?? '').slice(0, 10);
+    if (cid == null || r?.sku == null || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const key = `${cid}|${date}|${r.sku}`;
+    const row = acc.get(key) ?? { date, campaign_id: String(cid), sku: String(r.sku), views: 0, clicks: 0, spend: 0, carts: 0, orders: 0, revenue: 0, avg_pos: null };
+    row.views += n(r.views); row.clicks += n(r.clicks); row.spend += n(r.expense);
+    row.carts += n(r.toCart); row.orders += n(r.orders); row.revenue += n(r.sales);
+    acc.set(key, row);
+  }
+  return [...acc.values()];
+}
+
+/**
+ * Статистика Ozon по кампаниям и товарам за вчера и сегодня. Метод синхронный
+ * и, по спецификации, не расходует лимиты Performance; дальше вчерашнего дня
+ * не отдаёт — история копится проходами (раз в 2 ч). Более старые дни по
+ * товарам есть в РНП (отчёты Performance).
+ */
+async function syncOzonStats(token: string, ids: string[]): Promise<string> {
+  if (!ids.length) return 'статистика: нет кампаний';
+  const MSK = 3 * 3_600_000;
+  const day = (back: number) => new Date(Date.now() + MSK - back * 86_400_000).toISOString().slice(0, 10);
+  let rows = 0;
+  let note = '';
+  for (let i = 0; i < ids.length; i += 10) {
+    const r = await fetchWithRetry(`${PERF_HOST}/api/client/statistics/products/sku`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ campaignIds: ids.slice(i, i + 10), dateFrom: day(1), dateTo: day(0) }),
+    }, { maxRetries: 1 });
+    if (!r.ok) { note = ` (ответ ${r.status} ${(await r.text().catch(() => '')).slice(0, 100)})`; continue; }
+    const text = await r.text();
+    let parsed: StatDayRow[] = [];
+    try { parsed = parseOzonSkuStats(JSON.parse(text)); } catch { /* ниже */ }
+    if (!parsed.length && text.length > 20 && !note) note = ` (не разобран: ${text.slice(0, 160)})`;
+    rows += saveStatDays('ozon', parsed);
+  }
+  return `статистика: строк ${rows}${note}`;
 }
 
 // ─── Точка входа ─────────────────────────────────────────────────────────────

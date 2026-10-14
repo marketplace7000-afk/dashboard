@@ -13,14 +13,12 @@
  *
  * Запуск: npm run check
  */
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import './_ads-check-env';
 import { join } from 'node:path';
-
-process.env.CACHE_DIR = mkdtempSync(join(tmpdir(), 'av-check-ads2-'));
-
 import { gate, note, ruleFor, gatewayStatus, GatewayBusy, _resetGatewayForTests } from '../api/_lib/gateway';
-import { parseWbAdverts, parseWbFullstats, parseOzonCampaigns, parseWbDailyLimits, micro } from '../api/_lib/ads/sync';
+import { parseWbAdverts, parseWbFullstats, parseOzonCampaigns, parseWbDailyLimits, parseOzonSkuStats, micro } from '../api/_lib/ads/sync';
+import { parseWbFunnelHistory } from '../api/_lib/rnp';
+import { applyAdAction } from '../api/_lib/ads/actions';
 import * as store from '../api/_lib/ads/store';
 
 let failed = 0;
@@ -107,6 +105,17 @@ async function main() {
   check('корневой массив, snake_case', parseWbDailyLimits([{ advert_id: 40898103, is_enabled: true, daily_limit: 70000, spent_today: 12050 }]), [lim]);
   check('мусор → пусто', parseWbDailyLimits({ error: 'x' }), []);
 
+  console.log('Статистика Ozon по товарам (statistics/products/sku)');
+  const ozs = parseOzonSkuStats({ rows: [
+    { campaignId: '777', sku: '5385887749', date: '2026-10-13', views: '1000', clicks: '40', toCart: '6', expense: '320,50', orders: '2', sales: '5980' },
+    { campaignId: '777', sku: '5385887749', date: '2026-10-13T00:00:00Z', views: '10', clicks: '1', toCart: '0', expense: '8', orders: '0', sales: '0' },
+  ] });
+  check('рубли с запятой, дубли дня складываются', ozs.map(r => [r.date, r.views, r.clicks, r.spend, r.carts, r.orders, r.revenue]), [['2026-10-13', 1010, 41, 328.5, 6, 2, 5980]]);
+
+  console.log('Воронка WB по дням (sales-funnel/products/history)');
+  check('переходы и корзины по дням', parseWbFunnelHistory([{ product: { nmId: 923646381 }, history: [{ date: '2026-10-13', openCount: 120, cartCount: 14 }] }]),
+    [{ nm: '923646381', date: '2026-10-13', open: 120, cart: 14 }]);
+
   console.log('Хранилище');
   store._useAdsDbForTests(':memory:');
   if (!store.adsDb()) { console.log('  — node:sqlite недоступен в этой версии Node, проверка хранилища пропущена'); }
@@ -135,8 +144,80 @@ async function main() {
     check('журнал пишет и читает JSON', store.listChanges(5)[0]?.after, { search: 95000 });
   }
 
+  if (store.adsDb()) await checkActions();
+
   console.log(failed ? `\n✗ ошибок: ${failed}` : '\n✓ всё в порядке');
   process.exit(failed ? 1 : 0);
+}
+
+/**
+ * Команды площадкам — без сети: fetch подменён, смотрим, что ушло бы в WB и Ozon.
+ * Главное — единицы (WB копейки, Ozon миллионные доли) и что соседние товары
+ * кампании Ozon отправляются со своими ставками.
+ */
+async function checkActions() {
+  console.log('Команды площадкам (fetch подменён)');
+  process.env.WB_TOKEN_PROMOTION = 'test';
+  process.env.OZON_PERF_CLIENT_ID = 'id';
+  process.env.OZON_PERF_CLIENT_SECRET = 'secret';
+  const sent: { method: string; url: string; body: any }[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: any, init: any = {}) => {
+    const u = String(url);
+    if (u.endsWith('/api/client/token')) return new Response(JSON.stringify({ access_token: 't', expires_in: 1800 }), { status: 200 });
+    sent.push({ method: init.method ?? 'GET', url: u, body: init.body ? JSON.parse(init.body) : null });
+    if (u.includes('/daily-limits?')) return new Response(JSON.stringify({ adverts: [{ advertId: 40898103, enabled: true, dailyLimit: 150000, spentToday: 0 }] }), { status: 200 });
+    if (u.includes('/daily-limits')) return new Response(JSON.stringify({ adverts: [{ advertId: 40898103, belowMinLimit: false, requiredLimit: 0 }] }), { status: 200 });
+    if (u.includes('/v2/products')) return new Response(JSON.stringify({ products: [{ sku: '5385887749', bid: '9500000' }, { sku: '111', bid: '5000000' }] }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as any;
+  try {
+    // Модуль команд может получить свою копию store (на Windows с кириллицей в пути
+    // tsx различает спецификаторы модуля) — поэтому обе копии работают с одним
+    // файлом во временной папке, а не с базой в памяти.
+    store._useAdsDbForTests(join(process.env.CACHE_DIR!, 'ads.sqlite'));
+    const adv = parseWbAdverts({ adverts: [
+      { bid_type: 'manual', id: 40772131, status: 9, settings: { name: 'Поиск', payment_type: 'cpm', placements: { search: true } },
+        nm_settings: [{ nm_id: 923646381, bids_kopecks: { search: 87000, recommendations: 0 } }] },
+      { bid_type: 'unified', id: 40898103, status: 11, settings: { name: 'Клик', payment_type: 'cpc', placements: { search: true, recommendations: true } },
+        nm_settings: [{ nm_id: 111, bids_kopecks: { search: 2300, recommendations: 2300 } }] },
+    ] });
+    store.saveCampaigns('wb', adv.campaigns, adv.items);
+    let r = await applyAdAction({ mp: 'wb', campaignId: '40772131', kind: 'bid', sku: '923646381', placement: 'search', valueRub: 950 });
+    check('WB ставка 950 ₽ → 95000 копеек в поиск', [r.ok, sent.at(-1)?.method, sent.at(-1)?.body?.bids?.[0]?.nm_bids?.[0]], [true, 'PATCH', { nm_id: 923646381, bid_kopecks: 95000, placement: 'search' }]);
+    r = await applyAdAction({ mp: 'wb', campaignId: '40772131', kind: 'bid', sku: '923646381', placement: 'search', valueRub: 3000 });
+    check('скачок больше чем ×2 — нужно подтверждение, в площадку не ушло', [r.ok, r.needConfirm, sent.length], [false, true, 1]);
+    r = await applyAdAction({ mp: 'wb', campaignId: '40772131', kind: 'daily_limit', valueRub: 1500 });
+    check('дневной лимит у CPM-кампании не ставится', r.ok, false);
+    r = await applyAdAction({ mp: 'wb', campaignId: '40898103', kind: 'daily_limit', valueRub: 1500 });
+    const put = sent.find(s => s.method === 'PUT');
+    check('WB лимит 1500 ₽ → 150000 копеек, без переноса, затем сверка', [r.ok, put?.body, r.message.includes('ВНИМАНИЕ')],
+      [true, { advertIds: [40898103], enabled: true, dailyLimit: 150000, carryOverEnabled: false }, false]);
+    r = await applyAdAction({ mp: 'wb', campaignId: '40772131', kind: 'pause' });
+    check('WB пауза активной кампании', [r.ok, sent.at(-1)?.url.endsWith('/adv/v0/pause?id=40772131')], [true, true]);
+    check('после паузы статус в базе обновлён', store.getCampaign('wb', '40772131')?.status, 'paused');
+
+    store.saveCampaigns('ozon',
+      [{ mp: 'ozon', id: '777', name: 'LIGHTS', status: 'active', status_code: null, payment: 'cpc', bid_type: 'TARGET_BIDS', placements: null,
+         daily_limit: null, daily_limit_on: null, spent_today: null, weekly_budget: 26000, created_at: null, started_at: null },
+       { mp: 'ozon', id: '778', name: 'MAX', status: 'active', status_code: null, payment: 'cpc', bid_type: 'MAX_CLICKS', placements: null,
+         daily_limit: null, daily_limit_on: null, spent_today: null, weekly_budget: 7000, created_at: null, started_at: null }],
+      [{ campaign_id: '777', sku: '5385887749', bid_raw: '8000000' }, { campaign_id: '777', sku: '111', bid_raw: '5000000' }, { campaign_id: '778', sku: '222', bid_raw: '0' }]);
+    r = await applyAdAction({ mp: 'ozon', campaignId: '777', kind: 'bid', sku: '5385887749', valueRub: 9.5 });
+    const ozPut = sent.find(s => s.method === 'PUT' && s.url.endsWith('/campaign/777/products'));
+    check('Ozon ставка 9,5 ₽ → "9500000", сосед уходит со своей ставкой', [r.ok, [...(ozPut?.body?.bids ?? [])].sort((x: any, y: any) => x.sku.localeCompare(y.sku)), r.message.includes('ВНИМАНИЕ')],
+      [true, [{ sku: '111', bid: '5000000' }, { sku: '5385887749', bid: '9500000' }], false]);
+    r = await applyAdAction({ mp: 'ozon', campaignId: '778', kind: 'bid', sku: '222', valueRub: 10 });
+    check('Ozon: при MAX_CLICKS ставку не трогаем', r.ok, false);
+    r = await applyAdAction({ mp: 'ozon', campaignId: '777', kind: 'weekly_budget', valueRub: 30000 });
+    const patch = sent.find(s => s.method === 'PATCH' && s.url.endsWith('/campaign/777'));
+    check('Ozon недельный бюджет 30 000 ₽ → "30000000000"', [r.ok, patch?.body], [true, { weeklyBudget: '30000000000' }]);
+    const log = store.listChanges(20);
+    check('журнал: успехи и отказы записаны, неподтверждённый скачок — нет',
+      [log.filter(l => l.status === 'applied').length, log.filter(l => l.status === 'failed').length], [5, 2]);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 void main();

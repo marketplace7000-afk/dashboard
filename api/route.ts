@@ -297,6 +297,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { syncAds } = await import('./_lib/ads/sync');
         return res.status(200).json({ ok: true, result: await syncAds() });
       }
+      // Этап 1 (14.10.2026): экран раздела и ручные команды площадкам.
+      if (what === 'overview') {
+        const mp = req.query.mp === 'ozon' ? 'ozon' : 'wb';
+        const { getAdsOverview } = await import('./_lib/ads/overview');
+        return res.status(200).json(await getAdsOverview(mp, Number(req.query.days) || 14));
+      }
+      if (what === 'action' && req.method === 'POST') {
+        const b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
+        const { applyAdAction } = await import('./_lib/ads/actions');
+        const r = await applyAdAction({
+          mp: b.mp, campaignId: String(b.campaignId ?? ''), kind: b.kind,
+          sku: b.sku == null ? undefined : String(b.sku),
+          placement: b.placement, valueRub: b.valueRub == null ? undefined : Number(b.valueRub),
+          enabled: b.enabled, confirmBig: !!b.confirmBig, reason: b.reason ? String(b.reason).slice(0, 300) : null,
+        }, 'manager');
+        return res.status(200).json(r);
+      }
       if (what === 'campaigns') {
         const mp = req.query.mp === 'wb' || req.query.mp === 'ozon' ? req.query.mp : undefined;
         return res.status(200).json({ ok: true, campaigns: store.listCampaigns(mp as any) });

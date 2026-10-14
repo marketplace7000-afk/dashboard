@@ -54,6 +54,9 @@ const RULES: Rule[] = [
   { bucket: 'wb-supplies',       host: 'supplies-api.wildberries.ru',    intervalMs: 1_000 },
   // ── Ozon Seller ── analytics/data — 1 запрос в минуту
   { bucket: 'oz:analytics',      host: 'api-seller.ozon.ru', path: /^\/v1\/analytics\/data/,                        intervalMs: 60_000 },
+  // Начисления: прод 14.10 — серия 429 «rate limit per second» при запросах подряд
+  // без паузы (факт логистики). Лимит в документации не назван — держим 2 с.
+  { bucket: 'oz:accrual',        host: 'api-seller.ozon.ru', path: /^\/v1\/finance\/accrual\//,                     intervalMs: 2_000 },
   { bucket: 'oz:seller',         host: 'api-seller.ozon.ru',                                                        intervalMs: 0 },
   // ── Ozon Performance ── 100 000 в сутки; отчёты сериализует ozonSkuAds сам
   { bucket: 'oz-perf',           host: 'api-performance.ozon.ru',                                                   intervalMs: 0 },

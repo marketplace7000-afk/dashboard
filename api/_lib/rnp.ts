@@ -402,6 +402,81 @@ async function collectWbPositions(): Promise<string> {
   return `позиции WB: ${parts.join(', ')}`;
 }
 
+/**
+ * Воронка WB по дням (14.10.2026, «Реклама 2.0», этап 1): переходы в карточку
+ * и добавления в корзину — sales-funnel/products/history. Метод отдаёт не
+ * дальше последней недели, по 20 товаров за запрос, 3 запроса в минуту (интервал
+ * держит шлюз). Поэтому каждый проход берёт 7 последних дней, а история
+ * копится в базе. Товары — те, у кого за 14 дней были заказы или остаток.
+ *
+ * Пишем по товарам, а не «стереть день целиком»: если часть запросов упала,
+ * воронка остальных товаров за эти дни не пропадёт.
+ */
+const WB_FUNNEL_METRICS = ['session_view_pdp', 'hits_tocart'];
+const WB_FUNNEL_MAX_NMS = 400;
+
+export function parseWbFunnelHistory(json: unknown): Array<{ nm: string; date: string; open: number; cart: number }> {
+  const arr: any[] = Array.isArray(json) ? json : Array.isArray((json as any)?.data) ? (json as any).data : [];
+  const out: Array<{ nm: string; date: string; open: number; cart: number }> = [];
+  for (const p of arr) {
+    const nm = String(p?.product?.nmId ?? p?.nmId ?? '');
+    if (!nm) continue;
+    for (const h of p?.history ?? []) {
+      const date = String(h?.date ?? '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      out.push({ nm, date, open: num(h?.openCount), cart: num(h?.cartCount) });
+    }
+  }
+  return out;
+}
+
+async function collectWbFunnel(): Promise<string> {
+  const d = getDb();
+  if (!d) return 'воронка WB: базы нет';
+  const token = (process.env.WB_TOKEN_ANALYTICS || process.env.WB_TOKEN || '').trim();
+  if (!token) return 'воронка WB: нет ключа';
+  const nms = (d.prepare(`SELECT sku FROM rnp_fact WHERE mp = 'wb' AND date >= ? AND metric IN ('ordered_cnt', 'stocks') AND value > 0
+    GROUP BY sku ORDER BY SUM(CASE WHEN metric = 'ordered_cnt' THEN value ELSE 0 END) DESC LIMIT ?`)
+    .all(mskDate(13), WB_FUNNEL_MAX_NMS) as Array<{ sku: string }>).map(r => r.sku).filter(s => /^\d+$/.test(s));
+  if (!nms.length) return 'воронка WB: нет товаров с заказами или остатком';
+
+  const start = mskDate(6), end = mskDate(0);
+  const del = d.prepare(`DELETE FROM rnp_fact WHERE mp = 'wb' AND sku = ? AND date >= ? AND date <= ? AND metric IN (${WB_FUNNEL_METRICS.map(() => '?').join(',')})`);
+  const ins = d.prepare('INSERT OR REPLACE INTO rnp_fact (mp, date, sku, metric, value) VALUES (?, ?, ?, ?, ?)');
+  let ok = 0, failed = 0, rows = 0;
+  let lastErr = '';
+  for (let i = 0; i < nms.length; i += 20) {
+    const chunk = nms.slice(i, i + 20);
+    const r = await fetchWithRetry('https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history', {
+      method: 'POST',
+      headers: { Authorization: token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selectedPeriod: { start, end }, nmIds: chunk.map(Number), skipDeletedNm: false, aggregationLevel: 'day' }),
+    }, { maxRetries: 2, backoff429Ms: 21_000, timeoutMs: 60_000 }).catch(e => ({ ok: false, status: 0, text: async () => String((e as Error).message) }) as any);
+    if (!r.ok) {
+      failed += chunk.length;
+      lastErr = `${r.status} ${(await r.text().catch(() => '')).slice(0, 120)}`;
+      // Нет подписки/прав — дальше спрашивать бессмысленно.
+      if (r.status === 401 || r.status === 402 || r.status === 403) break;
+      continue;
+    }
+    const hist = parseWbFunnelHistory(await r.json().catch(() => null));
+    d.exec('BEGIN');
+    try {
+      for (const nm of chunk) del.run(nm, start, end, ...WB_FUNNEL_METRICS);
+      for (const h of hist) {
+        if (h.date < start || h.date > end) continue;
+        ins.run('wb', h.date, h.nm, 'session_view_pdp', h.open);
+        ins.run('wb', h.date, h.nm, 'hits_tocart', h.cart);
+        rows += 2;
+      }
+      d.exec('COMMIT');
+    } catch (e) { d.exec('ROLLBACK'); throw e; }
+    ok += chunk.length;
+  }
+  if (ok) markCollected('wb:funnel');
+  return `воронка WB: товаров ${ok} из ${nms.length} → ${rows} значений${failed ? `, сбой ${failed} (${lastErr})` : ''}`;
+}
+
 // ─── Ozon ──────────────────────────────────────────────────────────────────
 
 const OZ_BASE = 'https://api-seller.ozon.ru';
@@ -767,6 +842,7 @@ export function collectRnp(only?: RnpMp): Promise<string[]> {
       await step('реклама WB', () => collectWbAds());
       await step('остатки WB', () => collectWbStock());
       await step('позиции WB', () => collectWbPositions());
+      await step('воронка WB', () => collectWbFunnel());
       await step('каталог WB', async () => { await wbCatalog(items); await fillSheetCategories(items); upsertItems('wb', [...items.values()]); return `каталог WB: ${items.size} товаров`; });
     }
     if (!only || only === 'ozon') {
@@ -891,7 +967,7 @@ export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise
   }
 
   res.present = [...present];
-  for (const src of ['sales', 'ads', 'stock', 'analytics']) {
+  for (const src of ['sales', 'ads', 'stock', 'analytics', 'funnel']) {
     const v = metaGet(`collected:${mp}:${src}`);
     if (v) res.collectedAt[src] = Number(v);
   }

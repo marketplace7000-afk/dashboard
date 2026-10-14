@@ -209,6 +209,71 @@ export function listCampaigns(mp?: AdMp): (CampaignRow & { items: number; seen_a
   }));
 }
 
+export type CampaignItemFull = CampaignItemRow & { mp: AdMp; seen_at: number };
+
+export function listItems(mp?: AdMp): CampaignItemFull[] {
+  const d = adsDb();
+  if (!d) return [];
+  return d.prepare(`SELECT * FROM ad_campaign_item ${mp ? 'WHERE mp = ?' : ''}`).all(...(mp ? [mp] : [])) as any[];
+}
+
+export function getCampaign(mp: AdMp, id: string): (CampaignRow & { items: CampaignItemFull[] }) | null {
+  const d = adsDb();
+  if (!d) return null;
+  const r = d.prepare('SELECT * FROM ad_campaign WHERE mp = ? AND id = ?').get(mp, id) as any;
+  if (!r) return null;
+  const items = d.prepare('SELECT * FROM ad_campaign_item WHERE mp = ? AND campaign_id = ?').all(mp, id) as any[];
+  return {
+    ...r,
+    placements: r.placements ? JSON.parse(r.placements) : null,
+    daily_limit_on: r.daily_limit_on == null ? null : !!r.daily_limit_on,
+    raw: r.raw ? JSON.parse(r.raw) : null,
+    items,
+  };
+}
+
+/** Точечные правки после успешной команды — чтобы экран сразу видел новое, не дожидаясь сбора. */
+export function patchCampaign(mp: AdMp, id: string, p: { status?: string; status_code?: number | null; weekly_budget?: number | null }): void {
+  const d = adsDb();
+  if (!d) return;
+  if (p.status !== undefined) d.prepare('UPDATE ad_campaign SET status = ?, status_code = COALESCE(?, status_code), updated_at = ? WHERE mp = ? AND id = ?')
+    .run(p.status, p.status_code ?? null, Date.now(), mp, id);
+  if (p.weekly_budget !== undefined) d.prepare('UPDATE ad_campaign SET weekly_budget = ?, updated_at = ? WHERE mp = ? AND id = ?')
+    .run(p.weekly_budget, Date.now(), mp, id);
+}
+
+export function patchItemBid(mp: AdMp, campaignId: string, sku: string, p: { bid_search_kop?: number; bid_reco_kop?: number; bid_raw?: string }): void {
+  const d = adsDb();
+  if (!d) return;
+  for (const [col, v] of Object.entries(p)) {
+    if (v === undefined || !['bid_search_kop', 'bid_reco_kop', 'bid_raw'].includes(col)) continue;
+    d.prepare(`UPDATE ad_campaign_item SET ${col} = ? WHERE mp = ? AND campaign_id = ? AND sku = ?`).run(v, mp, campaignId, sku);
+  }
+}
+
+export type CampaignStat = { campaign_id: string; sku: string | null; views: number; clicks: number; spend: number; carts: number; orders: number; revenue: number; avg_pos: number | null; days: number };
+
+/** Сумма статистики за период: по кампании (sku = null) или по кампании × товару. */
+export function campaignStats(mp: AdMp, from: string, to: string, bySku = false): CampaignStat[] {
+  const d = adsDb();
+  if (!d) return [];
+  return d.prepare(`SELECT campaign_id, ${bySku ? 'sku' : 'NULL AS sku'},
+      ROUND(SUM(views)) AS views, ROUND(SUM(clicks)) AS clicks, ROUND(SUM(spend), 2) AS spend,
+      ROUND(SUM(carts), 1) AS carts, ROUND(SUM(orders), 1) AS orders, ROUND(SUM(revenue), 2) AS revenue,
+      ROUND(SUM(avg_pos * views) / NULLIF(SUM(CASE WHEN avg_pos IS NOT NULL THEN views END), 0), 1) AS avg_pos,
+      COUNT(DISTINCT date) AS days
+    FROM ad_stat_day WHERE mp = ? AND date >= ? AND date <= ?
+    GROUP BY campaign_id${bySku ? ', sku' : ''}`).all(mp, from, to) as any[];
+}
+
+/** Расход по дням (для графика темпа бюджета). */
+export function spendByDay(mp: AdMp, from: string, to: string): { date: string; spend: number }[] {
+  const d = adsDb();
+  if (!d) return [];
+  return d.prepare('SELECT date, ROUND(SUM(spend), 2) AS spend FROM ad_stat_day WHERE mp = ? AND date >= ? AND date <= ? GROUP BY date ORDER BY date')
+    .all(mp, from, to) as any[];
+}
+
 // ─── Статистика кампания × товар × день ─────────────────────────────────────
 
 export type StatDayRow = {

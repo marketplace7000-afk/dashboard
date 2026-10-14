@@ -161,8 +161,11 @@ async function computeOzon(diag: string[]): Promise<Record<string, FactItem>> {
   const since7 = Date.now() - 7 * dayMs;
   const byNum = new Map(postings.map(p => [p.number, p] as const));
   let unknownTypes = new Map<string, number>();
-  for (let i = 0; i < postings.length; i += 200) {
-    const chunk = postings.slice(i, i + 200).map(p => p.number);
+  // 14.10.2026: по 200 отправлений Ozon отвечал 429 «rate limit per second» даже при
+  // запросах раз в 2 с (шлюз, ведро oz:accrual) — похоже, лимит считает отправления.
+  // Берём по 50; если 429 останутся — смотреть журнал «факт логистики».
+  for (let i = 0; i < postings.length; i += 50) {
+    const chunk = postings.slice(i, i + 50).map(p => p.number);
     let j: any;
     try { j = await ozPost('v1/finance/accrual/postings', { posting_numbers: chunk }); }
     catch (e) { diag.push(`Ozon: accrual/postings — ${String((e as Error)?.message ?? e).slice(0, 120)}`); continue; }

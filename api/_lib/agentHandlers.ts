@@ -117,7 +117,7 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
       task.params = { ...task.params, marketplace: 'ozon', company_id: String(process.env.OZON_CLIENT_ID || '').trim() };
     }
     // Конкуренты Ozon (Агент 3): id компании и типы наших товаров по выручке.
-    if (task.type === 'competitor_watch' && task.params.marketplace === 'ozon') {
+    if (task.type === 'competitor_watch' && task.params.marketplace === 'ozon' && !task.params.light) {
       const { ozonTopTypeIds } = await import('./rnp');
       const top = await ozonTopTypeIds(8).catch(() => []);
       task.params = { ...task.params, company_id: String(process.env.OZON_CLIENT_ID || '').trim(), categories: top.map(t => t.typeId) };

@@ -337,10 +337,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       // Конкуренты и позиции из аналитики кабинетов (Агент 3 на ПК, 14.10.2026).
       //   POST competitors {mp, sku, action: add|approve|ignore|restore|remove, link?, id?} — правка привязок менеджером
+      // Советник по продажам дня (15.10.2026): GET advisor?mp=wb|ozon&date=YYYY-MM-DD (по умолчанию вчера).
+      if (what === 'advisor') {
+        const { getAdvisor } = await import('./_lib/ads/advisor');
+        return res.status(200).json(await getAdvisor(req.query.mp === 'ozon' ? 'ozon' : 'wb', typeof req.query.date === 'string' ? req.query.date : undefined));
+      }
       if (what === 'competitors') {
         const { getCompetitors, editWatch } = await import('./_lib/ads/cabinet');
         if (req.method === 'POST') {
           const b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
+          // «Обновить сейчас»: быстрый проход агента по витрине (цены, рейтинг, отзывы, остаток).
+          if (b.action === 'refresh') {
+            const { requestRefresh } = await import('./_lib/ads/cabinet');
+            const r = requestRefresh(b.mp === 'ozon' ? 'ozon' : 'wb', 'panel');
+            if (!r.ok) return res.status(503).json(r);
+            return res.status(200).json({ ...getCompetitors(b.mp === 'ozon' ? 'ozon' : 'wb'), queued: r });
+          }
           const r = editWatch(b);
           if (!r.ok) return res.status(400).json(r);
           return res.status(200).json(getCompetitors(b.mp === 'ozon' ? 'ozon' : 'wb'));

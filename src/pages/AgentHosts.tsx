@@ -149,6 +149,9 @@ const sameLane = (l: Lane) => (t: Task) => t.type === l.type && (t.params?.marke
 const laneOf = (t: Task) => ALL_LANES.find(l => sameLane(l)(t));
 const scheduleOf = (l: Lane, live: Live) =>
   (live.schedules ?? []).find(s => s.type === l.type && (!s.params?.marketplace || s.params.marketplace === l.mp));
+/** Все расписания дорожки: у «Конкурентов» ночной полный проход и дневные быстрые (15.10.2026). */
+const schedulesOf = (l: Lane, live: Live) =>
+  (live.schedules ?? []).filter(s => s.type === l.type && (!s.params?.marketplace || s.params.marketplace === l.mp));
 
 const SERVER_DIRS: { key: 'wb_reviews' | 'wb_questions' | 'ozon_questions'; label: string }[] = [
   { key: 'wb_reviews', label: 'Отзывы WB' },
@@ -368,18 +371,19 @@ function DayTrack({ live }: { live: Live }) {
 
           {ALL_LANES.map(l => {
             const match = sameLane(l);
-            const sch = scheduleOf(l, live);
+            const schs = schedulesOf(l, live);
+            const sch = schs.find(x => x.enabled) ?? schs[0];
             const done = live.finished_today.filter(t => match(t) && inDay(t.finished_at));
             const running = live.tasks.filter(match);
             const queued = live.queued.filter(t => match(t) && inDay(t.scheduled_for));
-            const planned = sch?.enabled ? cronTimes(sch.cron, day).filter(t => t > nowMs) : [];
+            const planned = schs.filter(x => x.enabled).flatMap(x => cronTimes(x.cron, day)).filter(t => t > nowMs).sort((a, b) => a - b);
             return (
               <div key={l.type + l.mp} className="ah-day-row" style={{ ['--lane' as any]: l.color }}>
                 <div className="ah-day-label">
                   <span className="ah-lane-dot" />
                   <div>
                     <div className="ah-day-name">{l.short}</div>
-                    <div className="ah-sub">{sch ? (sch.enabled ? cronLabel(sch.cron) : 'расписание выключено') : 'вручную'}</div>
+                    <div className="ah-sub">{sch ? (schs.some(x => x.enabled) ? schs.filter(x => x.enabled).map(x => `${cronLabel(x.cron)}${x.params?.light ? ' (быстро)' : ''}`).join(' · ') : 'расписание выключено') : 'вручную'}</div>
                   </div>
                 </div>
                 <div className="ah-day-track">

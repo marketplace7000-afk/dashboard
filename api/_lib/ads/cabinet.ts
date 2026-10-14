@@ -7,7 +7,8 @@
  */
 import { adsDb, listFlags, type AdMp } from './store';
 import { DEFAULT_AGENT_SETTINGS } from '../../../shared/agents';
-import type { Ads2Competitors, Ads2OzMarketItem, Ads2WatchLink, Ads2WatchProduct, Ads2WbPosItem } from '../../../shared/ads2';
+import type { Ads2CompRefresh, Ads2Competitors, Ads2OzMarketItem, Ads2WatchLink, Ads2WatchProduct, Ads2WbPosItem } from '../../../shared/ads2';
+import { createTask, listSchedules, listTasks } from '../agentQueue';
 import {
   getAllLinks, suggestLinks, watchedIds, addLink, setLinkStatus, removeLink, parseNmId, parseOzonSku, getLatestPrices,
   type CompetitorLink, type WatchStatus,
@@ -17,20 +18,136 @@ import { wbImageUrl } from '../wbBasket';
 
 const KEEP = 30;
 
+let tablesReady = false;
 function db(): any {
   const d = adsDb();
   if (!d) throw new Error('хранилище рекламы недоступно');
-  d.exec(`CREATE TABLE IF NOT EXISTS ad_cabinet_snapshot (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, mp TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL);
-    CREATE INDEX IF NOT EXISTS ad_cab_mp ON ad_cabinet_snapshot (mp, at);`);
+  if (!tablesReady) {
+    d.exec(`CREATE TABLE IF NOT EXISTS ad_cabinet_snapshot (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, mp TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS ad_cab_mp ON ad_cabinet_snapshot (mp, at);
+      -- 15.10: история карточек на витрине (конкуренты и наши) — строка на товар в день, последний замер дня.
+      -- Из неё: свежая цена между ночными проходами и «конкурент снизил цену» для советника.
+      CREATE TABLE IF NOT EXISTS ad_comp_card (
+        mp TEXT NOT NULL, id TEXT NOT NULL, date TEXT NOT NULL, at INTEGER NOT NULL,
+        price REAL, rating REAL, feedbacks INTEGER, stock INTEGER, name TEXT, seller TEXT, photo TEXT,
+        PRIMARY KEY (mp, id, date));
+      -- 15.10: позиция наших карточек WB в поиске за вчера (отчёт «Поисковые запросы» за один день).
+      CREATE TABLE IF NOT EXISTS ad_pos_daily (
+        mp TEXT NOT NULL, date TEXT NOT NULL, id TEXT NOT NULL,
+        pos REAL, views INTEGER, open_card INTEGER, carts INTEGER, orders INTEGER,
+        PRIMARY KEY (mp, date, id));`);
+    tablesReady = true;
+  }
   return d;
+}
+
+const mskDay = (ms: number) => new Date(ms + 3 * 3600_000).toISOString().slice(0, 10);
+
+/** Карточки витрины из прохода агента → история (строка на товар в день). */
+function saveCards(mp: AdMp, cards: any[], at: number): number {
+  const d = db();
+  const date = mskDay(at);
+  const st = d.prepare(`INSERT INTO ad_comp_card (mp, id, date, at, price, rating, feedbacks, stock, name, seller, photo)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(mp, id, date) DO UPDATE SET at = excluded.at,
+      price = COALESCE(excluded.price, ad_comp_card.price), rating = COALESCE(excluded.rating, ad_comp_card.rating),
+      feedbacks = COALESCE(excluded.feedbacks, ad_comp_card.feedbacks), stock = excluded.stock,
+      name = COALESCE(NULLIF(excluded.name, ''), ad_comp_card.name), seller = COALESCE(NULLIF(excluded.seller, ''), ad_comp_card.seller),
+      photo = COALESCE(NULLIF(excluded.photo, ''), ad_comp_card.photo)`);
+  let n = 0;
+  d.exec('BEGIN');
+  try {
+    for (const c of cards) {
+      const id = String(c?.id ?? c?.sku ?? '').trim();
+      if (!/^\d+$/.test(id)) continue;
+      // Ozon не отдаёт остаток — только «можно купить»: false → 0, иначе неизвестно.
+      const stock = num(c.qty) ?? (c.available === false ? 0 : null);
+      st.run(mp, id, date, at, num(c.price), num(c.rating), num(c.feedbacks ?? c.reviews), stock,
+        String(c.name ?? ''), String(c.seller ?? c.supplier ?? ''), String(c.photo ?? ''));
+      n++;
+    }
+    d.exec('COMMIT');
+  } catch (e) { d.exec('ROLLBACK'); throw e; }
+  d.prepare(`DELETE FROM ad_comp_card WHERE mp = ? AND date < ?`).run(mp, mskDay(at - 120 * 86_400_000));
+  return n;
+}
+
+/** WB: позиции наших карточек за вчера и позавчера (отчёт за один день) → история по дням. */
+function savePosDaily(mp: AdMp, daily: any): number {
+  if (!daily || typeof daily !== 'object') return 0;
+  const d = db();
+  const st = d.prepare(`INSERT OR REPLACE INTO ad_pos_daily (mp, date, id, pos, views, open_card, carts, orders) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+  let n = 0;
+  for (const day of Array.isArray(daily) ? daily : [daily]) {
+    const date = String(day?.date ?? '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    for (const g of day?.report?.groups ?? []) for (const it of g.items ?? []) {
+      if (!it?.nmId) continue;
+      st.run(mp, date, String(it.nmId), cur(it.avgPosition), cur(it.views), cur(it.openCard), cur(it.addToCart), cur(it.orders));
+      n++;
+    }
+  }
+  return n;
+}
+
+/** Последняя карточка по каждому номеру + цена сутки и неделю назад (для «−8% за сутки»). */
+export function cardHistory(mp: AdMp, ids: string[]): Map<string, { at: number; date: string; price: number | null; rating: number | null; feedbacks: number | null; stock: number | null; name: string; seller: string; photo: string; price1d: number | null; price7d: number | null }> {
+  const out = new Map<string, any>();
+  if (!ids.length) return out;
+  const d = db();
+  const rows = d.prepare(`SELECT * FROM ad_comp_card WHERE mp = ? AND date >= ? ORDER BY id, date`).all(mp, mskDay(Date.now() - 10 * 86_400_000)) as any[];
+  const want = new Set(ids);
+  const by = new Map<string, any[]>();
+  for (const r of rows) if (want.has(r.id)) { const a = by.get(r.id) ?? []; a.push(r); by.set(r.id, a); }
+  for (const [id, a] of by) {
+    const last = a[a.length - 1];
+    const before = (days: number) => {
+      const lim = mskDay(Date.parse(last.date + 'T12:00:00Z') - days * 86_400_000);
+      for (let i = a.length - 2; i >= 0; i--) if (a[i].date <= lim && a[i].price != null) return Number(a[i].price);
+      return null;
+    };
+    out.set(id, { at: Number(last.at), date: last.date, price: last.price, rating: last.rating, feedbacks: last.feedbacks, stock: last.stock,
+      name: last.name ?? '', seller: last.seller ?? '', photo: last.photo ?? '', price1d: before(1), price7d: before(7) });
+  }
+  return out;
+}
+
+/** Ряды витрины по дням: номер → дата → цена/остаток (для советника). */
+export function compCardSeries(mp: AdMp, ids: string[], from: string, to: string): Map<string, Map<string, { price: number | null; stock: number | null }>> {
+  const out = new Map<string, Map<string, { price: number | null; stock: number | null }>>();
+  if (!ids.length) return out;
+  const want = new Set(ids);
+  for (const r of db().prepare('SELECT id, date, price, stock FROM ad_comp_card WHERE mp = ? AND date >= ? AND date <= ? ORDER BY date').all(mp, from, to) as any[]) {
+    if (!want.has(r.id)) continue;
+    const m = out.get(r.id) ?? new Map();
+    m.set(r.date, { price: r.price == null ? null : Number(r.price), stock: r.stock == null ? null : Number(r.stock) });
+    out.set(r.id, m);
+  }
+  return out;
+}
+
+/** WB: позиция наших карточек по дням: nm → дата → позиция. */
+export function posSeries(mp: AdMp, from: string, to: string): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>();
+  for (const r of db().prepare('SELECT id, date, pos FROM ad_pos_daily WHERE mp = ? AND date >= ? AND date <= ? AND pos IS NOT NULL').all(mp, from, to) as any[]) {
+    const m = out.get(r.id) ?? new Map();
+    m.set(r.date, Number(r.pos));
+    out.set(r.id, m);
+  }
+  return out;
 }
 
 /** Записать снимок; вернуть короткую сводку для «Сборщиков». */
 export function saveCabinetSnapshot(mp: AdMp, data: any): string {
   if (!data || typeof data !== 'object') throw new Error('пустой снимок');
   const d = db();
-  d.prepare('INSERT INTO ad_cabinet_snapshot (mp, at, json) VALUES (?, ?, ?)').run(mp, Date.now(), JSON.stringify(data));
+  const at = Date.now();
+  const cardsN = Array.isArray(data.cards) ? saveCards(mp, data.cards, at) : 0;
+  // Быстрый проход днём (только карточки витрины) — в историю карточек, полный снимок кабинета не трогаем.
+  if (data.light) return `${mp === 'wb' ? 'WB' : 'Ozon'}: быстрое обновление — карточек на витрине ${cardsN}${data.errors?.length ? `, ошибок ${data.errors.length}` : ''}`;
+  const posN = savePosDaily(mp, data.daily);
+  d.prepare('INSERT INTO ad_cabinet_snapshot (mp, at, json) VALUES (?, ?, ?)').run(mp, at, JSON.stringify(data));
   d.prepare(`DELETE FROM ad_cabinet_snapshot WHERE mp = ? AND id NOT IN (SELECT id FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT ?)`).run(mp, mp, KEEP);
   let suggested = 0;
   try { suggested = autoSuggest(mp, data); } catch (e) { console.warn('[competitors] предложения не собраны:', (e as Error).message); }
@@ -40,7 +157,7 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
     const items = (data.report?.groups ?? []).reduce((s: number, g: any) => s + (g.items?.length ?? 0), 0);
     const pos = data.report?.positionInfo?.average?.current;
     const opened = Array.isArray(data.compDetails) ? `, отчётов сравнения ${data.compDetails.length}` : '';
-    return `WB: карточек с позициями ${items}${pos != null ? `, средняя позиция ${pos}` : ''}, наборов сравнения ${data.comparisons?.history?.length ?? 0}${opened}${cards}${sug}`;
+    return `WB: карточек с позициями ${items}${pos != null ? `, средняя позиция ${pos}` : ''}${posN ? `, позиций по дням ${posN}` : ''}, наборов сравнения ${data.comparisons?.history?.length ?? 0}${opened}${cards}${sug}`;
   }
   const items = (data.markets ?? []).reduce((s: number, m: any) => s + (m.items?.length ?? 0), 0);
   const p = data.positions?.[0]?.days?.at?.(-1);
@@ -155,6 +272,9 @@ export function editWatch(b: any): { ok: true } | { ok: false; error: string } {
     const { byId } = ourCatalog(mp);
     if (byId.has(String(id))) return { ok: false, error: `Это наш товар (${byId.get(String(id))}), а не конкурент` };
     addLink(sku, id, { mp, source: 'manual', note: b?.note ? String(b.note).slice(0, 120) : undefined });
+    // Цифры по новому конкуренту — быстрым проходом через пару минут, не ждать ночи
+    // (задержка — чтобы привязки пачкой ушли одним заданием).
+    try { requestRefresh(mp, 'manager', 2); } catch (e) { console.warn('[competitors] обновление не поставлено:', (e as Error).message); }
     return { ok: true };
   }
   const id = Number(b?.id);
@@ -264,7 +384,7 @@ const blankLink = (id: string, mp: AdMp): Ads2WatchLink => ({
   id, url: mp === 'wb' ? `https://www.wildberries.ru/catalog/${id}/detail.aspx` : `https://www.ozon.ru/product/${id}/`,
   source: 'manual', status: 'active', title: '', brand: '', seller: '', note: '', photo: '',
   price: null, rating: null, feedbacks: null, stock: null, orders: null, ordersDyn: null, avgPos: null, ctr: null, openCard: null,
-  inAds: null, inPromo: null, gmv: null, drr: null,
+  inAds: null, inPromo: null, gmv: null, drr: null, ordersDays: null, convPdp: null, priceAt: null, price1d: null, price7d: null,
 });
 
 /** Фото карточки WB по номеру (basket-CDN, как на витрине). */
@@ -295,18 +415,19 @@ function metricsIndex(mp: AdMp, data: any): Map<string, Partial<Ads2WatchLink>> 
       put(String(x.nmId), {
         title: x.name || undefined, brand: x.brand || undefined, photo: x.photo || undefined,
         price: num(x.medianPrice) || num(x.minPrice), rating: num(x.rating), feedbacks: num(x.feedbacks),
-        orders: num(x.orders), ordersDyn: num(x.ordersDyn), avgPos: num(x.avgPos), ctr: num(x.ctr), openCard: num(x.openCard),
+        orders: num(x.orders), ordersDyn: num(x.ordersDyn), ordersDays: num(x.orders) != null ? 30 : undefined, avgPos: num(x.avgPos), ctr: num(x.ctr), openCard: num(x.openCard),
         inAds: typeof x.inAds === 'boolean' ? x.inAds : null, inPromo: typeof x.inPromo === 'boolean' ? x.inPromo : null,
       });
     }
     for (const g of data?.report?.groups ?? []) for (const it of g.items ?? []) {
       put(String(it.nmId), { title: it.name || undefined, photo: it.mainPhoto || undefined, price: num(it.price?.minPrice), rating: num(it.feedbackRating),
-        orders: cur(it.orders), ordersDyn: dyn(it.orders), avgPos: cur(it.avgPosition), ctr: cur(it.ctr), openCard: cur(it.openCard), inAds: !!it.isAdvertised });
+        orders: cur(it.orders), ordersDyn: dyn(it.orders), ordersDays: cur(it.orders) != null ? 7 : undefined, avgPos: cur(it.avgPosition), ctr: cur(it.ctr), openCard: cur(it.openCard), inAds: !!it.isAdvertised });
     }
   } else {
     for (const mk of data?.markets ?? []) for (const x of mk.items ?? []) {
       put(String(x.sku), { title: x.name || undefined, brand: x.brand || undefined, seller: x.sellerName || undefined, photo: x.photo || undefined,
-        price: num(x.avgPrice), gmv: num(x.gmvSum ?? x.soldSum), orders: num(x.soldCount), ordersDyn: num(x.salesDynamics), drr: num(x.drr),
+        price: num(x.avgPrice), gmv: num(x.gmvSum ?? x.soldSum), orders: num(x.soldCount), ordersDyn: num(x.salesDynamics),
+        ordersDays: num(x.soldCount) != null ? 7 : undefined, drr: num(x.drr), convPdp: num(x.pdpToCartConversion ?? x.convToCartPdp),
         inPromo: num(x.daysInPromo) != null ? Number(x.daysInPromo) > 0 : null, inAds: num(x.daysWithTrafarets) != null ? Number(x.daysWithTrafarets) > 0 : null });
     }
   }
@@ -319,10 +440,20 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
   const links = getAllLinks(mp);
   const idx = metricsIndex(mp, data);
   const wbPrices = mp === 'wb' ? getLatestPrices(Object.values(links).flat().map(l => l.nmId)) : {};
+  // Свежая витрина (в т.ч. дневные быстрые проходы) главнее ночного снимка: цена, рейтинг, отзывы, остаток.
+  const ids = new Set<string>(Object.values(links).flat().map(l => String(l.nmId)));
+  for (const v of byKey.values()) if (v.id) ids.add(String(v.id));
+  const hist = cardHistory(mp, [...ids]);
+  const fresh = (r: Ads2WatchLink): Ads2WatchLink => {
+    const h = hist.get(r.id);
+    if (!h) return r;
+    return { ...r, price: h.price ?? r.price, rating: h.rating ?? r.rating, feedbacks: h.feedbacks ?? r.feedbacks, stock: h.stock ?? r.stock,
+      title: r.title || h.name, seller: r.seller || h.seller, photo: r.photo || h.photo, priceAt: h.at, price1d: h.price1d, price7d: h.price7d };
+  };
   const toLink = (l: CompetitorLink): Ads2WatchLink => {
     const id = String(l.nmId);
     const x = idx.get(id) ?? {};
-    const r = { ...blankLink(id, mp), ...x, source: l.source, status: l.status, note: l.note ?? '' };
+    const r = fresh({ ...blankLink(id, mp), ...x, source: l.source, status: l.status, note: l.note ?? '' });
     if (!r.title) r.title = l.title ?? '';
     if (!r.brand) r.brand = l.brand ?? '';
     if (r.price == null && (wbPrices as any)[l.nmId]) r.price = (wbPrices as any)[l.nmId].price;
@@ -352,24 +483,57 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     const cat = byKey.get(key)?.id ? byKey.get(key) : fromSnap.get(key) ?? byKey.get(key);
     const ourId = cat?.id ?? '';
     const ourM = ourId ? idx.get(ourId) : undefined;
-    const our = ourId ? { ...blankLink(ourId, mp), ...(ourM ?? {}), title: cat?.name || ourM?.title || '', photo: cat?.photo || ourM?.photo || (mp === 'wb' ? wbPhoto(ourId) : '') } : null;
+    const our = ourId ? fresh({ ...blankLink(ourId, mp), ...(ourM ?? {}), title: cat?.name || ourM?.title || '', photo: cat?.photo || ourM?.photo || (mp === 'wb' ? wbPhoto(ourId) : '') }) : null;
+    // Порядок — как привязаны (15.10, просьба владельца): «Подтвердить» и «Не наш» строку не двигают.
     const ls = (links[key] ?? []).map(toLink);
-    const order = { active: 0, suggested: 1, ignored: 2 } as const;
-    ls.sort((a, b) => order[a.status] - order[b.status] || (b.orders ?? -1) - (a.orders ?? -1));
     return { key, ourId, name: cat?.name || our?.title || key, photo: our?.photo ?? '', our, links: ls };
   });
-  const live = (p: Ads2WatchProduct) => p.links.filter(l => l.status !== 'ignored').length;
-  watch.sort((a, b) => Number(live(b) > 0) - Number(live(a) > 0) || live(b) - live(a) || a.name.localeCompare(b.name, 'ru'));
+  // Порядок товаров не зависит от решений менеджера: сначала с привязками, внутри — по нашим заказам (самые продаваемые выше).
+  watch.sort((a, b) => Number(b.links.length > 0) - Number(a.links.length > 0) || (b.our?.orders ?? -1) - (a.our?.orders ?? -1) || a.key.localeCompare(b.key, 'ru'));
   for (const [k, v] of fromSnap) if (!byKey.has(k)) byKey.set(k, v);
   const catalog = [...byKey.entries()].map(([key, v]) => ({ key, name: v.name })).sort((a, b) => a.key.localeCompare(b.key)).slice(0, 2000);
   return { watch, catalog };
 }
 
+// ─── Обновление в течение дня ───────────────────────────────────────────────
+// Ночью (05:40 WB / 05:50 Ozon) — полный проход: аналитика кабинета + витрина.
+// Днём (11:40, 16:40) и по кнопке / после привязки нового конкурента — быстрый проход
+// (light): только карточки витрины привязанных конкурентов и наших товаров, 1–3 минуты.
+
+const isMine = (t: { params: Record<string, unknown> }, mp: AdMp) => (t.params?.marketplace === 'ozon' ? 'ozon' : 'wb') === mp;
+
+export function refreshState(mp: AdMp): Ads2CompRefresh {
+  const d = db();
+  const full = d.prepare('SELECT max(at) at FROM ad_cabinet_snapshot WHERE mp = ?').get(mp) as any;
+  const cards = d.prepare('SELECT max(at) at FROM ad_comp_card WHERE mp = ?').get(mp) as any;
+  const t = listTasks({ type: 'competitor_watch', limit: 30 }).find(x => isMine(x, mp)) ?? null;
+  const nextRuns = listSchedules().filter((s: any) => s.type === 'competitor_watch' && s.enabled && (s.params?.marketplace === 'ozon' ? 'ozon' : 'wb') === mp && s.next_run_at)
+    .map((s: any) => Number(s.next_run_at)).sort((a: number, b: number) => a - b);
+  return {
+    fullAt: full?.at ? Number(full.at) : null, cardsAt: cards?.at ? Number(cards.at) : null,
+    task: t ? { id: t.id, status: t.status, light: !!t.params?.light, createdAt: t.created_at, finishedAt: t.finished_at ?? null,
+      message: t.summary ?? t.error ?? null } : null,
+    nextRuns,
+  };
+}
+
+/**
+ * Поставить быстрое обновление витрины. Если задание по площадке уже ждёт или идёт —
+ * новое не ставим (менеджеры жмут несколько раз, привязывают пачкой).
+ */
+export function requestRefresh(mp: AdMp, by: string, delayMin = 0): { ok: true; taskId: number; already: boolean } | { ok: false; error: string } {
+  const open = listTasks({ status: ['queued', 'claimed', 'running'], type: 'competitor_watch', limit: 20 }).find(x => isMine(x, mp));
+  if (open) return { ok: true, taskId: open.id, already: true };
+  const t = createTask('competitor_watch', { marketplace: mp, light: true }, by, { scheduledFor: Date.now() + delayMin * 60_000 });
+  return t ? { ok: true, taskId: t.id, already: false } : { ok: false, error: 'очередь агентов недоступна' };
+}
+
 export function getCompetitors(mp: AdMp): Ads2Competitors {
   const d = db();
   const row = d.prepare('SELECT at, json FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT 1').get(mp) as any;
-  if (!row) return { ok: true, mp, at: null, empty: true, errors: [], ...buildWatch(mp, null) };
+  const refresh = refreshState(mp);
+  if (!row) return { ok: true, mp, at: null, empty: true, errors: [], refresh, ...buildWatch(mp, null) };
   const data = JSON.parse(row.json);
-  const base = { ok: true as const, mp, at: Number(row.at), empty: false, errors: (data?.errors ?? []).map(String).slice(0, 10), ...buildWatch(mp, data) };
+  const base = { ok: true as const, mp, at: Number(row.at), empty: false, refresh, errors: (data?.errors ?? []).map(String).slice(0, 10), ...buildWatch(mp, data) };
   return mp === 'wb' ? { ...base, wb: parseWb(data) } : { ...base, ozon: parseOzon(data, String(process.env.OZON_CLIENT_ID || '').trim()) };
 }

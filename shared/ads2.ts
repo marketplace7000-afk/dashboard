@@ -129,6 +129,22 @@ export type Ads2WatchLink = {
   orders: number | null; ordersDyn: number | null; avgPos: number | null; ctr: number | null; openCard: number | null;
   inAds: boolean | null; inPromo: boolean | null;
   gmv: number | null; drr: number | null;
+  /** За сколько дней «заказы»: WB сравнение — 30, WB поиск и Ozon рынок — 7. */
+  ordersDays: number | null;
+  /** Ozon: конверсия из карточки в корзину, %. */
+  convPdp: number | null;
+  /** Когда снята цена на витрине (мс) и цена сутки / неделю назад — из истории карточек. */
+  priceAt: number | null; price1d: number | null; price7d: number | null;
+};
+
+/** Обновление данных конкурентов: последний проход агента и следующий по расписанию. */
+export type Ads2CompRefresh = {
+  /** Последний полный ночной проход (аналитика кабинета) и последний замер витрины. */
+  fullAt: number | null; cardsAt: number | null;
+  /** Последнее задание «Конкуренты» по площадке. */
+  task: { id: number; status: string; light: boolean; createdAt: number; finishedAt: number | null; message: string | null } | null;
+  /** Ближайшие запуски по расписанию (мс). */
+  nextRuns: number[];
 };
 
 /** Наш товар (ключ — наш артикул продавца) и его конкуренты. */
@@ -138,6 +154,7 @@ export type Ads2Competitors = {
   ok: true; mp: Ads2Mp; at: number | null;
   /** Нет снимка — задание ещё не отработало. */
   empty: boolean;
+  refresh: Ads2CompRefresh;
   /** Привязки конкурентов к товарам: правят менеджеры (добавить по ссылке/артикулу, подтвердить, «не тот»). */
   watch: Ads2WatchProduct[];
   /** Наши товары для выбора при добавлении: артикул и название. */
@@ -155,6 +172,49 @@ export type Ads2Competitors = {
       competitor: string | null; percentDiff: number | null; series: { date: string; my: number | null; competitor: number | null; best: number | null }[] }[];
   };
   errors: string[];
+};
+
+// ─── Советник по продажам дня (15.10.2026) ──────────────────────────────────
+// Почему в конкретный день просели (или выросли) заказы: день против среднего
+// за 7 дней до него, по товарам, с причинами из РНП, рекламы, остатков, позиций
+// и цен конкурентов. Правила — api/_lib/ads/advisor.ts.
+
+export type Ads2AdvisorCause = {
+  code: string; level: 'critical' | 'warn' | 'info' | 'good';
+  /** Что видно в данных — с цифрами. */
+  text: string;
+  /** Что сделать. */
+  action?: string;
+};
+
+export type Ads2AdvisorProduct = {
+  key: string; adSku: string | null; article: string; name: string; photo: string; link: string | null;
+  orders: number; ordersBase: number; revenue: number; revenueBase: number;
+  /** Разница выручки день − среднее, ₽ (вклад товара в просадку/рост). */
+  delta: number;
+  causes: Ads2AdvisorCause[];
+  /** Главная причина (код), по ней товар попадает в «главные причины дня». */
+  primary: string;
+};
+
+export type Ads2AdvisorTotals = {
+  orders: number; revenue: number; spend: number; drr: number | null; views: number | null; cartConv: number | null;
+};
+
+export type Ads2Advisor = {
+  ok: true; mp: Ads2Mp;
+  /** Разбираемый день и база сравнения (7 дней до него). */
+  date: string; baseFrom: string; baseTo: string;
+  /** Дни, которые можно выбрать (полные, последние 14). */
+  dates: string[];
+  day: Ads2AdvisorTotals; base: Ads2AdvisorTotals; weekAgo: { orders: number; revenue: number } | null;
+  /** Короткий вывод: 2–5 фраз. */
+  summary: string[];
+  /** Главные причины дня: сколько выручки «съела» каждая (по главной причине товаров). */
+  drivers: { code: string; label: string; delta: number; products: number; action: string }[];
+  down: Ads2AdvisorProduct[];
+  up: Ads2AdvisorProduct[];
+  notes: string[];
 };
 
 // ─── Автопилот, этап 2 «советник» (14.10.2026) ──────────────────────────────

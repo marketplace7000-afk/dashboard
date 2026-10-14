@@ -26,26 +26,17 @@ import {
   CaretUpIcon,
 } from '@phosphor-icons/react';
 import { apiGet, apiPost, errText } from '../api/http';
+import { nf0, nf1, nf2, rub, rub2, num, pct, ddmm, kRub, ProductCell } from './ads2ui';
 import {
   NO_ADS_REASON_LABEL,
   type Ads2Mp, type Ads2Overview, type Ads2Product, type Ads2Campaign, type Ads2CampaignItem, type Ads2Stat, type Ads2Issue,
-  type Ads2ActionKind, type Ads2Proposal, type Ads2AutopilotState, type Ads2Competitors, type Ads2WatchLink, type Ads2WatchProduct,
+  type Ads2ActionKind, type Ads2Proposal, type Ads2AutopilotState,
 } from '../../shared/ads2';
 
 // ─── Числа ──────────────────────────────────────────────────────────────────
 
-const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
-const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
-const nf2 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
-const rub = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? '–' : `${nf0.format(v)} ₽`);
-const rub2 = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? '–' : `${nf2.format(v)} ₽`);
-const num = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? '–' : nf0.format(v));
-const pct = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? '–' : `${nf1.format(v)}%`);
-const ddmm = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
-const kRub = (v: number) => (Math.abs(v) >= 1_000_000 ? `${nf1.format(v / 1_000_000)} млн ₽` : Math.abs(v) >= 10_000 ? `${nf0.format(v / 1000)} тыс ₽` : rub(v));
-
-type Tab = 'overview' | 'products' | 'campaigns' | 'competitors' | 'autopilot' | 'log';
-const TABS: Array<[Tab, string]> = [['overview', 'Обзор'], ['products', 'Товары'], ['campaigns', 'Кампании'], ['competitors', 'Конкуренты'], ['autopilot', 'Автопилот'], ['log', 'Журнал']];
+type Tab = 'overview' | 'products' | 'campaigns' | 'autopilot' | 'log';
+const TABS: Array<[Tab, string]> = [['overview', 'Обзор'], ['products', 'Товары'], ['campaigns', 'Кампании'], ['autopilot', 'Автопилот'], ['log', 'Журнал']];
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   active: { label: 'активна', cls: 'good' }, paused: { label: 'пауза', cls: '' }, ready: { label: 'готова', cls: 'info' },
@@ -141,20 +132,6 @@ function StatusChip({ s }: { s: string }) {
 function IssueIcon({ i }: { i: Ads2Issue }) {
   const Icon = i.level === 'critical' ? WarningOctagonIcon : i.level === 'warn' ? WarningIcon : LightbulbIcon;
   return <span className={`ad2-issue ad2-lv-${i.level}`} title={i.text}><Icon size={16} weight="fill" /></span>;
-}
-
-function ProductCell({ p, onOpen }: { p: { photo: string; name: string; article: string; link?: string | null }; onOpen?: () => void }) {
-  return (
-    <div className="ad2-prod">
-      {p.photo ? <img src={p.photo} alt="" loading="lazy" onError={e => { e.currentTarget.style.visibility = 'hidden'; }} /> : <span className="ad2-noimg" />}
-      <div className="ad2-prod-t">
-        {onOpen ? <button className="ad2-link" onClick={onOpen}>{p.name || p.article}</button>
-          : p.link ? <a href={p.link} target="_blank" rel="noreferrer" title={p.name}>{p.name || p.article}</a>
-          : <span>{p.name || p.article}</span>}
-        <span className="muted">{p.article}</span>
-      </div>
-    </div>
-  );
 }
 
 /** Полоса «факт против бюджета»: зелёная до 100%, дальше красная. */
@@ -802,278 +779,6 @@ function Journal({ mp, names }: { mp: Ads2Mp; names: Map<string, string> }) {
   );
 }
 
-// ─── Конкуренты (Агент 3 на ПК, 14.10.2026) ─────────────────────────────────
-
-/** Динамика позиции: меньше — лучше. WB отдаёт разницу «сейчас − прошлый период». */
-function PosDyn({ v }: { v: number | null }) {
-  if (v == null || v === 0) return null;
-  const better = v < 0;
-  return <span className={`ad2-dyn ${better ? 'good' : 'bad'}`}>{better ? '▲' : '▼'}{nf0.format(Math.abs(v))}</span>;
-}
-function PctDyn({ v }: { v: number | null }) {
-  if (v == null || v === 0) return null;
-  // от почти нулевой базы динамика бывает «+372 277%» — это просто «новый рост»
-  return <span className={`ad2-dyn ${v > 0 ? 'good' : 'bad'}`}>{v > 999 ? '>+999' : `${v > 0 ? '+' : ''}${nf0.format(v)}`}%</span>;
-}
-
-function MiniLines({ s }: { s: { date: string; my: number | null; competitor: number | null; best: number | null }[] }) {
-  const W = 260, H = 56;
-  const vals = s.flatMap(x => [x.my, x.competitor, x.best]).filter((v): v is number => v != null);
-  if (s.length < 2 || !vals.length) return null;
-  const max = Math.max(...vals) || 1;
-  const path = (k: 'my' | 'competitor' | 'best') => s.map((x, i) => {
-    const v = x[k];
-    if (v == null) return '';
-    return `${i === 0 ? 'M' : 'L'}${((i / (s.length - 1)) * W).toFixed(1)},${(H - (v / max) * (H - 4) - 2).toFixed(1)}`;
-  }).join(' ');
-  return (
-    <svg className="ad2-minilines" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Выручка: мы, ближайший конкурент, лидер">
-      <path d={path('best')} className="l-best" /><path d={path('competitor')} className="l-comp" /><path d={path('my')} className="l-my" />
-    </svg>
-  );
-}
-
-const W_STATUS: Record<Ads2WatchLink['status'], { label: string; cls: string }> = {
-  active: { label: 'подтверждён', cls: 'good' }, suggested: { label: 'предложен', cls: 'info' }, ignored: { label: 'не наш конкурент', cls: '' },
-};
-
-/** Привязка конкурентов к нашим товарам: система предлагает, менеджер подтверждает, убирает или добавляет своего. */
-function Watch({ mp, d, setD }: { mp: Ads2Mp; d: Ads2Competitors; setD: (x: Ads2Competitors) => void }) {
-  const [sku, setSku] = useState('');
-  const [link, setLink] = useState('');
-  const [q, setQ] = useState('');
-  const [all, setAll] = useState(false);
-  const [more, setMore] = useState(12);
-  const [showIgnored, setShowIgnored] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const send = async (body: Record<string, unknown>, key: string, ok: string) => {
-    setBusy(key); setMsg(null);
-    try {
-      const r = await apiPost<Ads2Competitors>('/api/ads2/competitors', { mp, ...body });
-      setD(r.data); setMsg({ ok: true, text: ok });
-      if (body.action === 'add') setLink('');
-    } catch (e) { setMsg({ ok: false, text: errText(e).replace(/^сервер ответил \d+: /, '') }); }
-    finally { setBusy(null); }
-  };
-  const live = (p: Ads2WatchProduct) => p.links.filter(l => l.status !== 'ignored').length;
-  const withLinks = d.watch.filter(p => p.links.length > 0);
-  const needle = q.trim().toLowerCase();
-  const list = (all ? d.watch : withLinks).filter(p => !needle || p.key.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle) || p.ourId.includes(needle));
-  const pending = d.watch.reduce((s, p) => s + p.links.filter(l => l.status === 'suggested').length, 0);
-  const add = () => { if (sku.trim() && link.trim()) void send({ action: 'add', sku: sku.trim(), link: link.trim() }, 'add', 'Конкурент привязан — цифры по нему агент снимет этой ночью'); };
-  const diff = (x: number | null, our: number | null) => {
-    if (x == null || our == null || !our) return null;
-    const v = Math.round((x / our - 1) * 100);
-    return v === 0 ? null : <span className={`ad2-dyn ${v < 0 ? 'bad' : 'good'}`} title="цена конкурента против нашей">{v > 0 ? '+' : ''}{v}%</span>;
-  };
-  return (
-    <section className="card ad2-tablecard">
-      <h3 className="ad2-h3">Конкуренты по товарам {pending > 0 && <span className="chip info ad2-chipsm">ждут решения: {pending}</span>}</h3>
-      <p className="muted ad2-small">
-        Система предлагает конкурентов ({mp === 'wb' ? 'из наборов «Сравнение карточек» в кабинете WB' : 'лидеров по выручке в категории товара, «Товары на Ozon»'}).
-        В расчёты идут только подтверждённые. Если система взяла не тех — «Не наш конкурент», больше не предложит.
-        Своего конкурента привяжите по ссылке или артикулу. Цену, рейтинг и отзывы Агент 3 обновляет каждую ночь{mp === 'wb' ? ', заказы и позицию — по открытым сравнениям WB' : ''}.
-      </p>
-      <div className="ad2-watch-add" id={`ad2-watch-add-${mp}`}>
-        <input className="input" list={`ad2-cat-${mp}`} value={sku} onChange={e => setSku(e.target.value)} placeholder="Наш товар: артикул продавца" aria-label="Наш товар" />
-        <datalist id={`ad2-cat-${mp}`}>{d.catalog.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}</datalist>
-        <input className="input" value={link} onChange={e => setLink(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') add(); }}
-          placeholder={mp === 'wb' ? 'Конкурент: ссылка wildberries.ru/catalog/… или артикул' : 'Конкурент: ссылка ozon.ru/product/… или SKU'} aria-label="Ссылка или артикул конкурента" />
-        <button className="btn btn-primary" disabled={!!busy || !sku.trim() || !link.trim()} onClick={add}>{busy === 'add' ? 'Привязываю…' : 'Привязать'}</button>
-      </div>
-      {msg && <div className={`ad2-small ${msg.ok ? 'ad2-ok' : 'ad2-err'}`} role="status">{msg.text}</div>}
-      <div className="ad2-filters">
-        <button className={`period-btn ${!all ? 'active' : ''}`} onClick={() => setAll(false)}>С конкурентами · {withLinks.length}</button>
-        <button className={`period-btn ${all ? 'active' : ''}`} onClick={() => setAll(true)}>Все товары · {d.watch.length}</button>
-        <label className="ad2-small ad2-nowrap"><input type="checkbox" checked={showIgnored} onChange={e => setShowIgnored(e.target.checked)} /> показывать отклонённых</label>
-        <input className="input ad2-watch-q" value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск: артикул или название" aria-label="Поиск товара" />
-      </div>
-      {list.length === 0 && <p className="muted">{all || needle ? 'Ничего не найдено.' : 'Привязок пока нет. Предложения появятся после ночного прохода агента; своего конкурента можно привязать уже сейчас.'}</p>}
-      {list.slice(0, more).map(p => {
-        const our = p.our;
-        const links = p.links.filter(l => showIgnored || l.status !== 'ignored');
-        return (
-          <div key={p.key} className="ad2-watch-prod">
-            <div className="ad2-watch-head">
-              <ProductCell p={{ photo: p.photo, name: p.name, article: `${p.key}${p.ourId ? ` · ${p.ourId}` : ''}`, link: our?.url }} />
-              <div className="ad2-small ad2-watch-our">
-                {our && <>мы: <b>{rub(our.price)}</b> · ★ {our.rating ?? '–'} · отзывов {num(our.feedbacks)}{our.orders != null && <> · заказов {num(our.orders)}</>}</>}
-              </div>
-              <button className="btn btn-sm" onClick={() => { setSku(p.key); setLink(''); document.getElementById(`ad2-watch-add-${mp}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}>+ конкурент</button>
-            </div>
-            {links.length > 0 ? (
-              <div className="ad2-scroll">
-                <table className="ad2-table ad2-watch-table">
-                  <thead><tr><th>Конкурент</th><th>Статус</th><th>Цена</th><th>Рейтинг · отзывы</th>
-                    <th>{mp === 'wb' ? 'Заказы 30 дн' : 'Продано / выручка нед.'}</th><th>{mp === 'wb' ? 'Позиция · CTR' : 'ДРР'}</th><th>Реклама · акция</th><th></th></tr></thead>
-                  <tbody>
-                    {links.map(l => {
-                      const k = `${p.key}:${l.id}`;
-                      return (
-                        <tr key={l.id} className={l.status === 'ignored' ? 'ad2-row-muted' : ''}>
-                          <td><ProductCell p={{ photo: l.photo, name: l.title || `${mp === 'wb' ? 'nm' : 'SKU '}${l.id}`, article: [l.id, l.brand || l.seller].filter(Boolean).join(' · '), link: l.url }} />
-                            {l.note && <div className="muted ad2-small">{l.source === 'manual' ? 'добавлен вручную · ' : ''}{l.note}</div>}
-                            {!l.note && l.source === 'manual' && <div className="muted ad2-small">добавлен вручную</div>}</td>
-                          <td><span className={`chip ${W_STATUS[l.status].cls} ad2-chipsm`}>{W_STATUS[l.status].label}</span></td>
-                          <td className="ad2-nowrap" title="Разница с нашей ценой: зелёным — конкурент дороже нас, красным — дешевле">
-                            {l.price == null && l.stock === 0 ? <span className="muted">нет в наличии</span> : <>{rub(l.price)} {diff(l.price, our?.price ?? null)}</>}</td>
-                          <td className="ad2-nowrap">{!l.rating && !l.feedbacks ? (l.rating === 0 ? <span className="muted">нет отзывов</span> : '–') : <>★ {l.rating ?? '–'} · {num(l.feedbacks)}</>}</td>
-                          <td className="ad2-nowrap">{mp === 'wb' ? <>{num(l.orders)} <PctDyn v={l.ordersDyn} /></> : <>{num(l.orders)} / {l.gmv != null ? kRub(l.gmv) : '–'}</>}</td>
-                          <td className="ad2-nowrap">{mp === 'wb' ? <>{num(l.avgPos)} · {pct(l.ctr)}</> : pct(l.drr)}</td>
-                          <td className="ad2-nowrap">{l.inAds == null ? '–' : l.inAds ? 'да' : 'нет'} · {l.inPromo == null ? '–' : l.inPromo ? 'да' : 'нет'}</td>
-                          <td className="ad2-watch-btns">
-                            {l.status !== 'active' && <button className="btn btn-sm" disabled={!!busy} onClick={() => void send({ action: 'approve', sku: p.key, id: l.id }, k, 'Подтверждён — идёт в расчёты')}>Подтвердить</button>}
-                            {l.status !== 'ignored' && <button className="btn btn-sm" disabled={!!busy} onClick={() => void send({ action: 'ignore', sku: p.key, id: l.id }, k, 'Отмечен «не наш конкурент» — система его больше не предложит')}>Не наш</button>}
-                            {l.status === 'ignored' && <button className="btn btn-sm" disabled={!!busy} onClick={() => void send({ action: 'remove', sku: p.key, id: l.id }, k, 'Удалён из списка')}>Удалить</button>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : <p className="muted ad2-small">{p.links.length ? 'Все предложенные отклонены.' : 'Конкурентов нет.'} {live(p) === 0 && 'Привяжите своего: «+ конкурент».'}</p>}
-          </div>
-        );
-      })}
-      {list.length > more && <button className="btn" onClick={() => setMore(m => m + 24)}>Показать ещё ({list.length - more})</button>}
-    </section>
-  );
-}
-
-function Competitors({ mp }: { mp: Ads2Mp }) {
-  const [d, setD] = useState<Ads2Competitors | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [onlyBad, setOnlyBad] = useState(false);
-  useEffect(() => {
-    setD(null);
-    apiGet<Ads2Competitors>(`/api/ads2/competitors?mp=${mp}`).then(r => { setD(r.data); setErr(null); }).catch(e => setErr(errText(e)));
-  }, [mp]);
-  if (err) return <div className="rnp-alert">Конкуренты не загрузились: {err}</div>;
-  if (!d) return <div className="card muted">Загружаю…</div>;
-  const when = d.at ? new Date(d.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
-  const head = (
-    <p className="muted ad2-small">
-      Данные из аналитики кабинета {mp === 'wb' ? 'WB («Поисковые запросы: ваши товары», «Сравнение карточек»)' : 'Ozon («Товары на Ozon», «Конкурентная позиция»)'} — собирает Агент 3 в Chrome на ПК каждую ночь, только чтение.
-      {when && <> Снимок: {when}.</>}
-    </p>
-  );
-  const watch = <Watch mp={mp} d={d} setD={setD} />;
-  if (d.empty) return <><section className="card">{head}<p>Снимков ещё нет — задание «Конкуренты» запустится ночью по расписанию или кнопкой в «Сборщиках» → Агент 3.</p></section>{watch}</>;
-
-  if (d.wb) {
-    const w = d.wb;
-    const items = [...w.items].filter(i => !onlyBad || i.bad.length).sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
-    return (
-      <>
-        <section className="ad2-kpis">
-          <div className="card ad2-kpi"><div className="card-title">Средняя позиция в поиске</div><div className="ad2-kpi-v">{num(w.summary.avgPos)} <PosDyn v={w.summary.avgPosDyn} /></div><div className="ad2-kpi-sub">медиана {num(w.summary.medianPos)} · {w.period ? `${ddmm(w.period.start)}–${ddmm(w.period.end)}` : '7 дней'}</div></div>
-          <div className="card ad2-kpi"><div className="card-title">Видимость</div><div className="ad2-kpi-v">{pct(w.summary.visibility)}</div><div className="ad2-kpi-sub">доля показов карточек в поиске</div></div>
-          <div className="card ad2-kpi"><div className="card-title">В рекламе</div><div className="ad2-kpi-v">{num(w.summary.advertised)}</div><div className="ad2-kpi-sub">из {num(w.summary.total)} карточек</div></div>
-          <div className="card ad2-kpi"><div className="card-title">Сравнения карточек</div><div className="ad2-kpi-v">{num(w.comparisons.thisMonth)}</div><div className="ad2-kpi-sub">за месяц · агенту можно {w.comparisons.agentLimit}/мес · осталось у WB {num(w.comparisons.remaining)}</div></div>
-        </section>
-        {watch}
-        <section className="card ad2-tablecard">
-          {head}
-          <div className="ad2-filters">
-            <button className={`period-btn ${!onlyBad ? 'active' : ''}`} onClick={() => setOnlyBad(false)}>Все · {w.items.length}</button>
-            <button className={`period-btn ${onlyBad ? 'active' : ''}`} onClick={() => setOnlyBad(true)}>Есть что исправить · {w.items.filter(i => i.bad.length).length}</button>
-          </div>
-          <div className="ad2-scroll">
-            <table className="ad2-table">
-              <thead><tr><th>Товар</th><th>Позиция</th><th>Показы</th><th>CTR</th><th>Переходы</th><th>Заказы</th><th>Видимость</th><th>Что мешает в поиске (по WB)</th></tr></thead>
-              <tbody>
-                {items.map(i => (
-                  <tr key={i.nmId}>
-                    <td><ProductCell p={{ photo: i.photo, name: i.name, article: `${i.vendorCode} · ${i.nmId}`, link: `https://www.wildberries.ru/catalog/${i.nmId}/detail.aspx` }} />
-                      {i.isAdvertised && <span className="chip info ad2-small">в рекламе</span>}</td>
-                    <td className="ad2-nowrap"><b>{num(i.avgPos)}</b> <PosDyn v={i.avgPosDyn} /></td>
-                    <td className="ad2-nowrap">{num(i.views)} <PctDyn v={i.viewsDyn} /></td>
-                    <td>{pct(i.ctr)}</td>
-                    <td>{num(i.openCard)}</td>
-                    <td className="ad2-nowrap">{num(i.orders)} <PctDyn v={i.ordersDyn} /></td>
-                    <td>{pct(i.visibility)}</td>
-                    <td>{i.bad.length ? i.bad.map(b => <span key={b} className="chip warn ad2-chipsm">{b}</span>) : <span className="muted">—</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section className="card ad2-tablecard">
-          <h3 className="ad2-h3">Сравнения карточек (созданы в кабинете WB)</h3>
-          <p className="muted ad2-small">Наш товар выделен. «Отчёт снят» — агент открыл сравнение за 30 дней (заказы, позиция, CTR конкурентов — в «Конкурентах по товарам» выше). Открываются бесплатно только свежие наборы (3 дня после создания в кабинете); чтобы получить отчёт по нужным конкурентам — создайте сравнение в кабинете WB, агент снимет его ночью.</p>
-          <div className="ad2-cmpsets">
-            {w.comparisons.sets.slice(0, 20).map((s, k) => (
-              <div key={k} className="ad2-cmpset">
-                <div className="ad2-small"><b>{s.date ? new Date(s.date).toLocaleDateString('ru-RU') : ''}</b> {s.opened ? <span className="chip good ad2-chipsm">отчёт снят</span> : s.free ? <span className="chip info ad2-chipsm">бесплатно</span> : <span className="chip ad2-chipsm">истёк</span>}</div>
-                <div className="ad2-cmpnms">{s.nms.map(n => (
-                  <a key={n.nmId} href={`https://www.wildberries.ru/catalog/${n.nmId}/detail.aspx`} target="_blank" rel="noreferrer" className={`ad2-cmpnm ${n.ours ? 'ours' : ''}`} title={n.name}>
-                    {n.photo ? <img src={n.photo} alt="" loading="lazy" /> : null}<span>{n.name}</span>
-                  </a>
-                ))}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-        {d.errors.length > 0 && <div className="rnp-note">Кабинет ответил ошибкой: {d.errors.join(' · ')}</div>}
-      </>
-    );
-  }
-
-  const o = d.ozon!;
-  return (
-    <>
-      {watch}
-      <section className="card ad2-tablecard">
-        {head}
-        <div className="ad2-ozpos">
-          {o.positions.map(p => (
-            <div key={p.category2Id} className="card ad2-kpi">
-              <div className="card-title">Место среди продавцов: {p.name}</div>
-              <div className="ad2-kpi-v">{p.myPosition ? <>{num(p.myPosition)} <span className="muted ad2-small">из {num(p.sellers)}</span> <PosDyn v={p.myPositionDyn} /></> : <span className="muted ad2-small">нет продаж за период · продавцов {num(p.sellers)}</span>}</div>
-              <MiniLines s={p.series} />
-              <div className="ad2-kpi-sub"><span className="ad2-lg my">мы</span> <span className="ad2-lg comp">ближайший: {p.competitor ?? '—'}</span> <span className="ad2-lg best">лидер</span>
-                {p.percentDiff != null && <> · у ближайшего выручка больше на {nf0.format(p.percentDiff)}%</>}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-      {o.categories.map(c => {
-        const rows = [...c.top, ...c.ours.filter(x => x.rank > 10)];
-        return (
-          <section key={c.category3Id} className="card ad2-tablecard">
-            <h3 className="ad2-h3">{c.name}: топ рынка за неделю {c.ours.length ? <span className="muted ad2-small">· наших в топ-50: {c.ours.length}</span> : <span className="muted ad2-small">· наших в топ-50 нет</span>}</h3>
-            <p className="muted ad2-small">Средние по категории: конверсия в корзину из поиска {pct(c.benchmark.convSearch)}, из карточки {pct(c.benchmark.convPdp)}, ДРР {pct(c.benchmark.drr)}.{c.updateDate ? ` Данные Ozon на ${c.updateDate.slice(0, 10)}.` : ''}</p>
-            <div className="ad2-scroll">
-              <table className="ad2-table">
-                <thead><tr><th>#</th><th>Товар</th><th>Продавец</th><th>Цена</th><th>Выручка</th><th>Продано</th><th>В корзину: поиск / карточка</th><th>ДРР</th><th>Дней в акциях / трафаретах</th></tr></thead>
-                <tbody>
-                  {rows.map(x => (
-                    <tr key={x.sku} className={x.ours ? 'ad2-row-ours' : ''}>
-                      <td>{x.rank}</td>
-                      <td><ProductCell p={{ photo: x.photo, name: x.name, article: x.sku, link: x.link }} /></td>
-                      <td>{x.ours ? <b>мы</b> : x.seller}</td>
-                      <td className="ad2-nowrap">{rub(x.price)}</td>
-                      <td className="ad2-nowrap">{kRub(x.gmv ?? 0)} <PctDyn v={x.salesDyn} /></td>
-                      <td>{num(x.sold)}</td>
-                      <td className="ad2-nowrap">{pct(x.convSearch)} / {pct(x.convPdp)}</td>
-                      <td>{pct(x.drr)}</td>
-                      <td>{num(x.daysInPromo)} / {num(x.daysWithTrafarets)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        );
-      })}
-      {d.errors.length > 0 && <div className="rnp-note">Кабинет ответил ошибкой: {d.errors.join(' · ')}</div>}
-    </>
-  );
-}
-
 // ─── Автопилот (этап 2) ─────────────────────────────────────────────────────
 
 type ApResp = { state: Ads2AutopilotState; proposals: Ads2Proposal[] };
@@ -1299,7 +1004,8 @@ function Autopilot({ d, setToast, reload }: { d: Ads2Overview; setToast: (t: { o
 // ─── Страница ───────────────────────────────────────────────────────────────
 
 function Board({ mp }: { mp: Ads2Mp }) {
-  const [tab, setTab] = useState<Tab>(() => { try { return (localStorage.getItem('ads2:tab') as Tab) || 'overview'; } catch { return 'overview'; } });
+  // 15.10: «Конкуренты» переехали в свой раздел — сохранённая вкладка 'competitors' открывает «Обзор».
+  const [tab, setTab] = useState<Tab>(() => { try { const t = localStorage.getItem('ads2:tab') as Tab; return TABS.some(([k]) => k === t) ? t : 'overview'; } catch { return 'overview'; } });
   const [days, setDays] = useState<number>(() => { try { return Number(localStorage.getItem('ads2:days')) || 14; } catch { return 14; } });
   const [data, setData] = useState<Ads2Overview | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -1364,7 +1070,6 @@ function Board({ mp }: { mp: Ads2Mp }) {
           {tab === 'overview' && <Overview d={data} openProduct={setProductKey} />}
           {tab === 'products' && <Products d={data} openProduct={setProductKey} onChanged={load} setToast={setToast} />}
           {tab === 'campaigns' && <Campaigns d={data} ask={ask} openId={openCamp} setOpenId={setOpenCamp} />}
-          {tab === 'competitors' && <Competitors mp={mp} />}
           {tab === 'autopilot' && <Autopilot d={data} setToast={setToast} reload={load} />}
           {tab === 'log' && <Journal mp={mp} names={names} />}
         </Fragment>

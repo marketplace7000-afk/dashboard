@@ -3,7 +3,7 @@ import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, PaperPlaneTiltIcon,
   GearIcon, SquaresFourIcon,
   CaretRightIcon, MegaphoneIcon,
-  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon
+  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, BinocularsIcon
 } from '@phosphor-icons/react';
 import { AgentHosts } from './pages/AgentHosts';
 import { Login } from './pages/Login';
@@ -14,6 +14,7 @@ import { Chats } from './pages/Chats';
 import { Settings } from './pages/Settings';
 import { Modules } from './pages/Modules';
 import { Ads } from './pages/Ads';
+import { Competitors } from './pages/Competitors';
 import { Rnp } from './pages/Rnp';
 import { NotificationsBell } from './components/NotificationsBell';
 import { AiChatBubble } from './components/AiChat';
@@ -21,7 +22,7 @@ import { prefetchAll } from './api/prefetch';
 import { setUnauthorizedHandler } from './api/http';
 import { noteSwallowed } from './utils/log';
 
-type Page = 'dashboard' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | 'ads' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | 'ads' | 'competitors' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -43,6 +44,8 @@ const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   // «Рука на пульсе» — по дням и товарам из API площадок (11.10.2026), замена РнП «Культуры Аналитики».
   { key: 'rnp',         Icon: PulseIcon,           label: 'РНП' },
   { key: 'ads',         Icon: MegaphoneIcon,       label: 'Реклама' },
+  // 15.10.2026: конкуренты — отдельный раздел (привязка, позиции и рынок, советник по продажам).
+  { key: 'competitors', Icon: BinocularsIcon,      label: 'Конкуренты' },
   // «Модули» скрыт из меню по просьбе клиента (28.07) — роут и страница живы,
   // вернуть = раскомментировать строку ниже.
   // { key: 'modules',     Icon: SquaresFourIcon,     label: 'Модули' },
@@ -62,6 +65,7 @@ const TITLES: Record<Page, string> = {
   chats: 'Чаты с покупателями',
   rnp: 'Рука на пульсе (РНП)',
   ads: 'Реклама',
+  competitors: 'Конкуренты',
   modules: 'Модули · акции, аудит карточек',
   collectors: 'Сборщики · агенты на ПК',
   settings: 'Настройки',
@@ -165,13 +169,14 @@ export function App() {
             </div>
           </div>
         </div>
-        <div className={`content ${page === 'rnp' ? 'content-wide' : page === 'prices' || page === 'ads' ? 'content-prices' : ''}`}>
+        <div className={`content ${page === 'rnp' ? 'content-wide' : page === 'prices' || page === 'ads' || page === 'competitors' ? 'content-prices' : ''}`}>
           {page === 'dashboard' && <Dashboard onNav={(k) => setPage(k as Page)} />}
           {page === 'prices' && <Prices />}
           {page === 'reviews' && <Reviews />}
           {page === 'chats' && <Chats />}
           {page === 'rnp' && <Rnp />}
           {page === 'ads' && <Ads />}
+          {page === 'competitors' && <Competitors />}
           {page === 'settings' && <Settings />}
           {page === 'modules' && <Modules />}
           {page === 'collectors' && <AgentHosts />}

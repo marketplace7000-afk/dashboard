@@ -102,7 +102,17 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
       queries: (det.searchQueries || []).map(q => ({ text: q.text, freq: c(q.frequency) })) });
     await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500));
   }
-  return { period: { start: d(7), end: d(1) }, report: data, recommendations: reco,
+  // Позиция и воронка каждой нашей карточки за вчера и позавчера — отчёт за один день
+  // (для советника по продажам: «позиция упала 6 → 14», 15.10.2026).
+  const daily = [];
+  for (const n of [1, 2]) {
+    const r = await j('/v3/search-report/report', { currentPeriod: { start: d(n), end: d(n) }, pastPeriod: { start: d(n + 1), end: d(n + 1) },
+      nmIds: [], subjectIds: [], brandNames: [], tagIds: [], orderBy: { field: 'openCard', mode: 'desc' }, positionCluster: 'all',
+      includeSubstitutedSKUs: true, includeSearchTexts: false });
+    if (r.error) errors.push(r.error); else daily.push({ date: d(n), report: r.json && r.json.data || null });
+    await new Promise(r => setTimeout(r, 1200 + Math.random() * 1000));
+  }
+  return { period: { start: d(7), end: d(1) }, report: data, recommendations: reco, daily: daily,
     comparisons: { limits: lim.json && lim.json.data || null, history: hist.json && hist.json.data || null }, compDetails: compDetails, errors: errors };
 })(${JSON.stringify(auth)})`;
 
@@ -220,9 +230,14 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
   const mp = task.params.marketplace === 'ozon' ? 'ozon' : 'wb';
   const page = await newPage();
   try {
-    await api.progress(task.id, stage(0, `Открываю аналитику кабинета ${mp === 'wb' ? 'WB' : 'Ozon'}`), true);
+    const light = !!task.params.light;
     let data: any;
-    if (mp === 'wb') {
+    if (light) {
+      // Быстрый проход днём / по кнопке: аналитику кабинета не открываем, только витрина.
+      await api.progress(task.id, stage(0, 'Быстрое обновление: только карточки на витрине'), true);
+      data = { light: true, errors: [] };
+    } else if (mp === 'wb') {
+      await api.progress(task.id, stage(0, 'Открываю аналитику кабинета WB'), true);
       // Заголовки сессии аналитики — из собственного запроса страницы.
       let auth: Record<string, string> | null = null;
       page.on('request', rq => {
@@ -239,6 +254,7 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
       const items = (data?.report?.groups ?? []).reduce((s: number, g: any) => s + (g.items?.length ?? 0), 0);
       await api.progress(task.id, stage(1, `Карточек с позициями: ${items}, наборов сравнения: ${data?.comparisons?.history?.length ?? 0}`, { items_done: items, items_total: items }), true);
     } else {
+      await api.progress(task.id, stage(0, 'Открываю аналитику кабинета Ozon'), true);
       if (!await openCabinet(task, page, OZ_PAGE, /^https:\/\/seller\.ozon\.ru\/app\//, 'ozon', settings)) return;
       const cid = String(task.params.company_id || '');
       if (!cid) { await api.fail(task.id, { error: 'сервер не передал company_id Ozon', retryable: false }); return; }
@@ -251,6 +267,7 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
     // Карточки привязанных конкурентов и наших товаров на витрине (цена, рейтинг, отзывы, остаток).
     const ids = [...new Set([...(task.params.ours as number[] ?? []), ...(task.params.watch as number[] ?? [])].map(Number).filter(n => n > 0))]
       .slice(0, mp === 'wb' ? 200 : 60);
+    if (light && !ids.length) { await api.complete(task.id, 'Быстрое обновление: привязанных конкурентов нет'); return; }
     if (data && ids.length) {
       await api.progress(task.id, stage(1, `Карточки конкурентов на витрине: ${ids.length}`), true);
       const sc = mp === 'wb' ? await wbShowcaseCards(page, ids) : await ozonShowcaseCards(page, ids, settings);

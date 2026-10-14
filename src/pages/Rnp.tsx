@@ -20,6 +20,46 @@ import {
 } from '@phosphor-icons/react';
 import { apiGet, apiPost, errText } from '../api/http';
 import { RNP_METRICS, RNP_METRIC, type RnpMetric, type RnpMp, type RnpResponse, type RnpItem, type RnpPriceView } from '../../shared/rnp';
+import type { Ads2Advisor } from '../../shared/ads2';
+
+/**
+ * Советник дня (15.10.2026): коротко — почему вчера просели или выросли продажи.
+ * Правила и подробный разбор по товарам — «Конкуренты» → «Советник по продажам».
+ */
+function AdvisorBrief({ mp }: { mp: RnpMp }) {
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('rnp:advisor') !== '0'; } catch { return true; } });
+  const [d, setD] = useState<Ads2Advisor | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    apiGet<Ads2Advisor>(`/api/ads2/advisor?mp=${mp}`).then(r => { setD(r.data); setErr(null); }).catch(e => setErr(errText(e)));
+  }, [mp]);
+  const toggle = () => { setOpen(o => { try { localStorage.setItem('rnp:advisor', o ? '0' : '1'); } catch { /* не критично */ } return !o; }); };
+  if (err) return null;
+  const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
+  const k = (v: number) => (Math.abs(v) >= 1_000_000 ? `${(v / 1_000_000).toFixed(1).replace('.', ',')} млн ₽` : `${nf.format(Math.round(v / 1000))} тыс ₽`);
+  return (
+    <section className="card rnp-advisor">
+      <button className="rnp-advisor-head" onClick={toggle} aria-expanded={open}>
+        <b>Советник дня{d ? ` · ${d.date.slice(8, 10)}.${d.date.slice(5, 7)}` : ''}</b>
+        {d && !open && <span className="muted">{d.summary[0]}</span>}
+        <span className="rnp-advisor-caret">{open ? <CaretUpIcon size={14} /> : <CaretDownIcon size={14} />}</span>
+      </button>
+      {open && (d ? (
+        <div className="rnp-advisor-body">
+          <ul>{d.summary.map(x => <li key={x}>{x}</li>)}</ul>
+          {d.drivers.filter(x => x.code !== 'low_volume' && x.code !== 'unknown').slice(0, 3).length > 0 && (
+            <div className="rnp-advisor-drv">
+              {d.drivers.filter(x => x.code !== 'low_volume' && x.code !== 'unknown').slice(0, 3).map(x => (
+                <span key={x.code} className="chip warn">{x.label}: −{k(Math.abs(x.delta))} · {x.products} тов.</span>
+              ))}
+            </div>
+          )}
+          <div className="muted rnp-advisor-more">По товарам — с причинами и что сделать: раздел «Конкуренты» → «Советник по продажам».</div>
+        </div>
+      ) : <div className="muted">Считаю…</div>)}
+    </section>
+  );
+}
 
 // ─── Настройки (localStorage, на каждую площадку свои) ──────────────────────
 
@@ -437,6 +477,7 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
 
   return (
     <div className="rnp">
+      <AdvisorBrief mp={mp} />
       {/* Фильтры */}
       <section className="card rnp-filters">
         <div className="rnp-frow">

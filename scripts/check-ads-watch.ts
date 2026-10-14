@@ -7,7 +7,9 @@
 import './_ads-check-env';
 import { readFileSync } from 'node:fs';
 import { parseNmId, parseOzonSku } from '../api/_lib/competitorWatch';
-import { editWatch, autoSuggest, buildWatch, watchParams, saveCabinetSnapshot, getCompetitors } from '../api/_lib/ads/cabinet';
+import { editWatch, autoSuggest, buildWatch, watchParams, saveCabinetSnapshot, getCompetitors, requestRefresh, posSeries } from '../api/_lib/ads/cabinet';
+import { adsDb } from '../api/_lib/ads/store';
+import { listTasks } from '../api/_lib/agentQueue';
 
 let failed = 0;
 function check(name: string, actual: unknown, expected: unknown): void {
@@ -86,7 +88,7 @@ const b = p.links.find(l => l.id === '390744732')!;
 check('цифры: витрина + сравнение', [b.title, b.seller, b.price, b.rating, b.feedbacks, b.stock, b.orders, b.avgPos, b.inPromo], ['Светильник соты RGB', 'Odds & Ends', 3832, 4.6, 73, 42, 39, 22, true]);
 const c = p.links.find(l => l.id === '321878641')!;
 check('без карточки — цена из сравнения', [c.price, c.status], [3528, 'active']);
-check('подтверждённые выше предложенных', p.links.slice(0, 2).map(l => l.status), ['active', 'active']);
+check('порядок — как привязаны: «Подтвердить» и «Не наш» строку не двигают', p.links.map(l => l.id), ['390744732', '257585393', '321878641', '832682672', '111111111']);
 const oz = buildWatch('ozon', ozData).watch.find(x => x.key === 'CARLINKIT-ULTRA2-KRUG-8-128')!;
 check('Ozon: ДРР и продажи лидера', oz.links.filter(l => l.id === '5555555555').map(l => [l.drr, l.orders, l.seller === '' ? 'нет' : l.seller]), [[6.5, 40, 'нет']]);
 
@@ -96,6 +98,21 @@ check('сводка для «Сборщиков»', /отчётов сравне
 const api = getCompetitors('wb');
 check('ответ: набор с отчётом помечен', api.wb?.comparisons.sets.map(s => s.opened), [true, false]);
 check('ответ: привязки и каталог', [api.watch.length > 0, Array.isArray(api.catalog)], [true, true]);
+
+console.log('Обновление днём');
+const open = () => listTasks({ status: ['queued', 'claimed', 'running'], type: 'competitor_watch', limit: 50 }).filter(t => t.params.marketplace === 'wb');
+check('после привязки нового конкурента — одно быстрое обновление', open().map(t => !!t.params.light), [true]);
+check('«Обновить сейчас», пока ждёт, — нового задания нет', [requestRefresh('wb', 'panel').ok, open().length], [true, 1]);
+const lightSum = saveCabinetSnapshot('wb', { light: true, errors: [], cards: [{ id: 390744732, name: 'Светильник соты RGB', supplier: 'Odds & Ends', rating: 4.7, feedbacks: 75, price: 3500, qty: 40 }] });
+check('быстрый проход: сводка', /быстрое обновление — карточек на витрине 1/.test(lightSum), true);
+const api2 = getCompetitors('wb');
+check('быстрый проход не затирает аналитику кабинета', [api2.at === api.at, api2.wb?.items.length], [true, 1]);
+const yest = new Date(Date.now() + 3 * 3600_000 - 86_400_000).toISOString().slice(0, 10);
+adsDb().prepare('INSERT OR REPLACE INTO ad_comp_card (mp, id, date, at, price) VALUES (?, ?, ?, ?, ?)').run('wb', '390744732', yest, Date.now() - 86_400_000, 3800);
+const b2 = getCompetitors('wb').watch.find(x => x.key === 'SOTA-RGB')!.links.find(l => l.id === '390744732')!;
+check('свежая витрина главнее ночного снимка, цена сутки назад', [b2.price, b2.rating, b2.feedbacks, b2.price1d, !!b2.priceAt], [3500, 4.7, 75, 3800, true]);
+saveCabinetSnapshot('wb', { ...wbData, daily: [{ date: yest, report: { groups: [{ items: [{ nmId: 1417220162, avgPosition: { current: 14 }, views: { current: 900 } }] }] } }] });
+check('позиция WB за день сохраняется', posSeries('wb', yest, yest).get('1417220162')?.get(yest), 14);
 
 console.log(failed ? `\nПРОВАЛЕНО: ${failed}` : '\nВсе проверки прошли');
 process.exit(failed ? 1 : 0);

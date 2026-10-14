@@ -394,17 +394,21 @@ export function upsertSchedule(s: { id?: number; type: AgentTaskType; params?: R
  * Расписания по умолчанию (МСК). Агент 3 «Конкуренты» — ночью, раньше цен покупателя
  * в 06:00, раз в сутки: отчёты аналитики кабинетов обновляются за прошедший день (14.10.2026).
  */
-const DEFAULT_SCHEDULES: { type: AgentTaskType; marketplace: 'wb' | 'ozon'; cron: string }[] = [
+const DEFAULT_SCHEDULES: { type: AgentTaskType; marketplace: 'wb' | 'ozon'; cron: string; light?: boolean }[] = [
   { type: 'competitor_watch', marketplace: 'wb', cron: '40 5 * * *' },
   { type: 'competitor_watch', marketplace: 'ozon', cron: '50 5 * * *' },
+  // 15.10: днём — быстрые проходы по витрине (цены, рейтинг, остаток конкурентов), без аналитики кабинета.
+  { type: 'competitor_watch', marketplace: 'wb', cron: '40 11,16 * * *', light: true },
+  { type: 'competitor_watch', marketplace: 'ozon', cron: '50 11,16 * * *', light: true },
 ];
 
 function ensureDefaultSchedules(d: any): void {
   for (const s of DEFAULT_SCHEDULES) {
-    const exists = d.prepare(`SELECT 1 FROM agent_schedules WHERE type = ? AND json_extract(params, '$.marketplace') = ?`).get(s.type, s.marketplace);
+    const exists = d.prepare(`SELECT 1 FROM agent_schedules WHERE type = ? AND json_extract(params, '$.marketplace') = ?
+      AND COALESCE(json_extract(params, '$.light'), 0) = ?`).get(s.type, s.marketplace, s.light ? 1 : 0);
     if (exists) continue;
     d.prepare('INSERT INTO agent_schedules(type, params, cron, enabled, next_run_at, created_at) VALUES (?, ?, ?, 1, ?, ?)')
-      .run(s.type, J({ marketplace: s.marketplace }), s.cron, nextCronRun(s.cron, now()), now());
+      .run(s.type, J(s.light ? { marketplace: s.marketplace, light: true } : { marketplace: s.marketplace }), s.cron, nextCronRun(s.cron, now()), now());
   }
 }
 

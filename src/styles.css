@@ -690,16 +690,6 @@ code {
 /* «Цены»: одинаковая сетка колонок на WB и Ozon — ширины заданы в thead в процентах (15.10.2026: расчётные
    колонки распределены по ширине, а не прижаты вправо; колонка «Реклама» убрана — советы по рекламе живут в «Советнике») */
 .tbl-scroll table.mp-table { width: 100%; table-layout: auto; } /* auto: проценты — подсказка, но фото (54px) и nowrap-цифры не ужимаются уже содержимого на узких окнах (1150px у владельца) */
-.pr-table-card table.mp-table > tbody > tr > td:first-child { padding-right: 4px; }
-/* Узкое окно: артикулу гарантирован минимум, а подписи под цифрами («клубная цена · API», «⚠ ком.») могут переноситься */
-.pr-table-card table.mp-table th:nth-child(2) { min-width: 150px; }
-.pr-table-card table.mp-table > tbody > tr > td.right > div { white-space: normal; }
-/* Окно до 1280px (у владельца 1150): боковые отступы ячеек меньше, чтобы 8 колонок влезли без прокрутки вбок */
-@media (max-width: 1280px) {
-  .pr-table-card .tbl-scroll thead.mp-head th, .pr-table-card table.mp-table > tbody > tr > td { padding-left: 7px; padding-right: 7px; }
-  .pr-table-card table.mp-table > tbody > tr > td:first-child { padding-right: 3px; }
-  .pr-table-card table.mp-table > tbody > tr > td:last-child { padding-left: 3px; }
-}
 .tbl-scroll table.mp-table td { overflow-wrap: anywhere; }
 
 /* ═══ «Сборщики» (src/pages/AgentHosts.tsx), префикс .ah- (11.10.2026) ═══
@@ -1407,6 +1397,17 @@ code {
 .pr-table-card table.mp-table > tbody > tr > td { padding: 14px 12px; border-bottom: 1px solid #eef0f4; vertical-align: middle; }
 /* Последняя колонка (архив + раскрытие) узкая — меньше боковых отступов, чтобы кнопка и стрелка влезали на 1366px */
 .pr-table-card table.mp-table > tbody > tr > td:last-child { padding-left: 4px; padding-right: 8px; }
+.pr-table-card table.mp-table > tbody > tr > td:first-child { padding-right: 4px; }
+/* Узкое окно: артикулу гарантирован минимум, а подписи под цифрами («клубная цена · API», «⚠ ком.») могут переноситься.
+   Эти правила ДОЛЖНЫ идти после базового padding выше — одинаковая специфичность, побеждает последнее. */
+.pr-table-card table.mp-table th:nth-child(2) { min-width: 150px; }
+.pr-table-card table.mp-table > tbody > tr > td.right > div { white-space: normal; }
+/* Окно до 1280px (у владельца 1150): боковые отступы ячеек меньше, чтобы 8 колонок влезли без прокрутки вбок */
+@media (max-width: 1280px) {
+  .pr-table-card .tbl-scroll thead.mp-head th, .pr-table-card table.mp-table > tbody > tr > td { padding-left: 7px; padding-right: 7px; }
+  .pr-table-card table.mp-table > tbody > tr > td:first-child { padding-right: 3px; }
+  .pr-table-card table.mp-table > tbody > tr > td:last-child { padding-left: 3px; }
+}
 .pr-table-card table.mp-table > tbody > tr { transition: background .12s; }
 .pr-table-card table.mp-table > tbody > tr:hover { background: #f8f9fb; }
 .pr-table-card table.mp-table img { border-radius: 10px !important; box-shadow: 0 1px 3px rgba(15,23,42,.10); }

@@ -21,7 +21,7 @@ import { apiGet, apiPost, errText } from '../api/http';
 import type {
   Ads2Mp, Ads2Competitors, Ads2WatchLink, Ads2WatchProduct, Ads2Advisor, Ads2AdvisorProduct, Ads2AdvisorCause,
 } from '../../shared/ads2';
-import { nf0, nf1, rub, num, pct, ddmm, kRub, when, ProductCell, PosDyn, PctDyn, MiniLines } from './ads2ui';
+import { nf0, nf1, rub, num, pct, ddmm, kRub, when, whenRel, ProductCell, PosDyn, PctDyn, MiniLines } from './ads2ui';
 
 type Sheet = 'watch' | 'market' | 'advisor';
 const SHEETS: Array<[Sheet, string]> = [['watch', 'Привязка конкурентов'], ['market', 'Позиции и рынок'], ['advisor', 'Советник по продажам']];
@@ -78,14 +78,24 @@ function RefreshBar({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
     finally { setBusy(false); }
   };
   const next = r.nextRuns.find(t => t > Date.now());
+  const pass = r.pass;
+  const sched = r.slots.map(s => s.light ? s.time : `${s.time} (ночью, полный)`).join(', ');
   return (
     <div className="cmp-refresh">
       <div className="cmp-refresh-t">
-        <span>Витрина (цены, рейтинг, отзывы): <b>{when(r.cardsAt)}</b></span>
-        <span>Аналитика кабинета: <b>{when(r.fullAt)}</b></span>
-        {next && <span className="muted">следующее обновление: {when(next)}</span>}
-        {r.task && <span className={`chip ${open ? 'info' : r.task.status === 'failed' ? 'bad' : ''}`}>
-          {r.task.light ? 'быстрое' : 'полное'} обновление: {TASK_STATUS[r.task.status] ?? r.task.status}{open ? '…' : ''}</span>}
+        <div className="cmp-fresh">
+          Цены конкурентов сняты <b>{whenRel(r.cardsAt)}</b>
+          {pass && <span className="muted"> · {pass.light ? 'дневной проход' : 'ночной проход'}, с ценой {nf0.format(pass.priced)} из {nf0.format(pass.cards)} карточек</span>}
+        </div>
+        {r.missedAt && !open && <div className="cmp-missed"><WarningIcon size={16} /> Плановое обновление {whenRel(r.missedAt)} не прошло — цены старше, чем по расписанию.
+          Проверьте, что ПК с агентом включён, или нажмите «Обновить сейчас».</div>}
+        <div className="cmp-refresh-s muted">
+          {sched && <span>По расписанию (МСК): {sched}</span>}
+          {next && <span>следующее — {whenRel(next)}</span>}
+          <span>аналитика кабинета: {whenRel(r.fullAt)}</span>
+          {r.task && open && <span className="chip info">{r.task.light ? 'быстрое' : 'полное'} обновление: {TASK_STATUS[r.task.status] ?? r.task.status}…</span>}
+          {r.task && !open && r.task.status === 'failed' && <span className="chip bad" title={r.task.message ?? ''}>последнее обновление: ошибка</span>}
+        </div>
       </div>
       <button className="btn" onClick={run} disabled={busy || !!open} title="Агент на ПК снимет карточки привязанных конкурентов и наших товаров на витрине">
         <ArrowsClockwiseIcon size={15} className={busy || open ? 'spin' : ''} /> Обновить сейчас
@@ -95,13 +105,17 @@ function RefreshBar({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
 }
 
 /** Строка таблицы сравнения: наш товар и конкуренты в одних колонках. */
-function CmpCells({ l, mp, our }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2WatchLink | null }) {
+function CmpCells({ l, mp, our, passAt }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2WatchLink | null; passAt: number | null }) {
   const diff = l !== our && l.price != null && our?.price ? Math.round((l.price / our.price - 1) * 100) : null;
   const day = l.price != null && l.price1d ? Math.round((l.price / l.price1d - 1) * 100) : null;
   const ordSuffix = mp === 'wb' && l.orders != null && l.ordersDays === 7 ? <span className="muted cmp-unit"> за 7 дн</span> : null;
+  // Цена не из последнего прохода (карточку в этот раз не отдали) — честно пишем, от когда она.
+  const stale = l.price != null && passAt != null && (l.priceAt == null || l.priceAt < passAt - 30 * 60_000);
   return (
     <>
-      <td className="ad2-num">{l.price == null && l.stock === 0 ? <span className="muted">нет в наличии</span> : rub(l.price)}
+      <td className="ad2-num" title={l.priceAt ? `цена снята ${whenRel(l.priceAt)}` : 'цена из ночной аналитики кабинета'}>
+        {l.price == null && l.stock === 0 ? <span className="muted">нет в наличии</span> : rub(l.price)}
+        {stale && <div className="cmp-sub warn">{l.priceAt ? `цена от ${whenRel(l.priceAt)}` : 'цена из аналитики'}</div>}
         {day != null && Math.abs(day) >= 3 && <div className={`cmp-sub ${day < 0 ? 'bad' : 'good'}`} title={`вчера ${rub(l.price1d)}`}>{day > 0 ? '+' : ''}{day}% за сутки</div>}</td>
       <td className="ad2-num">{diff == null || diff === 0 ? <span className="muted">{l === our ? '' : '–'}</span>
         : <span className={`ad2-dyn ${diff < 0 ? 'bad' : 'good'}`} title={diff < 0 ? 'конкурент дешевле нас' : 'конкурент дороже нас'}>{diff > 0 ? '+' : ''}{diff}%</span>}</td>
@@ -122,8 +136,8 @@ function CmpCells({ l, mp, our }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2Watch
   );
 }
 
-function WatchProduct({ p, mp, showIgnored, onData, setToast }: {
-  p: Ads2WatchProduct; mp: Ads2Mp; showIgnored: boolean; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
+function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast }: {
+  p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; showIgnored: boolean; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [link, setLink] = useState('');
@@ -187,7 +201,7 @@ function WatchProduct({ p, mp, showIgnored, onData, setToast }: {
               {our && (
                 <tr className="cmp-our">
                   <td className="cmp-col-prod"><ProductCell p={{ photo: our.photo || p.photo, name: our.title || p.name, article: `наш товар · ${p.key}`, link: our.url }} /></td>
-                  <CmpCells l={our} mp={mp} our={our} />
+                  <CmpCells l={our} mp={mp} our={our} passAt={passAt} />
                   <td className="cmp-decide"><span className="chip ad2-chipsm cmp-chip-our">наш товар</span></td>
                 </tr>
               )}
@@ -199,7 +213,7 @@ function WatchProduct({ p, mp, showIgnored, onData, setToast }: {
                       <ProductCell p={{ photo: l.photo, name: l.title || `${mp === 'wb' ? 'артикул' : 'SKU'} ${l.id}`, article: [l.id, l.brand || l.seller].filter(Boolean).join(' · '), link: l.url }} />
                       {(l.note || l.source === 'manual') && <div className="muted cmp-note">{l.source === 'manual' ? 'добавлен вручную' : ''}{l.source === 'manual' && l.note ? ' · ' : ''}{l.note}</div>}
                     </td>
-                    <CmpCells l={l} mp={mp} our={our} />
+                    <CmpCells l={l} mp={mp} our={our} passAt={passAt} />
                     <td className="cmp-decide">
                       <span className={`chip ${W_STATUS[l.status].cls} ad2-chipsm`}>{W_STATUS[l.status].label}</span>
                       <div className="cmp-btns">
@@ -247,7 +261,8 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
         <p className="muted cmp-lead">
           Система предлагает конкурентов ({mp === 'wb' ? 'из наборов «Сравнение карточек» в кабинете WB' : 'лидеров категории с похожими названием и ценой, «Товары на Ozon»'}).
           В расчёты и советы идут подтверждённые. Не тот — «Не наш», система его больше не предложит. Своего — кнопка «+ Конкурент» у товара.
-          Цены, рейтинг и отзывы агент обновляет ночью, в 11:40 и 16:40 и по кнопке «Обновить сейчас»; после привязки нового конкурента — сам через пару минут.
+          Цены, рейтинг и отзывы агент снимает по расписанию выше и по кнопке «Обновить сейчас»; после привязки нового конкурента — сам через пару минут.
+          Если цену карточки в последний раз снять не удалось, под ней написано, от когда она.
         </p>
         <div className="ad2-filters">
           <label className="ad2-search">
@@ -263,7 +278,7 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
         </div>
       </section>
       {list.length === 0 && <div className="card muted">{all || needle || onlyPending ? 'Ничего не найдено.' : 'Привязок пока нет. Предложения появятся после ночного прохода агента; своего конкурента можно привязать в «Все товары».'}</div>}
-      {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} showIgnored={showIgnored} onData={onData} setToast={setToast} />)}
+      {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} showIgnored={showIgnored} onData={onData} setToast={setToast} />)}
       {list.length > more && <button className="btn" onClick={() => setMore(m => m + 20)}>Показать ещё ({list.length - more})</button>}
     </>
   );

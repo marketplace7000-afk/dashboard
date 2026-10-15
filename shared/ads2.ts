@@ -145,6 +145,12 @@ export type Ads2CompRefresh = {
   task: { id: number; status: string; light: boolean; createdAt: number; finishedAt: number | null; message: string | null } | null;
   /** Ближайшие запуски по расписанию (мс). */
   nextRuns: number[];
+  /** Последний проход по витрине: когда сняты цены, сколько карточек и у скольких есть цена. */
+  pass: { at: number; light: boolean; cards: number; priced: number; errors: number } | null;
+  /** Расписание по МСК: «05:40» (полный ночной), «11:40», «16:40» (быстрые). */
+  slots: { time: string; light: boolean }[];
+  /** Плановое обновление наступило больше 40 минут назад, а цен после него нет — время этого слота. */
+  missedAt: number | null;
 };
 
 /** Наш товар (ключ — наш артикул продавца) и его конкуренты. */

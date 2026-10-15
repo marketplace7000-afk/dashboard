@@ -13,6 +13,18 @@ export const pct = (v: number | null | undefined) => (v == null || !Number.isFin
 export const ddmm = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 export const kRub = (v: number) => (Math.abs(v) >= 1_000_000 ? `${nf1.format(v / 1_000_000)} млн ₽` : Math.abs(v) >= 10_000 ? `${nf0.format(v / 1000)} тыс ₽` : rub(v));
 export const when = (ms: number | null | undefined) => (ms ? new Date(ms).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
+/** «сегодня в 11:42», «вчера в 16:41», «13.10 в 05:43» — по Москве, как расписание агента. */
+export function whenRel(ms: number | null | undefined, now = Date.now()): string {
+  if (!ms) return '—';
+  const MSK = 3 * 3600_000;
+  const day = (t: number) => Math.floor((t + MSK) / 86_400_000);
+  const hm = new Date(ms + MSK).toISOString().slice(11, 16);
+  const dd = day(now) - day(ms);
+  if (dd === 0) return `сегодня в ${hm}`;
+  if (dd === 1) return `вчера в ${hm}`;
+  const iso = new Date(ms + MSK).toISOString();
+  return `${iso.slice(8, 10)}.${iso.slice(5, 7)} в ${hm}`;
+}
 
 export function ProductCell({ p, onOpen }: { p: { photo: string; name: string; article: string; link?: string | null }; onOpen?: () => void }) {
   return (

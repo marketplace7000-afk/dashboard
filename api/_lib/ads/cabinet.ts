@@ -8,7 +8,7 @@
 import { adsDb, listFlags, type AdMp } from './store';
 import { DEFAULT_AGENT_SETTINGS } from '../../../shared/agents';
 import type { Ads2CompRefresh, Ads2Competitors, Ads2OzMarketItem, Ads2WatchLink, Ads2WatchProduct, Ads2WbPosItem } from '../../../shared/ads2';
-import { createTask, listSchedules, listTasks } from '../agentQueue';
+import { createTask, listSchedules, listTasks, nextCronRun } from '../agentQueue';
 import {
   getAllLinks, suggestLinks, watchedIds, addLink, setLinkStatus, removeLink, parseNmId, parseOzonSku, getLatestPrices,
   type CompetitorLink, type WatchStatus,
@@ -30,13 +30,19 @@ function db(): any {
       -- Из неё: свежая цена между ночными проходами и «конкурент снизил цену» для советника.
       CREATE TABLE IF NOT EXISTS ad_comp_card (
         mp TEXT NOT NULL, id TEXT NOT NULL, date TEXT NOT NULL, at INTEGER NOT NULL,
-        price REAL, rating REAL, feedbacks INTEGER, stock INTEGER, name TEXT, seller TEXT, photo TEXT,
+        price REAL, rating REAL, feedbacks INTEGER, stock INTEGER, name TEXT, seller TEXT, photo TEXT, price_at INTEGER,
         PRIMARY KEY (mp, id, date));
+      -- 15.10: проходы агента по витрине — когда сняты цены (для «цены сняты сегодня в 11:42»).
+      CREATE TABLE IF NOT EXISTS ad_comp_pass (
+        mp TEXT NOT NULL, at INTEGER NOT NULL, light INTEGER NOT NULL, cards INTEGER NOT NULL, priced INTEGER NOT NULL, errors INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS ad_comp_pass_mp ON ad_comp_pass (mp, at);
       -- 15.10: позиция наших карточек WB в поиске за вчера (отчёт «Поисковые запросы» за один день).
       CREATE TABLE IF NOT EXISTS ad_pos_daily (
         mp TEXT NOT NULL, date TEXT NOT NULL, id TEXT NOT NULL,
         pos REAL, views INTEGER, open_card INTEGER, carts INTEGER, orders INTEGER,
         PRIMARY KEY (mp, date, id));`);
+    // price_at появился позже самой таблицы — у баз, созданных до него, добавить колонку.
+    if (!(d.prepare('PRAGMA table_info(ad_comp_card)').all() as any[]).some(c => c.name === 'price_at')) d.exec('ALTER TABLE ad_comp_card ADD COLUMN price_at INTEGER');
     tablesReady = true;
   }
   return d;
@@ -45,17 +51,20 @@ function db(): any {
 const mskDay = (ms: number) => new Date(ms + 3 * 3600_000).toISOString().slice(0, 10);
 
 /** Карточки витрины из прохода агента → история (строка на товар в день). */
-function saveCards(mp: AdMp, cards: any[], at: number): number {
+function saveCards(mp: AdMp, cards: any[], at: number): { n: number; priced: number } {
   const d = db();
   const date = mskDay(at);
-  const st = d.prepare(`INSERT INTO ad_comp_card (mp, id, date, at, price, rating, feedbacks, stock, name, seller, photo)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  // price_at — когда снята именно цена: если в этот проход цену не отдали, остаётся время прошлого замера
+  // (менеджер видит «цена от 05:43», а не выдаём утреннюю цену за дневную).
+  const st = d.prepare(`INSERT INTO ad_comp_card (mp, id, date, at, price, rating, feedbacks, stock, name, seller, photo, price_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(mp, id, date) DO UPDATE SET at = excluded.at,
-      price = COALESCE(excluded.price, ad_comp_card.price), rating = COALESCE(excluded.rating, ad_comp_card.rating),
+      price_at = CASE WHEN excluded.price IS NOT NULL OR excluded.stock = 0 THEN excluded.at ELSE ad_comp_card.price_at END,
+      price = CASE WHEN excluded.price IS NULL AND excluded.stock = 0 THEN NULL ELSE COALESCE(excluded.price, ad_comp_card.price) END, rating = COALESCE(excluded.rating, ad_comp_card.rating),
       feedbacks = COALESCE(excluded.feedbacks, ad_comp_card.feedbacks), stock = excluded.stock,
       name = COALESCE(NULLIF(excluded.name, ''), ad_comp_card.name), seller = COALESCE(NULLIF(excluded.seller, ''), ad_comp_card.seller),
       photo = COALESCE(NULLIF(excluded.photo, ''), ad_comp_card.photo)`);
-  let n = 0;
+  let n = 0, priced = 0;
   d.exec('BEGIN');
   try {
     for (const c of cards) {
@@ -63,14 +72,16 @@ function saveCards(mp: AdMp, cards: any[], at: number): number {
       if (!/^\d+$/.test(id)) continue;
       // Ozon не отдаёт остаток — только «можно купить»: false → 0, иначе неизвестно.
       const stock = num(c.qty) ?? (c.available === false ? 0 : null);
-      st.run(mp, id, date, at, num(c.price), num(c.rating), num(c.feedbacks ?? c.reviews), stock,
-        String(c.name ?? ''), String(c.seller ?? c.supplier ?? ''), String(c.photo ?? ''));
+      const price = num(c.price);
+      st.run(mp, id, date, at, price, num(c.rating), num(c.feedbacks ?? c.reviews), stock,
+        String(c.name ?? ''), String(c.seller ?? c.supplier ?? ''), String(c.photo ?? ''), price != null || stock === 0 ? at : null);
       n++;
+      if (price != null || stock === 0) priced++;
     }
     d.exec('COMMIT');
   } catch (e) { d.exec('ROLLBACK'); throw e; }
   d.prepare(`DELETE FROM ad_comp_card WHERE mp = ? AND date < ?`).run(mp, mskDay(at - 120 * 86_400_000));
-  return n;
+  return { n, priced };
 }
 
 /** WB: позиции наших карточек за вчера и позавчера (отчёт за один день) → история по дням. */
@@ -107,7 +118,10 @@ export function cardHistory(mp: AdMp, ids: string[]): Map<string, { at: number; 
       for (let i = a.length - 2; i >= 0; i--) if (a[i].date <= lim && a[i].price != null) return Number(a[i].price);
       return null;
     };
-    out.set(id, { at: Number(last.at), date: last.date, price: last.price, rating: last.rating, feedbacks: last.feedbacks, stock: last.stock,
+    // Цена — из последнего замера, где её действительно сняли (сегодня или раньше), со своим временем.
+    let pr = last;
+    for (let i = a.length - 1; i >= 0; i--) if (a[i].price_at != null) { pr = a[i]; break; }
+    out.set(id, { at: Number(pr.price_at ?? pr.at), date: last.date, price: pr.price, rating: last.rating, feedbacks: last.feedbacks, stock: last.stock,
       name: last.name ?? '', seller: last.seller ?? '', photo: last.photo ?? '', price1d: before(1), price7d: before(7) });
   }
   return out;
@@ -143,9 +157,13 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
   if (!data || typeof data !== 'object') throw new Error('пустой снимок');
   const d = db();
   const at = Date.now();
-  const cardsN = Array.isArray(data.cards) ? saveCards(mp, data.cards, at) : 0;
+  const saved = Array.isArray(data.cards) ? saveCards(mp, data.cards, at) : { n: 0, priced: 0 };
+  const cardsN = saved.n;
+  const errN = Array.isArray(data.errors) ? data.errors.length : 0;
+  if (cardsN) d.prepare('INSERT INTO ad_comp_pass (mp, at, light, cards, priced, errors) VALUES (?, ?, ?, ?, ?, ?)').run(mp, at, data.light ? 1 : 0, cardsN, saved.priced, errN);
+  d.prepare('DELETE FROM ad_comp_pass WHERE mp = ? AND at < ?').run(mp, at - 60 * 86_400_000);
   // Быстрый проход днём (только карточки витрины) — в историю карточек, полный снимок кабинета не трогаем.
-  if (data.light) return `${mp === 'wb' ? 'WB' : 'Ozon'}: быстрое обновление — карточек на витрине ${cardsN}${data.errors?.length ? `, ошибок ${data.errors.length}` : ''}`;
+  if (data.light) return `${mp === 'wb' ? 'WB' : 'Ozon'}: быстрое обновление — карточек на витрине ${cardsN}, с ценой ${saved.priced}${errN ? `, ошибок ${errN}` : ''}`;
   const posN = savePosDaily(mp, data.daily);
   d.prepare('INSERT INTO ad_cabinet_snapshot (mp, at, json) VALUES (?, ?, ?)').run(mp, at, JSON.stringify(data));
   d.prepare(`DELETE FROM ad_cabinet_snapshot WHERE mp = ? AND id NOT IN (SELECT id FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT ?)`).run(mp, mp, KEEP);
@@ -502,18 +520,41 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
 
 const isMine = (t: { params: Record<string, unknown> }, mp: AdMp) => (t.params?.marketplace === 'ozon' ? 'ozon' : 'wb') === mp;
 
-export function refreshState(mp: AdMp): Ads2CompRefresh {
+/** Слоты расписания «m h1,h2 * * *» (МСК) → «05:40», «11:40»… и последний наступивший слот (мс). */
+function cronSlots(cron: string): string[] {
+  const m = String(cron).trim().match(/^(\d{1,2})\s+([\d,]+)\s+\*\s+\*\s+\*$/);
+  if (!m) return [];
+  return m[2].split(',').map(h => `${h.padStart(2, '0')}:${m[1].padStart(2, '0')}`);
+}
+function lastCronSlot(cron: string, upTo: number): number | null {
+  let t = nextCronRun(cron, upTo - 26 * 3600_000), last: number | null = null;
+  for (let i = 0; t != null && t <= upTo && i < 30; i++) { last = t; t = nextCronRun(cron, t); }
+  return last;
+}
+
+/** Пропущенный плановый проход: слот наступил, а витрину после него так и не сняли (ПК выключен, нет входа…). */
+const MISSED_AFTER_MIN = 40;
+
+export function refreshState(mp: AdMp, now = Date.now()): Ads2CompRefresh {
   const d = db();
   const full = d.prepare('SELECT max(at) at FROM ad_cabinet_snapshot WHERE mp = ?').get(mp) as any;
-  const cards = d.prepare('SELECT max(at) at FROM ad_comp_card WHERE mp = ?').get(mp) as any;
+  const pass = d.prepare('SELECT * FROM ad_comp_pass WHERE mp = ? ORDER BY at DESC LIMIT 1').get(mp) as any;
+  const cards = pass ? { at: pass.at } : d.prepare('SELECT max(at) at FROM ad_comp_card WHERE mp = ?').get(mp) as any;
   const t = listTasks({ type: 'competitor_watch', limit: 30 }).find(x => isMine(x, mp)) ?? null;
-  const nextRuns = listSchedules().filter((s: any) => s.type === 'competitor_watch' && s.enabled && (s.params?.marketplace === 'ozon' ? 'ozon' : 'wb') === mp && s.next_run_at)
-    .map((s: any) => Number(s.next_run_at)).sort((a: number, b: number) => a - b);
+  const scheds = listSchedules().filter((s: any) => s.type === 'competitor_watch' && s.enabled && isMine(s, mp));
+  const nextRuns = scheds.filter((s: any) => s.next_run_at).map((s: any) => Number(s.next_run_at)).sort((a: number, b: number) => a - b);
+  const slots = scheds.flatMap((s: any) => cronSlots(s.cron).map(time => ({ time, light: !!s.params?.light })))
+    .sort((a: { time: string }, b: { time: string }) => a.time.localeCompare(b.time));
+  const cardsAt = cards?.at ? Number(cards.at) : null;
+  // последний слот, которому уже пора было отработать (40 минут на очередь и сам проход), — и после него цен нет
+  const due = Math.max(0, ...scheds.map((s: any) => lastCronSlot(s.cron, now - MISSED_AFTER_MIN * 60_000) ?? 0));
+  const missedAt = due && (cardsAt ?? 0) < due ? due : null;
   return {
-    fullAt: full?.at ? Number(full.at) : null, cardsAt: cards?.at ? Number(cards.at) : null,
+    fullAt: full?.at ? Number(full.at) : null, cardsAt,
+    pass: pass ? { at: Number(pass.at), light: !!pass.light, cards: Number(pass.cards), priced: Number(pass.priced), errors: Number(pass.errors) } : null,
     task: t ? { id: t.id, status: t.status, light: !!t.params?.light, createdAt: t.created_at, finishedAt: t.finished_at ?? null,
       message: t.summary ?? t.error ?? null } : null,
-    nextRuns,
+    nextRuns, slots, missedAt,
   };
 }
 

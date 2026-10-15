@@ -7,9 +7,9 @@
 import './_ads-check-env';
 import { readFileSync } from 'node:fs';
 import { parseNmId, parseOzonSku } from '../api/_lib/competitorWatch';
-import { editWatch, autoSuggest, buildWatch, watchParams, saveCabinetSnapshot, getCompetitors, requestRefresh, posSeries } from '../api/_lib/ads/cabinet';
+import { editWatch, autoSuggest, buildWatch, watchParams, saveCabinetSnapshot, getCompetitors, requestRefresh, refreshState, posSeries } from '../api/_lib/ads/cabinet';
 import { adsDb } from '../api/_lib/ads/store';
-import { listTasks } from '../api/_lib/agentQueue';
+import { listTasks, maintainQueue } from '../api/_lib/agentQueue';
 
 let failed = 0;
 function check(name: string, actual: unknown, expected: unknown): void {
@@ -111,6 +111,19 @@ const yest = new Date(Date.now() + 3 * 3600_000 - 86_400_000).toISOString().slic
 adsDb().prepare('INSERT OR REPLACE INTO ad_comp_card (mp, id, date, at, price) VALUES (?, ?, ?, ?, ?)').run('wb', '390744732', yest, Date.now() - 86_400_000, 3800);
 const b2 = getCompetitors('wb').watch.find(x => x.key === 'SOTA-RGB')!.links.find(l => l.id === '390744732')!;
 check('свежая витрина главнее ночного снимка, цена сутки назад', [b2.price, b2.rating, b2.feedbacks, b2.price1d, !!b2.priceAt], [3500, 4.7, 75, 3800, true]);
+const firstAt = b2.priceAt!;
+for (const t0 = Date.now(); Date.now() - t0 < 5;) { /* следующий проход — позже по времени */ }
+saveCabinetSnapshot('wb', { light: true, errors: ['нет цены'], cards: [{ id: 390744732, rating: 4.7, feedbacks: 76, qty: 30 }] });
+const b3 = getCompetitors('wb').watch.find(x => x.key === 'SOTA-RGB')!.links.find(l => l.id === '390744732')!;
+maintainQueue(); // заводит расписания по умолчанию
+const rs = refreshState('wb');
+check('цену в проход не отдали — остаётся прошлая со своим временем', [b3.price, b3.feedbacks, b3.priceAt === firstAt, rs.pass!.at > firstAt, rs.pass!.priced, rs.pass!.cards], [3500, 76, true, true, 0, 1]);
+check('расписание по МСК', rs.slots.map(s => s.time), ['05:40', '11:40', '16:40']);
+check('сразу после прохода пропуска нет', rs.missedAt, null);
+const mskMidnight = Math.floor((Date.now() + 3 * 3600_000) / 86_400_000) * 86_400_000 - 3 * 3600_000;
+const tomorrow1230 = mskMidnight + 86_400_000 + 12.5 * 3600_000;
+check('завтра в 12:30 без прохода — пропущено 11:40', refreshState('wb', tomorrow1230).missedAt, mskMidnight + 86_400_000 + (11 * 60 + 40) * 60_000);
+check('завтра в 12:10 — 11:40 ещё ждём (40 минут), но ночной 05:40 пропущен', refreshState('wb', mskMidnight + 86_400_000 + (12 * 60 + 10) * 60_000).missedAt, mskMidnight + 86_400_000 + (5 * 60 + 40) * 60_000);
 saveCabinetSnapshot('wb', { ...wbData, daily: [{ date: yest, report: { groups: [{ items: [{ nmId: 1417220162, avgPosition: { current: 14 }, views: { current: 900 } }] }] } }] });
 check('позиция WB за день сохраняется', posSeries('wb', yest, yest).get('1417220162')?.get(yest), 14);
 

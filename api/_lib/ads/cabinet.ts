@@ -263,13 +263,13 @@ export function autoSuggest(mp: AdMp, data: any): number {
 
 /** Параметры задания competitor_watch: кого снимать на витрине (конкуренты + наши товары с привязками). */
 export function watchParams(mp: AdMp): { watch: number[]; ours: number[] } {
-  const { byKey } = ourCatalog(mp);
-  const ours: number[] = [];
-  for (const key of Object.keys(getAllLinks(mp))) {
-    const id = Number(byKey.get(key)?.id);
-    if (Number.isFinite(id) && id > 0) ours.push(id);
-  }
-  return { watch: watchedIds(mp, 80), ours: ours.slice(0, 40) };
+  // Наши карточки с привязками — тем же способом, что и на странице (справочник РНП, а если там товара нет —
+  // номер из снимка кабинета), иначе у такого товара цена так и осталась бы «из аналитики».
+  const row = db().prepare('SELECT json FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT 1').get(mp) as any;
+  let snap: any = null;
+  try { snap = row ? JSON.parse(row.json) : null; } catch { snap = null; }
+  const ours = buildWatch(mp, snap).watch.filter(p => p.links.length).map(p => Number(p.ourId)).filter(id => Number.isFinite(id) && id > 0);
+  return { watch: watchedIds(mp, 80), ours: [...new Set(ours)].slice(0, 40) };
 }
 
 /**

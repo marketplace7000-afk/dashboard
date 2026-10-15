@@ -1648,7 +1648,7 @@ code {
 .cmp-badge { margin-left: 2px; }
 .cmp-check { display: inline-flex; align-items: center; gap: 6px; font-size: 14.5px; color: var(--muted); white-space: nowrap; cursor: pointer; }
 .cmp-check input { width: 16px; height: 16px; }
-.cmp-refresh { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.cmp-refresh { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; flex: 1 1 100%; }
 .cmp-refresh-t { display: grid; gap: 4px; font-size: 14px; flex: 1 1 420px; min-width: 0; }
 .cmp-fresh { font-size: 16px; }
 .cmp-fresh b { font-size: 17px; }

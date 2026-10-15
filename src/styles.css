@@ -694,6 +694,12 @@ code {
 /* Узкое окно: артикулу гарантирован минимум, а подписи под цифрами («клубная цена · API», «⚠ ком.») могут переноситься */
 .pr-table-card table.mp-table th:nth-child(2) { min-width: 150px; }
 .pr-table-card table.mp-table > tbody > tr > td.right > div { white-space: normal; }
+/* Окно до 1280px (у владельца 1150): боковые отступы ячеек меньше, чтобы 8 колонок влезли без прокрутки вбок */
+@media (max-width: 1280px) {
+  .pr-table-card .tbl-scroll thead.mp-head th, .pr-table-card table.mp-table > tbody > tr > td { padding-left: 7px; padding-right: 7px; }
+  .pr-table-card table.mp-table > tbody > tr > td:first-child { padding-right: 3px; }
+  .pr-table-card table.mp-table > tbody > tr > td:last-child { padding-left: 3px; }
+}
 .tbl-scroll table.mp-table td { overflow-wrap: anywhere; }
 
 /* ═══ «Сборщики» (src/pages/AgentHosts.tsx), префикс .ah- (11.10.2026) ═══

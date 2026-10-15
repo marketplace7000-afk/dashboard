@@ -691,6 +691,9 @@ code {
    колонки распределены по ширине, а не прижаты вправо; колонка «Реклама» убрана — советы по рекламе живут в «Советнике») */
 .tbl-scroll table.mp-table { width: 100%; table-layout: auto; } /* auto: проценты — подсказка, но фото (54px) и nowrap-цифры не ужимаются уже содержимого на узких окнах (1150px у владельца) */
 .pr-table-card table.mp-table > tbody > tr > td:first-child { padding-right: 4px; }
+/* Узкое окно: артикулу гарантирован минимум, а подписи под цифрами («клубная цена · API», «⚠ ком.») могут переноситься */
+.pr-table-card table.mp-table th:nth-child(2) { min-width: 150px; }
+.pr-table-card table.mp-table > tbody > tr > td.right > div { white-space: normal; }
 .tbl-scroll table.mp-table td { overflow-wrap: anywhere; }
 
 /* ═══ «Сборщики» (src/pages/AgentHosts.tsx), префикс .ah- (11.10.2026) ═══

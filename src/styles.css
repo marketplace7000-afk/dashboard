@@ -278,7 +278,8 @@ a { color: var(--accent); text-decoration: none; }
   box-shadow: 0 1px 2px rgba(15,23,42,.06);
 }
 
-.content { padding: 8px 28px 60px; max-width: 1280px; }
+/* 15.10.2026, просьба владельца: все разделы во всю ширину окна, как РНП, — без пустого поля справа и обрезанных таблиц. */
+.content { padding: 8px 16px 60px 28px; max-width: none; }
 
 /* Cards */
 .card {
@@ -1411,7 +1412,7 @@ code {
 .pr-page table.table { font-size: 15px; }
 .pr-page table.table th { font-size: 14px; }
 /* «Цены» шире обычных страниц: таблице с 9 колонками тесно в 1280px */
-.content.content-prices { max-width: 1480px; }
+.content.content-prices { max-width: none; }
 
 /* ── «Реклама 2.0» (14.10.2026) ── */
 .ad2 { --ad2-spend: #2563eb; --ad2-norm: #d97706; --ad2-orders: #94a3b8; }

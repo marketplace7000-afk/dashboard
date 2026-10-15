@@ -689,7 +689,8 @@ code {
 
 /* «Цены»: одинаковая сетка колонок на WB и Ozon — ширины заданы в thead в процентах (15.10.2026: расчётные
    колонки распределены по ширине, а не прижаты вправо; колонка «Реклама» убрана — советы по рекламе живут в «Советнике») */
-.tbl-scroll table.mp-table { width: 100%; table-layout: fixed; }
+.tbl-scroll table.mp-table { width: 100%; table-layout: auto; } /* auto: проценты — подсказка, но фото (54px) и nowrap-цифры не ужимаются уже содержимого на узких окнах (1150px у владельца) */
+.pr-table-card table.mp-table > tbody > tr > td:first-child { padding-right: 4px; }
 .tbl-scroll table.mp-table td { overflow-wrap: anywhere; }
 
 /* ═══ «Сборщики» (src/pages/AgentHosts.tsx), префикс .ah- (11.10.2026) ═══

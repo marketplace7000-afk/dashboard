@@ -17,11 +17,13 @@
 import { adsDb, type AdMp } from './store';
 import { getAdsOverview } from './overview';
 import { getAdvisor, ADVISOR_LABEL } from './advisor';
-import { hiddenCards, compCardSeries, refreshState } from './cabinet';
+import { hiddenCards, compCardSeries, cardHistory, refreshState } from './cabinet';
 import { lastAdsSync } from './sync';
 import { getAllLinks } from '../competitorWatch';
 import { getRnp, collectRnp, rnpCollecting } from '../rnp';
 import { mskDate } from '../mskDate';
+import { getMargins, marginAt, priceFloor, type MarginReport } from '../margin';
+import { getSettings as repricerSettings } from '../repricer';
 import type {
   Ads2AdvisorIssue, Ads2IssueSlot, Ads2Pace, Ads2Signal, Ads2SignalRole, Ads2SignalsResponse, Ads2Product,
 } from '../../../shared/ads2';
@@ -115,6 +117,11 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
   const drafts: Draft[] = [];
   const has = (sku: string, code: string) => drafts.some(d => d.sku === sku && d.code === code);
   const target = 5;
+  // Маржа на сервере (этап Б): пол цены и сигналы по ценам.
+  let margins: MarginReport | null = null;
+  try { margins = await getMargins(mp); } catch (e) { notes.push(`Маржа: ${(e as Error).message}`); }
+  const artOf = (p: Ads2Product) => up(mp === 'wb' ? p.article : p.key);
+  const marginOf = (p: Ads2Product) => margins?.items[artOf(p)] ?? null;
 
   // 1. Узкие места «Рекламы» за 7 дней.
   for (const p of ov.products) {
@@ -122,6 +129,7 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
     for (const i of p.issues) {
       const m = ISSUE_MAP[i.code];
       if (!m) continue;
+      if (i.code === 'low_margin' && marginOf(p)?.marginPct != null) continue; // точнее скажет сигнал по марже (п. 6)
       let money: number | null = null;
       if (i.code === 'flagged_but_running' || i.code === 'spend_no_orders') money = p.spend;
       else if (i.code === 'stock_critical') money = p.stock === 0 ? p.spendSinceOut : null;
@@ -192,6 +200,71 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
       }
     }
   } catch (e) { notes.push(`Конкуренты: ${(e as Error).message}`); }
+
+  // 6. Цены (этап Б): маржа ниже порога и цена против подтверждённых конкурентов — с рекомендованной
+  //    ценой ЛК, не ниже пола по марже (порог — настройка репрайсера, по умолчанию 15%).
+  if (margins) {
+    const rs = repricerSettings();
+    const minMargin = rs.minMarginPct;
+    const links = getAllLinks(mp);
+    const compIds = new Set<string>();
+    for (const ls of Object.values(links)) for (const l of ls) if (l.status === 'active') compIds.add(String(l.nmId));
+    let hist = new Map<string, { price: number | null; stock: number | null; name: string }>();
+    try { hist = cardHistory(mp, [...compIds]) as any; } catch (e) { notes.push(`Витрина конкурентов: ${(e as Error).message}`); }
+    const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+    const pctOf = (a: number, b: number) => Math.round((a / b - 1) * 100);
+    for (const p of ov.products) {
+      if (p.archived || !(p.stock != null && p.stock > 0)) continue;
+      const mr = marginOf(p);
+      if (!mr || mr.retail == null) continue;
+      const art = artOf(p);
+      const floor = priceFloor(mr, minMargin);
+      const toBuyer = (retail: number) => Math.round(retail * (1 - mr.spp / 100));
+      const fromBuyer = (b: number) => Math.round(mr.spp > 0 ? b / (1 - mr.spp / 100) : b);
+      const mAt = (retail: number) => { const v = marginAt(mr, retail); return v == null ? '–' : `${Math.round(v)}%`; };
+      // 6a. Маржа ниже порога / в минус.
+      if (mr.marginPct != null && mr.marginPct < minMargin) {
+        const neg = mr.marginPct < 0;
+        drafts.push({
+          sku: p.key, code: 'margin_below_floor', level: neg ? 'critical' : 'warn', role: 'price',
+          title: neg ? 'Товар продаётся в минус' : `Маржа ниже порога ${minMargin}%`,
+          text: `Маржа ${mr.marginPct}% (${rub(mr.marginRub ?? 0)} с штуки) при цене ЛК ${rub(mr.retail)}${mr.buyer ? ` и цене покупателя ${rub(mr.buyer)}` : ''}; порог ${minMargin}%. ${floor ? `Пол цены ЛК — ${rub(floor)} (маржа ${mAt(floor)})` : 'Порог недостижим при этой себестоимости и расходах'}`,
+          action: floor ? 'Поднять цену ЛК до пола в «Ценах» или снизить расходы (реклама, логистика); если рынок не позволяет — пересмотреть закупку' : 'Проверить себестоимость и расходы в «Ценах»; при верных цифрах — выводить товар или менять закупку',
+          rub: neg && mr.marginRub != null ? Math.round(Math.abs(mr.marginRub) * p.orders / 7) : null, prod: prodOf(p),
+        });
+      }
+      // 6b. Против подтверждённых конкурентов (цены с витрины, последний замер).
+      const comps = (links[art] ?? []).filter(l => l.status === 'active').map(l => ({ l, h: hist.get(String(l.nmId)) })).filter(x => x.h && x.h.price != null && x.h.price > 0 && x.h.stock !== 0);
+      if (!comps.length || mr.buyer == null) continue;
+      const prices = comps.map(x => x.h!.price!);
+      const med = median(prices), min = Math.min(...prices);
+      const medConv = ov.medians.pdpToCart;
+      const convLow = p.pdpToCart != null && medConv != null && (p.cardViews ?? 0) >= 50 && p.pdpToCart < medConv * 0.8;
+      const convOk = p.pdpToCart != null && medConv != null && p.pdpToCart >= medConv;
+      if (mr.buyer >= med * 1.08 && (convLow || (p.orders === 0 && (p.cardViews ?? 0) >= 50))) {
+        const targetRetail = fromBuyer(Math.round(med * 0.99));
+        const stepMin = Math.round(mr.retail * 0.85);
+        let rec = Math.max(targetRetail, floor ?? 0, stepMin);
+        const limited = floor != null && targetRetail < floor;
+        rec = Math.min(rec, mr.retail); // рекомендация — снижение, выше текущей не предлагаем
+        if (rec >= mr.retail) continue; // пол не пускает ниже — скажет сигнал по марже
+        drafts.push({
+          sku: p.key, code: 'price_above_market', level: 'warn', role: 'price', title: 'Цена выше рынка',
+          text: `Наша цена покупателю ${rub(mr.buyer)} против медианы ${comps.length} конкурентов ${rub(med)} (${pctOf(mr.buyer, med) > 0 ? '+' : ''}${pctOf(mr.buyer, med)}%)${convLow ? `; в корзину кладут ${p.pdpToCart}% при ${medConv}% по магазину` : '; заказов за 7 дней нет'}. Рекомендованная цена ЛК ${rub(rec)} (покупателю ≈ ${rub(toBuyer(rec))}), маржа станет ${mAt(rec)}${limited ? ' — ниже не пускает пол по марже' : rec === stepMin ? ' — за раз не больше 15%' : ''}`,
+          action: 'Поставить цену в «Ценах» (или акцию / промо); ставку рекламы до этого не поднимать', rub: null, prod: prodOf(p),
+        });
+      } else if (mr.buyer <= min * 0.90 && convOk && p.orders >= 3) {
+        const targetRetail = Math.min(fromBuyer(Math.round(min * 0.98)), Math.round(mr.retail * 1.10));
+        if (targetRetail <= mr.retail) continue;
+        const gain = Math.round((targetRetail - mr.retail) * p.orders / 7);
+        drafts.push({
+          sku: p.key, code: 'price_room', level: 'info', role: 'price', title: 'Есть запас по цене',
+          text: `Мы дешевле самого дешёвого из ${comps.length} конкурентов на ${Math.abs(pctOf(mr.buyer, min))}% (${rub(mr.buyer)} против ${rub(min)}), конверсия в корзину ${p.pdpToCart}% не ниже средней ${medConv}%. Можно поднять цену ЛК до ${rub(targetRetail)} (покупателю ≈ ${rub(toBuyer(targetRetail))}), маржа ${mAt(mr.retail)} → ${mAt(targetRetail)}${gain > 0 ? `, ≈ +${rub(gain)} в день` : ''}`,
+          action: 'Поднять цену в «Ценах» шагом до 10% и посмотреть конверсию 3 дня', rub: gain > 0 ? gain : null, prod: prodOf(p),
+        });
+      }
+    }
+  }
 
   // 5. Кампании: кончился бюджет / упёрлись в дневной лимит — пока товар в наличии.
   for (const c of ov.campaigns) {

@@ -26,6 +26,8 @@ export type RnpMetric = {
   num?: string; den?: string; scale?: number;   // для ratio
   /** Что считать хорошим ростом: 'up' — больше лучше, 'down' — меньше лучше. Для тепловой карты. */
   better?: 'up' | 'down';
+  /** Для kind 'last': как сворачивать по товарам — сумма (остатки) или среднее (цены). По умолчанию сумма. */
+  rollup?: 'sum' | 'avg';
   mps: RnpMp[];
   hint?: string;
 };
@@ -47,6 +49,11 @@ export const RNP_METRICS: RnpMetric[] = [
   { key: 'return_cnt', label: 'Возвраты, шт', group: 'Продажи', unit: 'pcs', kind: 'sum', better: 'down', mps: BOTH },
   { key: 'spp_pct', label: 'СПП / соинвест, %', short: 'СПП', group: 'Продажи', unit: 'pct', kind: 'ratio', num: 'spp_disc', den: 'spp_base', scale: 100, better: 'up', mps: BOTH,
     hint: 'Скидка за счёт площадки по заказам, % от цены продавца. WB — СПП из заказов; Ozon — соинвест: цена продавца против цены, которую заплатил покупатель. За несколько дней и по группе товаров среднее взвешено по сумме заказов' },
+  // Цены по дням (этап Б советника, 15.10.2026): снимок раз в проход, на дату — последний за день.
+  { key: 'price_seller', label: 'Цена ЛК, ₽', short: 'Цена ЛК', group: 'Продажи', unit: 'rub', kind: 'last', rollup: 'avg', mps: BOTH,
+    hint: 'Цена в кабинете со скидкой продавца, до СПП / соинвеста. По группе товаров — среднее. История с 16.10.2026' },
+  { key: 'price_buyer', label: 'Цена покупателя, ₽', short: 'Цена пок.', group: 'Продажи', unit: 'rub', kind: 'last', rollup: 'avg', mps: BOTH,
+    hint: 'WB — цена последней продажи с СПП; Ozon — средняя цена покупателя по отправлениям (с соинвестом). По группе товаров — среднее' },
   // Служебные слагаемые СПП: не показываются, нужны для свёртки.
   { key: 'spp_disc', label: 'СПП, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', mps: [] },
   { key: 'spp_base', label: 'Цена продавца по заказам, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', mps: [] },

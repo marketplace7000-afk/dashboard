@@ -149,15 +149,15 @@ function aggregate(data: RnpResponse, skus: string[], idxs: number[], baseKeys: 
   for (const key of baseKeys) {
     const kind = RNP_METRIC[key]?.kind;
     if (kind === 'last') {
-      // Снимок: берём последний день, где есть хоть одно значение, и складываем товары.
-      let res: number | null = null;
+      // Снимок: берём последний день, где есть хоть одно значение, и складываем товары (цены — усредняем).
+      let res: number | null = null, n = 0;
       for (let j = idxs.length - 1; j >= 0 && res === null; j--) {
         for (const s of skus) {
           const v = data.facts[s]?.[key]?.[idxs[j]];
-          if (v !== null && v !== undefined) res = (res ?? 0) + v;
+          if (v !== null && v !== undefined) { res = (res ?? 0) + v; n++; }
         }
       }
-      out[key] = res;
+      out[key] = res !== null && RNP_METRIC[key]?.rollup === 'avg' && n > 1 ? res / n : res;
     } else {
       let res: number | null = null;
       for (const s of skus) {

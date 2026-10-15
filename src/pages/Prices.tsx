@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { LiveOzonPricing } from '../components/LiveOzonPricing';
 import { LiveWbPricing } from '../components/LiveWbPricing';
 import { Repricer } from '../components/Repricer';
+import { PriceAdvice } from '../components/PriceAdvice';
 
 // Третья вкладка — репрайсер. Он про WB и живёт рядом с ценами, а не в
 // «Конкурентах»: там разовый поиск по выдаче, здесь работа с нашим прайсом.
@@ -53,6 +54,8 @@ export function Prices() {
           <span className="muted" style={{ marginLeft: 6 }}>предложения</span>
         </button>
       </div>
+
+      {mp !== 'repricer' && <PriceAdvice mp={mp} />}
 
       {mp === 'wb' && <LiveWbPricing />}
 

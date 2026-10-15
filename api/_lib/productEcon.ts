@@ -178,7 +178,7 @@ function factVals(f: FactItem | undefined) {
 // ─── Wildberries ────────────────────────────────────────────────────────────
 
 /** Цены WB из прогретого кэша: даёт связку артикул ↔ nmId. */
-async function wbSkuToNm(): Promise<Map<string, number>> {
+export async function wbSkuToNm(): Promise<Map<string, number>> {
   const key = makeUpstreamCacheKey('wb:discounts', 'GET', 'api/v2/list/goods/filter', '?limit=1000', undefined);
   const out = new Map<string, number>();
   const cached = await cacheGet<{ text: string }>(key);
@@ -227,7 +227,7 @@ function ozonRatesFor(row: any, model: Fulfilment): OzonRates {
 }
 
 /** Цены и комиссии Ozon из прогретого кэша. */
-async function ozonPriceRows(): Promise<any[]> {
+export async function ozonPriceRows(): Promise<any[]> {
   const key = makeUpstreamCacheKey('ozon-seller', 'POST', 'v5/product/info/prices', '',
     JSON.stringify({ filter: { visibility: 'ALL' }, limit: 100 }));
   const cached = await cacheGet<{ text: string }>(key);

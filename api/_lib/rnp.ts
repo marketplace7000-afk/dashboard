@@ -321,6 +321,42 @@ async function collectWbStock(): Promise<string> {
   return `остатки WB: ${rows} значений на ${today}`;
 }
 
+/**
+ * Цены по дням (этап Б советника, 15.10.2026): цена ЛК (ценовые API, тот же кэш, что у листа «Цены»)
+ * и цена покупателя (WB — последняя продажа с СПП, Ozon — средняя по отправлениям с соинвестом).
+ * Снимок на сегодня; из него советник видит «наша цена выросла» без пересчёта по заказам.
+ */
+async function collectPrices(mp: RnpMp): Promise<string> {
+  const today = mskDateOf(Date.now());
+  const facts: DayFacts = new Map();
+  const items = rnpItems(mp);
+  // ключ РНП по артикулу (UPPER): WB — nmId, Ozon — артикул как есть
+  const byArt = new Map<string, string>();
+  for (const it of items) { if (it.article) byArt.set(up(it.article), it.sku); if (mp === 'ozon') byArt.set(up(it.sku), it.sku); }
+  const seller = await sellerPrices(mp);
+  let n = 0;
+  for (const [art, p] of Object.entries(seller)) {
+    const sku = byArt.get(art);
+    if (sku && p > 0) { bump(facts, today, sku, 'price_seller', p); n++; }
+  }
+  let b = 0;
+  if (mp === 'wb') {
+    const { getWbBuyerPrices } = await import('./wbBuyerPrices');
+    const bp = await getWbBuyerPrices();
+    for (const [nm, v] of Object.entries(bp.items)) if (v.price > 0) { bump(facts, today, nm, 'price_buyer', v.price); b++; }
+  } else {
+    const { getOzonBuyerPrices } = await import('./ozonBuyerPrices');
+    const bp = await getOzonBuyerPrices();
+    for (const [art, v] of Object.entries(bp.items)) {
+      const sku = byArt.get(up(art));
+      if (sku && v.buyer > 0) { bump(facts, today, sku, 'price_buyer', v.buyer); b++; }
+    }
+  }
+  const rows = writeDays(mp, [today], ['price_seller', 'price_buyer'], facts);
+  markCollected(`${mp}:prices`);
+  return `цены ${mp === 'wb' ? 'WB' : 'Ozon'}: ЛК ${n}, покупателя ${b} → ${rows} значений на ${today}`;
+}
+
 async function wbCatalog(items: Map<string, RnpItem>): Promise<void> {
   try {
     const entry = cacheGetNewestByPrefix<{ text?: string }>(makeUpstreamCachePrefix('wb:content', 'POST', 'content/v2/get/cards/list'));
@@ -889,6 +925,7 @@ export function collectRnp(only?: RnpMp): Promise<string[]> {
       await step('позиции WB', () => collectWbPositions());
       await step('воронка WB', () => collectWbFunnel());
       await step('каталог WB', async () => { await wbCatalog(items); await fillSheetCategories(items); upsertItems('wb', [...items.values()]); return `каталог WB: ${items.size} товаров`; });
+      await step('цены WB', () => collectPrices('wb'));
     }
     if (!only || only === 'ozon') {
       const items = new Map<string, RnpItem>();
@@ -897,6 +934,7 @@ export function collectRnp(only?: RnpMp): Promise<string[]> {
       await step('остатки Ozon', () => collectOzonStock());
       await step('каталог Ozon', async () => { await ozonCatalog(items); await fillSheetCategories(items); upsertItems('ozon', [...items.values()]); return `каталог Ozon: ${items.size} товаров`; });
       await step('реклама Ozon', () => collectOzonAds());
+      await step('цены Ozon', () => collectPrices('ozon'));
     }
     console.warn('[rnp]', log.join(' · '));
     return log;
@@ -1012,31 +1050,43 @@ export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise
   }
 
   res.present = [...present];
-  for (const src of ['sales', 'ads', 'stock', 'analytics', 'funnel']) {
+  for (const src of ['sales', 'ads', 'stock', 'analytics', 'funnel', 'prices']) {
     const v = metaGet(`collected:${mp}:${src}`);
     if (v) res.collectedAt[src] = Number(v);
   }
-  // Текущая цена, маржа и ROI — снимок листа «Цены» (его шлёт браузер, пока лист
-  // открыт; тот же снимок берёт «Управление рекламой»). Цифры совпадают с таблицей цен.
+  // Текущая цена, маржа и ROI. С 15.10.2026 (этап Б советника) считаются на сервере теми же
+  // формулами, что на листе «Цены» (api/_lib/margin.ts) — без открытого листа. Снимок листа
+  // (его шлёт браузер, пока лист открыт) остаётся запасным путём, если серверный расчёт пуст.
+  let served = false;
   try {
-    const raw = getUiState().state[`prices-${mp}:margins`];
-    const j = raw ? JSON.parse(raw) : null;
-    if (j?.items) {
+    const { getMargins } = await import('./margin');
+    const m = await getMargins(mp);
+    if (m.withMargin) {
       res.prices = {};
-      for (const [k, v] of Object.entries<any>(j.items)) {
-        if (v?.view) res.prices[k] = v.view;
-        // Снимок старого формата (без view, его пишет вкладка со старой версией сайта):
-        // маржу берём из него, ROI в нём нет.
-        else if (v) res.prices[k] = { price: null, marginPct: v.marginPct ?? null, marginRub: v.marginRub ?? null, roi: null, roiStatus: null };
-      }
-      res.pricesAt = Number(j.at) || null;
+      for (const [art, r] of Object.entries(m.items)) res.prices[art] = { price: r.buyer, marginPct: r.marginPct, marginRub: r.marginRub, roi: r.roi, roiStatus: r.roiStatus };
+      res.pricesAt = m.at;
+      served = true;
     }
-  } catch { /* снимка нет — блок цены просто не показываем */ }
-  // Маржа и ROI живут только в снимке листа «Цены»: если он пуст или старый — говорим, как обновить.
-  const sheet = `«Цены» → ${mp === 'wb' ? 'Wildberries' : 'Ozon'}`;
-  const withMargin = Object.values(res.prices ?? {}).filter(p => p.marginPct !== null).length;
-  if (!res.prices || !withMargin) notes.push(`Маржа и ROI берутся с листа ${sheet}, а свежего расчёта оттуда ещё нет. Откройте этот лист и дождитесь загрузки — цифры появятся здесь после обновления страницы.`);
-  else if (res.pricesAt && Date.now() - res.pricesAt > 2 * DAY_MS) notes.push(`Маржа и ROI — по расчёту листа ${sheet} от ${new Date(res.pricesAt + 3 * 3_600_000).toISOString().slice(0, 10).split('-').reverse().join('.')}. Откройте лист, чтобы обновить.`);
+  } catch (e) { notes.push(`Маржа на сервере не посчиталась: ${(e as Error).message.slice(0, 120)}`); }
+  if (!served) {
+    try {
+      const raw = getUiState().state[`prices-${mp}:margins`];
+      const j = raw ? JSON.parse(raw) : null;
+      if (j?.items) {
+        res.prices = {};
+        for (const [k, v] of Object.entries<any>(j.items)) {
+          if (v?.view) res.prices[k] = v.view;
+          // Снимок старого формата (без view, его пишет вкладка со старой версией сайта):
+          // маржу берём из него, ROI в нём нет.
+          else if (v) res.prices[k] = { price: null, marginPct: v.marginPct ?? null, marginRub: v.marginRub ?? null, roi: null, roiStatus: null };
+        }
+        res.pricesAt = Number(j.at) || null;
+      }
+    } catch { /* снимка нет — блок цены просто не показываем */ }
+    const sheet = `«Цены» → ${mp === 'wb' ? 'Wildberries' : 'Ozon'}`;
+    const withMargin = Object.values(res.prices ?? {}).filter(p => p.marginPct !== null).length;
+    if (!res.prices || !withMargin) notes.push(`Маржа и ROI пока не посчитаны: нет себестоимости или цены ЛК в кэше площадки. Откройте лист ${sheet} — его расчёт подхватится.`);
+  }
   res.sellerPrices = await sellerPrices(mp);
   if (!rows.length) notes.push('За выбранный период данных ещё нет: сбор идёт раз в 2 часа, первый проход после запуска сервера — в течение 10–30 минут.');
   if (present.has('stocks') && salesStart && from < salesStart) notes.push(`История собирается с ${salesStart.split('-').reverse().join('.')}: раньше этой даты данных нет.`);

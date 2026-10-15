@@ -113,7 +113,7 @@ export function Repricer() {
                 ))}
               </select>
             </label>
-            {num('minMarginPct', 'Минимальная маржа', '%')}
+            {num('minMarginPct', 'Минимальная маржа (репрайсер WB)', '%')}
             {num('undercutRub', 'Подрезать на', '₽')}
             {num('maxStepPct', 'Шаг за раз', '% от цены')}
             {num('minIntervalHours', 'Не чаще чем раз в', 'ч')}
@@ -124,6 +124,24 @@ export function Repricer() {
                 onChange={e => setDraft({ ...draft, stopList: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
               />
             </label>
+          </div>
+        )}
+        {draft && (
+          <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
+            <div className="card-title" style={{ fontSize: 13 }}>План маржи месяца — для советника и пола цены (ниже плана менеджеры не получают KPI; «край» = план + запас; цель — к чему стремимся)</div>
+            <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              {([['month', 'Месяц', 'ГГГГ-ММ'], ['wb', 'План WB', '%'], ['ozon', 'План Ozon', '%'], ['guardPct', 'Запас над планом', 'п.п.'], ['targetPct', 'Цель', '%']] as const).map(([k, label, suffix]) => (
+                <label key={k} style={{ display: 'grid', gap: 4 }}>
+                  <span className="card-title" style={{ fontSize: 13 }}>{label}</span>
+                  <span className="row gap-8">
+                    <input type={k === 'month' ? 'text' : 'number'} step="0.1" className="input" style={{ width: k === 'month' ? 100 : 90 }}
+                      value={String(draft.marginPlan?.[k] ?? '')}
+                      onChange={e => setDraft({ ...draft, marginPlan: { ...draft.marginPlan, [k]: k === 'month' ? e.target.value : Number(e.target.value) } })} />
+                    <span className="muted" style={{ fontSize: 13 }}>{suffix}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
           </div>
         )}
       </div>

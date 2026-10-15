@@ -59,7 +59,30 @@ export type RepricerSettings = {
    */
   confirmedByClient: boolean;
   updatedAt: number;
+  /**
+   * План маржи месяца по площадкам (владелец, 15.10.2026): ниже плана менеджеры не получают KPI,
+   * поэтому «край» — план + запас (2 п.п.), желательно — цель (20%+). Советник и пол цены считают от края.
+   */
+  marginPlan: MarginPlan;
 };
+
+export type MarginPlan = {
+  /** Месяц плана, YYYY-MM. */
+  month: string;
+  /** Минимум по плану, % маржи. */
+  wb: number; ozon: number;
+  /** Запас над планом, п.п.: ниже плана + запас — «на грани». */
+  guardPct: number;
+  /** Желательная маржа, %. */
+  targetPct: number;
+};
+
+/** Пороги маржи площадки: план, край (план + запас) и цель. */
+export function marginThresholds(mp: 'wb' | 'ozon'): { month: string; plan: number; floor: number; target: number } {
+  const p = getSettings().marginPlan;
+  const plan = Number(mp === 'wb' ? p.wb : p.ozon) || 0;
+  return { month: p.month, plan, floor: Math.round((plan + (Number(p.guardPct) || 0)) * 10) / 10, target: Number(p.targetPct) || plan };
+}
 
 /**
  * Значения по умолчанию. Осознанно осторожные: лучше не предложить снижение,
@@ -76,6 +99,9 @@ export const DEFAULT_SETTINGS: RepricerSettings = {
   stopList: [],
   confirmedByClient: false,
   updatedAt: 0,
+  // Октябрь 2026, слова владельца 15.10: «на WB самый минимум 15,1%, на Ozon 14,4% — план на октябрь;
+  // держать на 2% больше — это край, но желательно 20%+».
+  marginPlan: { month: '2026-10', wb: 15.1, ozon: 14.4, guardPct: 2, targetPct: 20 },
 };
 
 const FILE = process.env.REPRICER_FILE || join(process.cwd(), 'av-data', 'repricer.json');
@@ -87,7 +113,7 @@ export function getSettings(): RepricerSettings {
     const raw = JSON.parse(readFileSync(FILE, 'utf8')) as Partial<RepricerSettings>;
     // Разворачиваем поверх умолчаний: файл может быть от прошлой версии и не
     // знать новых полей, и это не повод терять остальные настройки.
-    cache = { ...DEFAULT_SETTINGS, ...raw, mode: 'suggest' };
+    cache = { ...DEFAULT_SETTINGS, ...raw, mode: 'suggest', marginPlan: { ...DEFAULT_SETTINGS.marginPlan, ...(raw.marginPlan ?? {}) } };
   } catch (e) {
     if ((e as NodeJS.ErrnoException)?.code !== 'ENOENT') {
       noteSwallowed('repricer', 'настройки не прочитаны, работаем на умолчаниях', e);
@@ -103,6 +129,7 @@ export function setSettings(patch: Partial<RepricerSettings>): RepricerSettings 
     ...patch,
     mode: 'suggest',                       // режим не меняется через API
     stopList: (patch.stopList ?? getSettings().stopList).map(normSku).filter(Boolean),
+    marginPlan: { ...getSettings().marginPlan, ...(patch.marginPlan ?? {}) },
     updatedAt: Date.now(),
   };
   cache = next;

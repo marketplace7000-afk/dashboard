@@ -56,6 +56,29 @@ function PaceCards({ issue }: { issue: Ads2AdvisorIssue }) {
   );
 }
 
+/** Маржа месяца против плана (план владельца: ниже — нет KPI; край = план + запас; цель 20%+). */
+function MonthMargin({ m }: { m: NonNullable<Ads2AdvisorIssue['monthMargin']> }) {
+  const f1 = (v: number) => nf1.format(v);
+  const state = m.pct == null ? 'none' : m.pct < m.plan ? 'bad' : m.pct < m.floor ? 'warn' : m.pct >= m.target ? 'good' : 'ok';
+  const label = state === 'none' ? 'маржа не посчитана' : state === 'bad' ? 'ниже плана — KPI под угрозой' : state === 'warn' ? 'на грани плана' : state === 'good' ? 'цель достигнута' : 'выше края, ниже цели';
+  const mon = `${m.month.slice(5)}.${m.month.slice(0, 4)}`;
+  return (
+    <section className={`card sg-mm sg-mm-${state}`}>
+      <div className="sg-mm-main">
+        <span className="card-title">Маржа месяца ({mon})</span>
+        <b className="sg-mm-v">{m.pct == null ? '–' : `${f1(m.pct)}%`}</b>
+        <span className={`chip ${state === 'bad' ? 'bad' : state === 'warn' ? 'warn' : state === 'good' ? 'good' : 'info'}`}>{label}</span>
+      </div>
+      <div className="sg-mm-scale" aria-hidden>
+        {[['план', m.plan], ['край', m.floor], ['цель', m.target]].map(([t, v]) => (
+          <span key={String(t)} className={`sg-mm-mark ${m.pct != null && m.pct >= Number(v) ? 'on' : ''}`}><b>{f1(Number(v))}%</b><span>{t}</span></span>
+        ))}
+      </div>
+      <div className="muted sg-mm-sub">Средняя по выручке с начала месяца при текущей марже товаров; маржа известна по {Math.round(m.covered * 100)}% выручки ({kRub(m.revenue)} всего). План и запас — «Цены» → «Репрайсер».</div>
+    </section>
+  );
+}
+
 // ─── Сигналы ────────────────────────────────────────────────────────────────
 
 function SignalRow({ s, onAct, busy }: { s: Ads2Signal; onAct: (id: number, action: 'done' | 'snooze' | 'reopen') => void; busy: boolean }) {
@@ -292,6 +315,7 @@ export function RnpAdvisorSheet({ mp }: { mp: Ads2Mp }) {
         <>
           <PaceCards issue={issue} />
           {issue.pace?.note && <div className="rnp-note">{issue.pace.note}</div>}
+          {issue.monthMargin && <MonthMargin m={issue.monthMargin} />}
           <section className="card sg-summary">
             <div className="sg-sumline">
               <b>{openCnt ? `Открытых сигналов ${openCnt}${crit ? `, срочных ${crit}` : ''}` : 'Открытых сигналов нет'}</b>

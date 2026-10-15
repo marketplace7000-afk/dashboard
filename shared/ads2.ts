@@ -273,6 +273,11 @@ export type Ads2AdvisorIssue = {
     down: Ads2AdvisorProduct[]; up: Ads2AdvisorProduct[] } | null;
   /** Снимок сигналов на момент выпуска (статусы — свежие, из таблицы). */
   signals: Ads2Signal[];
+  /**
+   * Маржа месяца по площадке (этап Б, план владельца 15.10): средневзвешенная по заказам с начала
+   * месяца при текущей марже товаров; план, край (план + запас) и цель; доля выручки, по которой маржа известна.
+   */
+  monthMargin: { month: string; pct: number | null; plan: number; floor: number; target: number; revenue: number; covered: number } | null;
   /** Когда обновлялись источники (мс): РНП, реклама, витрина конкурентов. */
   dataAt: { rnp: number | null; ads: number | null; comp: number | null };
   notes: string[];

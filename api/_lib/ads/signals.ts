@@ -23,7 +23,7 @@ import { getAllLinks } from '../competitorWatch';
 import { getRnp, collectRnp, rnpCollecting } from '../rnp';
 import { mskDate } from '../mskDate';
 import { getMargins, marginAt, priceFloor, type MarginReport } from '../margin';
-import { getSettings as repricerSettings } from '../repricer';
+import { marginThresholds } from '../repricer';
 import type {
   Ads2AdvisorIssue, Ads2IssueSlot, Ads2Pace, Ads2Signal, Ads2SignalRole, Ads2SignalsResponse, Ads2Product,
 } from '../../../shared/ads2';
@@ -109,7 +109,7 @@ function prodOf(p: Ads2Product): Draft['prod'] {
 }
 
 /** Собрать черновики сигналов по площадке из всех источников. */
-async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; notes: string[]; overviewProducts: Ads2Product[] }> {
+async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; notes: string[]; overviewProducts: Ads2Product[]; monthMargin: Ads2AdvisorIssue['monthMargin'] }> {
   const notes: string[] = [];
   const ov = await getAdsOverview(mp, 7);
   const byKey = new Map(ov.products.map(p => [p.key, p]));
@@ -204,8 +204,11 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
   // 6. Цены (этап Б): маржа ниже порога и цена против подтверждённых конкурентов — с рекомендованной
   //    ценой ЛК, не ниже пола по марже (порог — настройка репрайсера, по умолчанию 15%).
   if (margins) {
-    const rs = repricerSettings();
-    const minMargin = rs.minMarginPct;
+    // План маржи месяца (владелец 15.10): ниже плана — KPI под угрозой; край = план + запас; цель — 20%+.
+    const th = marginThresholds(mp);
+    const minMargin = th.floor;
+    const f1 = (v: number) => String(Math.round(v * 10) / 10).replace('.', ',');
+    const planText = `план ${th.month.slice(5)}.${th.month.slice(0, 4)} ${f1(th.plan)}%, держим ≥ ${f1(th.floor)}%, цель ${f1(th.target)}%`;
     const links = getAllLinks(mp);
     const compIds = new Set<string>();
     for (const ls of Object.values(links)) for (const l of ls) if (l.status === 'active') compIds.add(String(l.nmId));
@@ -225,8 +228,9 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
       // 6a. Маржа ниже порога / в минус — только у товаров, которые продаются или рекламируются
       //     (мёртвые карточки без заказов и расхода ленту не засоряют). Уровень: минус — срочно,
       //     меньше 5% — внимание, ниже порога — к сведению.
-      if (mr.marginPct != null && mr.marginPct < minMargin && (p.orders > 0 || p.spend > 0)) {
+      if (mr.marginPct != null && mr.marginPct < th.target && (p.orders > 0 || p.spend > 0)) {
         const neg = mr.marginPct < 0;
+        const belowPlan = mr.marginPct < th.plan, onEdge = !belowPlan && mr.marginPct < th.floor;
         const inp: any = mr.input ?? {};
         // Что съедает маржу — чтобы было ясно, цена ли решает или расходы.
         const eats = [`комиссия ${Math.round(inp.commission ?? 0)}%`, `реклама ${Math.round(inp.drr ?? 0)}% (ДРР)`,
@@ -234,10 +238,10 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
         // Пол дальше чем в полутора ценах — ценой не вытянуть, это про расходы.
         const reachable = floor != null && floor <= mr.retail * 1.5;
         drafts.push({
-          sku: p.key, code: 'margin_below_floor', level: neg ? 'critical' : mr.marginPct < 5 ? 'warn' : 'info', role: 'price',
-          title: neg ? 'Товар продаётся в минус' : `Маржа ниже порога ${minMargin}%`,
-          text: `Маржа ${mr.marginPct}% (${rub(mr.marginRub ?? 0)} с штуки) при цене ЛК ${rub(mr.retail)}${mr.buyer ? ` и цене покупателя ${rub(mr.buyer)}` : ''}; порог ${minMargin}%. Съедают: ${eats}. ${reachable ? `Пол цены ЛК — ${rub(floor!)} (маржа ${mAt(floor!)})` : 'Ценой не вытянуть — нужно снижать расходы или пересматривать закупку'}`,
-          action: reachable ? 'Поднять цену ЛК до пола в «Ценах» или снизить ДРР (ставки в «Автопилоте»)' : 'Снизить ДРР (пауза или ставка вниз в «Автопилоте»), проверить себестоимость и логистику; при верных цифрах — выводить товар',
+          sku: p.key, code: 'margin_below_floor', level: neg || belowPlan ? 'critical' : onEdge ? 'warn' : 'info', role: 'price',
+          title: neg ? 'Товар продаётся в минус' : belowPlan ? 'Маржа ниже плана месяца' : onEdge ? 'Маржа на грани плана' : `Маржа ниже цели ${f1(th.target)}%`,
+          text: `Маржа ${mr.marginPct}% (${rub(mr.marginRub ?? 0)} с штуки) при цене ЛК ${rub(mr.retail)}${mr.buyer ? ` и цене покупателя ${rub(mr.buyer)}` : ''}; ${planText}. Съедают: ${eats}. ${reachable ? `Цена ЛК для края — ${rub(floor!)} (маржа ${mAt(floor!)})` : 'Ценой не вытянуть — нужно снижать расходы или пересматривать закупку'}`,
+          action: reachable ? 'Поднять цену ЛК до края в «Ценах» или снизить ДРР (ставки в «Автопилоте»)' : 'Снизить ДРР (пауза или ставка вниз в «Автопилоте»), проверить себестоимость и логистику; при верных цифрах — выводить товар',
           rub: neg && mr.marginRub != null ? Math.round(Math.abs(mr.marginRub) * p.orders / 7) : null, prod: prodOf(p),
         });
       }
@@ -274,6 +278,43 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
     }
   }
 
+  // 7. Маржа месяца по площадке: средневзвешенная по выручке с начала месяца при текущей марже товаров.
+  //    Ниже плана — KPI менеджеров под угрозой; ниже края — предупреждение.
+  let monthMargin: Ads2AdvisorIssue['monthMargin'] = null;
+  if (margins) {
+    try {
+      const th = marginThresholds(mp);
+      const today = mskDate(0);
+      const start = `${today.slice(0, 7)}-01`;
+      const rnp = await getRnp(mp, start, today);
+      let revAll = 0, revCov = 0, profit = 0;
+      for (const p of ov.products) {
+        if (p.archived) continue;
+        const arr = rnp.facts[p.key]?.ordered_amount;
+        if (!arr) continue;
+        const rev = arr.reduce<number>((s, v) => s + (v ?? 0), 0);
+        if (rev <= 0) continue;
+        revAll += rev;
+        const mr = marginOf(p);
+        if (mr?.marginPct == null) continue;
+        revCov += rev; profit += rev * mr.marginPct / 100;
+      }
+      const pct = revCov > 0 ? Math.round(profit / revCov * 1000) / 10 : null;
+      monthMargin = { month: today.slice(0, 7), pct, plan: th.plan, floor: th.floor, target: th.target, revenue: Math.round(revAll), covered: revAll > 0 ? Math.round(revCov / revAll * 100) / 100 : 0 };
+      if (pct != null && revCov > 0 && pct < th.floor && monthMargin.covered >= 0.5) {
+        const f1 = (v: number) => String(Math.round(v * 10) / 10).replace('.', ',');
+        const below = pct < th.plan;
+        drafts.push({
+          sku: 'mp:plan', code: 'plan_margin', level: below ? 'critical' : 'warn', role: 'price',
+          title: below ? `Маржа месяца ниже плана ${f1(th.plan)}%` : `Маржа месяца на грани плана`,
+          text: `Средняя маржа ${mp === 'wb' ? 'WB' : 'Ozon'} с начала месяца ${f1(pct)}% (по ${Math.round(monthMargin.covered * 100)}% выручки с известной маржой); план ${f1(th.plan)}%, край ${f1(th.floor)}%, цель ${f1(th.target)}%${below ? ' — KPI менеджеров под угрозой' : ''}`,
+          action: 'Разобрать товары с маржой ниже плана ниже в ленте: цена, ДРР, акции; сначала те, где выручка больше',
+          rub: null, prod: { adSku: null, article: 'Вся площадка', name: `${mp === 'wb' ? 'Wildberries' : 'Ozon'} · маржа месяца`, photo: '', link: null },
+        });
+      }
+    } catch (e) { notes.push(`Маржа месяца: ${(e as Error).message}`); }
+  }
+
   // 5. Кампании: кончился бюджет / упёрлись в дневной лимит — пока товар в наличии.
   for (const c of ov.campaigns) {
     const prods = c.items.map(it => byAd.get(it.sku)).filter((p): p is Ads2Product => !!p && !p.archived && !p.flag);
@@ -292,7 +333,7 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
         action: 'Если ДРР в норме и товар в наличии — поднять лимит; иначе так и оставить', rub: null, prod: prodOf(first) });
     }
   }
-  return { drafts, notes: [...notes, ...ov.notes.filter(n => !/раз в 2 часа/.test(n))], overviewProducts: ov.products };
+  return { drafts, notes: [...notes, ...ov.notes.filter(n => !/раз в 2 часа/.test(n))], overviewProducts: ov.products, monthMargin };
 }
 
 const LEVEL_ORDER: Record<string, number> = { critical: 0, warn: 1, info: 2 };
@@ -316,8 +357,8 @@ export function sortSignals(xs: Ads2Signal[]): Ads2Signal[] {
 }
 
 /** Пересчитать сигналы площадки: открытые обновить, пропавшие закрыть, отложенные с истёкшим сроком вернуть. */
-async function recomputeSignals(mp: AdMp, now: number): Promise<{ signals: Ads2Signal[]; notes: string[]; products: Ads2Product[] }> {
-  const { drafts, notes, overviewProducts } = await draftSignals(mp, now);
+async function recomputeSignals(mp: AdMp, now: number): Promise<{ signals: Ads2Signal[]; notes: string[]; products: Ads2Product[]; monthMargin: Ads2AdvisorIssue['monthMargin'] }> {
+  const { drafts, notes, overviewProducts, monthMargin } = await draftSignals(mp, now);
   const d = db();
   const seen = new Set<string>();
   const ins = d.prepare(`INSERT INTO signal (mp, sku, code, level, role, title, text, action, rub, data, since, last_seen, status)
@@ -342,7 +383,7 @@ async function recomputeSignals(mp: AdMp, now: number): Promise<{ signals: Ads2S
     d.prepare(`DELETE FROM signal WHERE status = 'gone' AND COALESCE(status_at, last_seen) < ?`).run(now - 30 * DAY);
     d.exec('COMMIT');
   } catch (e) { d.exec('ROLLBACK'); throw e; }
-  return { signals: listSignals(mp, now), notes, products: overviewProducts };
+  return { signals: listSignals(mp, now), notes, products: overviewProducts, monthMargin };
 }
 
 /** Текущие сигналы площадки (кроме закрытых). */
@@ -419,7 +460,7 @@ export function buildIssue(mp: AdMp, slot: Ads2IssueSlot, opts: { collect?: bool
       }
     }
     const now = Date.now();
-    const { signals, notes: n2, products } = await recomputeSignals(mp, now);
+    const { signals, notes: n2, products, monthMargin } = await recomputeSignals(mp, now);
     const p = await pace(mp, slot, now, products).catch(e => { notes.push(`Темп дня: ${(e as Error).message}`); return null; });
     const adv = await getAdvisor(mp);
     const rnpAt = (await getRnp(mp, mskDate(0), mskDate(0))).collectedAt;
@@ -429,6 +470,7 @@ export function buildIssue(mp: AdMp, slot: Ads2IssueSlot, opts: { collect?: bool
       mp, slot, date: mskDate(0), at: now, pace: p,
       yesterday: { date: adv.date, baseFrom: adv.baseFrom, baseTo: adv.baseTo, summary: adv.summary, drivers: adv.drivers, day: adv.day, base: adv.base, weekAgo: adv.weekAgo, down: adv.down.slice(0, 15), up: adv.up.slice(0, 8) },
       signals: signals.filter(s => s.status !== 'done'),
+      monthMargin,
       dataAt: { rnp: Math.max(0, ...Object.values(rnpAt)) || null, ads: lastAdsSync()?.at ?? null, comp: compAt },
       notes: [...new Set([...notes, ...n2, ...adv.notes])],
     };

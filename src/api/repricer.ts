@@ -18,6 +18,8 @@ export type RepricerSettings = {
   stopList: string[];
   confirmedByClient: boolean;
   updatedAt: number;
+  /** План маржи месяца по площадкам (15.10.2026): план, запас над ним (край) и желательная цель. */
+  marginPlan: { month: string; wb: number; ozon: number; guardPct: number; targetPct: number };
 };
 
 export type Suggestion = {

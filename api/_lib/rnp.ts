@@ -339,19 +339,17 @@ async function collectPrices(mp: RnpMp): Promise<string> {
     const sku = byArt.get(art);
     if (sku && p > 0) { bump(facts, today, sku, 'price_seller', p); n++; }
   }
+  // Цена покупателя — из серверной маржи: там первый источник — витрина, снятая Агентом 3
+  // (наши карточки, 4 прохода в день), дальше продажи / соинвест / память.
   let b = 0;
-  if (mp === 'wb') {
-    const { getWbBuyerPrices } = await import('./wbBuyerPrices');
-    const bp = await getWbBuyerPrices();
-    for (const [nm, v] of Object.entries(bp.items)) if (v.price > 0) { bump(facts, today, nm, 'price_buyer', v.price); b++; }
-  } else {
-    const { getOzonBuyerPrices } = await import('./ozonBuyerPrices');
-    const bp = await getOzonBuyerPrices();
-    for (const [art, v] of Object.entries(bp.items)) {
-      const sku = byArt.get(up(art));
-      if (sku && v.buyer > 0) { bump(facts, today, sku, 'price_buyer', v.buyer); b++; }
+  try {
+    const { getMargins } = await import('./margin');
+    const m = await getMargins(mp);
+    for (const r of Object.values(m.items)) {
+      const sku = mp === 'wb' ? r.id : byArt.get(r.article);
+      if (sku && r.buyer != null && r.buyer > 0) { bump(facts, today, sku, 'price_buyer', r.buyer); b++; }
     }
-  }
+  } catch { /* маржа не посчиталась — цену покупателя за день не пишем */ }
   const rows = writeDays(mp, [today], ['price_seller', 'price_buyer'], facts);
   markCollected(`${mp}:prices`);
   return `цены ${mp === 'wb' ? 'WB' : 'Ozon'}: ЛК ${n}, покупателя ${b} → ${rows} значений на ${today}`;

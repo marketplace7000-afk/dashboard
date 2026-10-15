@@ -25,6 +25,7 @@ import { getOzonBuyerPrices } from './ozonBuyerPrices';
 import { getWbShowcase } from './wbShowcase';
 import { getOzonShowcase } from './ozonShowcase';
 import { getUiState } from './uiState';
+import { cardHistory } from './ads/cabinet';
 import { cacheGet, makeUpstreamCacheKey } from './cache';
 import { normSku } from './costs';
 import { mskDate } from './mskDate';
@@ -58,7 +59,24 @@ export type MarginReport = {
 };
 
 const SHOWCASE_FRESH_MS = 6 * 3600_000;
+/** Витрина от Агента 3 (проходы 05:40 / 11:20 / 14:50 / 16:50): годна до следующего утреннего прохода. */
+const AGENT_FRESH_MS = 26 * 3600_000;
 const FRESH_SALE_DAYS = 7;
+
+/**
+ * Цена покупателя с витрины, снятая Агентом 3 (ad_comp_card по нашим номерам) — самый свежий
+ * источник: это ровно та цифра, что видит покупатель на сайте. Вопрос владельца 15.10:
+ * «у нас же работает агент, который собирает цену покупателя — почему она не подтягивается».
+ */
+function agentPrices(mp: MarginMp, ids: string[], now: number): Map<string, { price: number; at: number }> {
+  const out = new Map<string, { price: number; at: number }>();
+  try {
+    for (const [id, c] of cardHistory(mp, ids)) {
+      if (c.price != null && c.price > 0 && now - c.at <= AGENT_FRESH_MS) out.set(id, { price: Math.round(c.price), at: c.at });
+    }
+  } catch { /* витрины нет — остальные источники */ }
+  return out;
+}
 const CACHE_MS = 20 * 60_000;
 const up = (s: unknown) => String(s ?? '').trim().toUpperCase();
 const n0 = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -117,6 +135,7 @@ async function wbMargins(now: number): Promise<MarginReport> {
     if (fr.length) avgSpp = fr.reduce((a, b) => a + b, 0) / fr.length;
   }
   const items: Record<string, MarginRow> = {};
+  const agent = agentPrices('wb', goods.map(g => String(g?.nmID ?? g?.nmId ?? '')).filter(Boolean), now);
   for (const g of goods) {
     const art = normSku(g?.vendorCode);
     const nm = String(g?.nmID ?? g?.nmId ?? '');
@@ -129,7 +148,9 @@ async function wbMargins(now: number): Promise<MarginReport> {
     const sc = showcasePrice(showcase?.items?.[nm], grey, now);
     const saleAge = sale?.date ? Math.round((Date.parse(mskDate(0)) - Date.parse(sale.date)) / 86_400_000) : Infinity;
     let bp = 0, src = 'none';
-    if (sc) { bp = sc.price; src = sc.source; }
+    const ag = agent.get(nm);
+    if (ag) { bp = ag.price; src = 'agent'; }
+    else if (sc) { bp = sc.price; src = sc.source; }
     else if (sale && sale.price > 0 && !sale.fromMemory && saleAge <= FRESH_SALE_DAYS) { bp = sale.price; src = 'sale'; }
     else if (sale && sale.price > 0) { bp = sale.price; src = 'old-sale'; }
     else if (gp('spp', 0) > 0 && grey > 0) { bp = Math.round(grey * (1 - gp('spp', 0) / 100)); src = 'gp'; }
@@ -181,16 +202,20 @@ async function ozonMargins(now: number): Promise<MarginReport> {
   if (!rows.length) diagnostics.push('Ozon: цены не прогреты');
   const gp = globalParams('ozon');
   const items: Record<string, MarginRow> = {};
+  const skuOf = (r: any) => String(r?.sources?.[0]?.sku ?? r?.product_id ?? '');
+  const agent = agentPrices('ozon', rows.map(skuOf).filter(Boolean), now);
   for (const r of rows) {
     const art = normSku(r?.offer_id);
     if (!art) continue;
     const cur = n0(r?.price?.marketing_seller_price) || n0(r?.price?.price);
-    const row: MarginRow = { mp: 'ozon', article: art, id: String(r?.sources?.[0]?.sku ?? r?.product_id ?? ''), retail: cur > 0 ? Math.round(cur) : null, buyer: null, buyerSource: 'none', spp: 0, cost: null, marginPct: null, marginRub: null, roi: null, roiStatus: null, input: null };
+    const row: MarginRow = { mp: 'ozon', article: art, id: skuOf(r), retail: cur > 0 ? Math.round(cur) : null, buyer: null, buyerSource: 'none', spp: 0, cost: null, marginPct: null, marginRub: null, roi: null, roiStatus: null, input: null };
     const ob = buyer?.items?.[art];
     const sc = showcasePrice(showcase?.items?.[art], cur, now);
     const hist = buyer?.sppHistory?.[art];
     let bp = 0, src = 'none';
-    if (sc) { bp = sc.price; src = sc.source; }
+    const ag = agent.get(row.id);
+    if (ag) { bp = ag.price; src = 'agent'; }
+    else if (sc) { bp = sc.price; src = sc.source; }
     else if (ob && ob.spp > 0 && cur > 0) { bp = Math.round(cur * (1 - ob.spp / 100)); src = 'coinvest'; }
     else if (hist && hist.spp > 0 && cur > 0) { bp = Math.round(cur * (1 - hist.spp / 100)); src = 'memory'; }
     else if (gp('spp', 0) > 0 && cur > 0) { bp = Math.round(cur * (1 - gp('spp', 0) / 100)); src = 'gp'; }

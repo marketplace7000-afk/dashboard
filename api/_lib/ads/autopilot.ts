@@ -25,6 +25,10 @@ import { adsDb, adsMetaGet, adsMetaSet, getCampaign, logChange, type AdMp } from
 import { applyAdAction, type AdAction } from './actions';
 import { getAdsOverview } from './overview';
 import { mskDate } from '../mskDate';
+import { cardHistory, getCompetitors } from './cabinet';
+import { getAllLinks } from '../competitorWatch';
+import { getMargins } from '../margin';
+import { marginThresholds } from '../repricer';
 import {
   ADS_BUDGET_SHARE,
   type Ads2Overview, type Ads2Campaign, type Ads2CampaignItem, type Ads2Product,
@@ -33,6 +37,22 @@ import {
 
 export const STEP = 0.15;
 const MARGIN_SHARE = 0.4;
+/** «Сначала худший ДРР»: при перерасходе площадки за проход предлагаем снизить не всё подряд, а столько товаров с худшим ДРР. */
+const OVER_BUDGET_TOP = 5;
+
+/**
+ * Контекст этапа В (15.10.2026): конкуренты, маржа и нормы категорий. Без него правила
+ * работают как раньше (проверки и старые вызовы).
+ */
+export type AutopilotCtx = {
+  /** Край маржи, % (план месяца + запас): ниже — ставки не поднимаем. */
+  marginFloorPct: number;
+  /** Наш товар (ключ рекламы) → подтверждённые конкуренты с витрины и наша цена покупателя. */
+  comps: Map<string, { ourBuyer: number | null; prices: number[]; outOfStock: number; total: number; median: number | null; min: number | null }>;
+  /** Ozon: товар → медианный ДРР его категории по «Товарам на Ozon», %. */
+  benchDrr: Map<string, number>;
+};
+const EMPTY_CTX: AutopilotCtx = { marginFloorPct: 15, comps: new Map(), benchDrr: new Map() };
 const SETTLE_MS = 24 * 3600_000;
 /** Открытое предложение, которое давно не подтверждалось пересчётом, не показываем. */
 const EXPIRE_MS = 36 * 3600_000;
@@ -130,12 +150,32 @@ function cpoCheck(it: Ads2CampaignItem, p: Ads2Product | undefined): { cpo: numb
   return { cpo: r2(s.spend / s.orders), max: r2(p.marginRub * MARGIN_SHARE) };
 }
 
-export function buildProposals(ov: Ads2Overview): Draft[] {
+/**
+ * Потолок ставки из маржи (обещан в описании с этапа 2, построен на этапе В): maxCPO = 40% маржи;
+ * за клик — maxCPC = maxCPO × конверсия клика в заказ; за 1000 показов — maxCPM = maxCPC × CTR × 1000.
+ * Нужна статистика: ≥ 30 кликов и ≥ 1 заказ (иначе конверсия — гадание), для CPM ещё ≥ 1000 показов.
+ */
+function bidCeiling(c: Ads2Campaign, it: Ads2CampaignItem, p: Ads2Product | undefined): { max: number; how: string } | null {
+  const s = it.stat;
+  if (!p?.marginRub || p.marginRub <= 0 || !s || s.clicks < 30 || s.orders < 1) return null;
+  const cr = s.orders / s.clicks;
+  const maxCpc = p.marginRub * MARGIN_SHARE * cr;
+  if (c.payment === 'cpc' || c.mp === 'ozon') return { max: r2(maxCpc), how: `40% маржи ${rub(p.marginRub)} × конверсия клика в заказ ${r2(cr * 100)}%` };
+  if (c.payment === 'cpm' && s.views >= 1000) {
+    const ctr = s.clicks / s.views;
+    return { max: Math.round(maxCpc * ctr * 1000), how: `40% маржи ${rub(p.marginRub)} × конверсия ${r2(cr * 100)}% × CTR ${r2(ctr * 100)}% × 1000` };
+  }
+  return null;
+}
+
+export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX): Draft[] {
   const mp = ov.mp;
   const out: Draft[] = [];
   const target = ADS_BUDGET_SHARE * 100;
   const overBudget = ov.budget.drrPct != null && ov.budget.drrPct > target * 1.1;
   const prodByAd = new Map(ov.products.filter(p => p.adSku).map(p => [p.adSku!, p]));
+  /** ДРР товара для правила «сначала худший»: fp предложения → ДРР. */
+  const overBudgetDrr = new Map<string, number>();
 
   for (const c of ov.campaigns) {
     if (!isActive(c) || !c.items.length) continue;
@@ -188,9 +228,21 @@ export function buildProposals(ov: Ads2Overview): Draft[] {
       const slots = bidSlots(c, it);
       const s = it.stat;
       const cpo = cpoCheck(it, p);
+      const ceil = bidCeiling(c, it, p);
       const funnelIssue = p?.issues.find(x => x.code === 'card_to_cart' || x.code === 'cart_to_order');
-      const lowMargin = p?.marginPct != null && p.marginPct < 15;
+      const lowMargin = p?.marginPct != null && p.marginPct < ctx.marginFloorPct;
       const dos = p?.daysOfStock ?? null;
+      // Конкуренты (этап В): мы дороже медианы подтверждённых конкурентов на 8%+ — ставку не поднимаем;
+      // у всех конкурентов нет в наличии — окно для роста.
+      const cm = ctx.comps.get(it.sku);
+      const compCheaper = !!cm && cm.ourBuyer != null && cm.median != null && cm.ourBuyer >= cm.median * 1.08;
+      const compOut = !!cm && cm.total > 0 && cm.outOfStock === cm.total;
+      // Норма ДРР по категории Ozon («Товары на Ozon», медиана): «вдвое выше нормы» считаем от большего из
+      // бюджета площадки и полуторной медианы категории — у электростанций и маникюра нормы разные.
+      const bench = ctx.benchDrr.get(it.sku) ?? null;
+      const highDrr = Math.max(target * 2, bench != null ? bench * 1.5 : 0);
+      const benchText = bench != null ? ` (медиана категории ${Math.round(bench * 10) / 10}%)` : '';
+      const slotsAboveCeil = ceil ? slots.filter(sl => sl.bid > ceil.max * 1.15) : [];
 
       let dir: 'down' | 'up' | null = null;
       let rule = '';
@@ -202,15 +254,18 @@ export function buildProposals(ov: Ads2Overview): Draft[] {
       } else if (s && s.spend >= 500 && s.orders === 0) {
         dir = 'down'; rule = 'spend_no_orders'; level = 'critical';
         why = `За 7 дней расход ${rub(s.spend)} без заказов`;
-      } else if (s && s.drr != null && s.drr > target * 2 && s.spend >= 300) {
+      } else if (s && s.drr != null && s.drr > highDrr && s.spend >= 300) {
         dir = 'down'; rule = 'drr_high';
-        why = `ДРР по рекламе ${s.drr}% — больше чем вдвое выше нормы ${target}%`;
+        why = `ДРР по рекламе ${s.drr}% — больше чем вдвое выше нормы ${target}%${benchText}`;
       } else if (overBudget && s && s.drr != null && s.drr > target && s.spend >= 300) {
         dir = 'down'; rule = 'over_budget';
-        why = `Площадка тратит ${ov.budget.drrPct}% от заказов при норме ${target}%; у товара ДРР ${s.drr}%`;
+        why = `Площадка тратит ${ov.budget.drrPct}% от заказов при норме ${target}%; у товара ДРР ${s.drr}%${benchText}`;
       } else if (cpo && cpo.cpo > cpo.max * 1.05) {
         dir = 'down'; rule = 'above_ceiling';
         why = `Рекламный заказ стоит ${rub(cpo.cpo)} — дороже потолка ${rub(cpo.max)} (40% маржи)`;
+      } else if (ceil && slotsAboveCeil.length) {
+        dir = 'down'; rule = 'above_bid_ceiling';
+        why = `Ставка выше потолка ${rub(ceil.max)}: ${ceil.how}`;
       } else if (!overBudget && s && s.orders >= 3 && s.drr != null && s.drr < target * 0.6
                  && (dos == null || dos >= 14) && !lowMargin && (!cpo || cpo.cpo * (1 + STEP) <= cpo.max)) {
         if (funnelIssue) {
@@ -221,11 +276,25 @@ export function buildProposals(ov: Ads2Overview): Draft[] {
           });
           return;
         }
+        if (compCheaper && cm) {
+          out.push({
+            mp, campaignId: c.id, sku: it.sku, kind: 'task', placement: null, fromValue: null, toValue: null,
+            rule: 'comp_cheaper', level: 'info', title: 'Сначала цена: конкуренты дешевле, ставку не поднимаем',
+            reason: `Реклама окупается (ДРР ${s.drr}%), но наша цена покупателю ${rub(cm.ourBuyer!)} против медианы ${cm.total} конкурентов ${rub(cm.median!)} (+${Math.round((cm.ourBuyer! / cm.median! - 1) * 100)}%) — поднятая ставка оплатит клики, которые уйдут к ним; рекомендация по цене — в «Советнике»`,
+            fp: `${campFp}|${it.sku}|task`,
+          });
+          return;
+        }
         dir = 'up'; rule = 'scale'; level = 'growth';
         why = `ДРР ${s.drr}% при норме ${target}%, ${s.orders} заказов за 7 дней, запас ${dos ?? '—'} дн — есть куда расти`;
+      } else if (compOut && cm && !overBudget && s && s.orders >= 1 && s.drr != null && s.drr <= target
+                 && (dos == null || dos >= 14) && !lowMargin && !compCheaper && (!cpo || cpo.cpo * (1 + STEP) <= cpo.max)) {
+        dir = 'up'; rule = 'comp_out'; level = 'growth';
+        why = `У всех ${cm.total} подтверждённых конкурентов нет в наличии — окно: ДРР ${s.drr}% в норме, запас ${dos ?? '—'} дн`;
       }
 
       if (!dir) return;
+      if (rule === 'over_budget' && s?.drr != null) overBudgetDrr.set(`${campFp}|${it.sku}`, s.drr);
 
       if (!slots.length) {
         // Ставку менять нельзя (стратегия Ozon, кампания за заказ) — Ozon: недельный бюджет.
@@ -241,8 +310,11 @@ export function buildProposals(ov: Ads2Overview): Draft[] {
         return;
       }
       for (const sl of slots) {
+        if (rule === 'above_bid_ceiling' && !slotsAboveCeil.includes(sl)) continue;
         let next = dir === 'down' ? sl.bid * (1 - STEP) : sl.bid * (1 + STEP);
-        next =mp === 'wb' && c.payment === 'cpm' ? Math.round(next) : r2(next);
+        // К потолку ставки спускаемся шагом, но не ниже самого потолка.
+        if (rule === 'above_bid_ceiling' && ceil) next = Math.max(next, ceil.max);
+        next = mp === 'wb' && c.payment === 'cpm' ? Math.round(next) : r2(next);
         if (dir === 'up' && next <= sl.bid) continue;
         if (dir === 'down' && next >= sl.bid) continue;
         const where = sl.placement === 'search' ? ' (поиск)' : sl.placement === 'recommendations' ? ' (рекомендации)' : '';
@@ -266,7 +338,51 @@ export function buildProposals(ov: Ads2Overview): Draft[] {
       });
     }
   }
+  // «Сначала худший ДРР»: при перерасходе площадки снижаем за проход только OVER_BUDGET_TOP товаров с худшим ДРР —
+  // остальные дойдут в следующие проходы, когда замерим эффект (а не всё подряд одним махом).
+  if (overBudgetDrr.size > OVER_BUDGET_TOP) {
+    const keep = new Set([...overBudgetDrr.entries()].sort((a, b) => b[1] - a[1]).slice(0, OVER_BUDGET_TOP).map(([k]) => k));
+    for (let i = out.length - 1; i >= 0; i--) {
+      const p = out[i];
+      if (p.rule === 'over_budget' && p.sku && !keep.has(`${mp}|${p.campaignId}|${p.sku}`)) out.splice(i, 1);
+    }
+  }
   return out.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
+}
+
+/** Контекст этапа В по площадке: край маржи, конкуренты с витрины, нормы ДРР категорий Ozon. */
+export async function buildCtx(mp: AdMp, ov: Ads2Overview): Promise<AutopilotCtx> {
+  const ctx: AutopilotCtx = { marginFloorPct: marginThresholds(mp).floor, comps: new Map(), benchDrr: new Map() };
+  const up = (s: unknown) => String(s ?? '').trim().toUpperCase();
+  try {
+    const margins = await getMargins(mp).catch(() => null);
+    const links = getAllLinks(mp);
+    const ids = new Set<string>();
+    for (const ls of Object.values(links)) for (const l of ls) if (l.status === 'active') ids.add(String(l.nmId));
+    const hist = cardHistory(mp, [...ids]);
+    const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+    for (const p of ov.products) {
+      if (!p.adSku) continue;
+      const art = up(mp === 'wb' ? p.article : p.key);
+      const comps = (links[art] ?? []).filter(l => l.status === 'active').map(l => hist.get(String(l.nmId))).filter(Boolean) as { price: number | null; stock: number | null }[];
+      if (!comps.length) continue;
+      const prices = comps.filter(c => c.price != null && c.price > 0 && c.stock !== 0).map(c => c.price!);
+      const mr = margins?.items[art];
+      ctx.comps.set(p.adSku, {
+        ourBuyer: mr?.buyer ?? p.price ?? null, prices, total: comps.length, outOfStock: comps.filter(c => c.stock === 0).length,
+        median: prices.length ? median(prices) : null, min: prices.length ? Math.min(...prices) : null,
+      });
+    }
+  } catch { /* без конкурентов правила работают как раньше */ }
+  if (mp === 'ozon') {
+    try {
+      for (const cat of getCompetitors('ozon').ozon?.categories ?? []) {
+        if (cat.benchmark.drr == null) continue;
+        for (const o of cat.ours) if (o.sku) ctx.benchDrr.set(String(o.sku), cat.benchmark.drr);
+      }
+    } catch { /* снимка рынка нет */ }
+  }
+  return ctx;
 }
 
 // ─── Хранение предложений ───────────────────────────────────────────────────
@@ -327,7 +443,7 @@ export function runAutopilot(): Promise<string> {
     for (const mp of ['wb', 'ozon'] as AdMp[]) {
       try {
         const ov = await getAdsOverview(mp, 7);
-        const r = saveProposals(mp, buildProposals(ov));
+        const r = saveProposals(mp, buildProposals(ov, await buildCtx(mp, ov)));
         out.push(`${mp}: новых ${r.added}, без изменений ${r.kept}, закрыто ${r.closed}`);
       } catch (e) {
         out.push(`${mp}: ошибка ${(e as Error).message}`);

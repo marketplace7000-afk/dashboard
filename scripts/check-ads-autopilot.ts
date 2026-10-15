@@ -7,7 +7,7 @@
 import './_ads-check-env';
 import { join } from 'node:path';
 import * as store from '../api/_lib/ads/store';
-import { buildProposals, saveProposals, listProposals, decideProposal } from '../api/_lib/ads/autopilot';
+import { buildProposals, saveProposals, listProposals, decideProposal, type AutopilotCtx } from '../api/_lib/ads/autopilot';
 import type { Ads2Overview, Ads2Campaign, Ads2Product, Ads2Stat } from '../shared/ads2';
 
 let failed = 0;
@@ -92,6 +92,28 @@ async function main() {
   // ДРР 1%, но заказ 550 ₽ при потолке 600: +15% выйдет за потолок — не повышаем.
   const noUp = buildProposals(overview([camp('10', [item('110', 200, stat({ spend: 2750, orders: 5, revenue: 275000 }))])], [prod('110', { marginRub: 1500 })]));
   check('повышение упрётся в потолок маржи — не предлагаем', noUp.length, 0);
+
+  console.log('Этап В: конкуренты, край маржи, потолок ставки, норма категории, «худший ДРР первым»');
+  const ctx = (o: Partial<AutopilotCtx>): AutopilotCtx => ({ marginFloorPct: 17.1, comps: new Map(), benchDrr: new Map(), ...o });
+  const c1 = buildProposals(overview([camp('2', [item('102', 200, stat({ spend: 500, orders: 5, revenue: 50000 }))])], [prod('102')]),
+    ctx({ comps: new Map([['102', { ourBuyer: 5000, prices: [4000, 4500], total: 2, outOfStock: 0, median: 4250, min: 4000 }]]) }));
+  check('дороже конкурентов на 8%+ → задача по цене, не повышение', c1.map(p => [p.kind, p.rule]), [['task', 'comp_cheaper']]);
+  // ДРР 4% (между «есть куда расти» и нормой), 4 заказа на 200 кликов — потолок ставки 240 ₽ не мешает.
+  const c2 = buildProposals(overview([camp('2', [item('102', 200, stat({ spend: 2000, orders: 4, revenue: 50000 }))])], [prod('102')]),
+    ctx({ comps: new Map([['102', { ourBuyer: 5000, prices: [], total: 2, outOfStock: 2, median: null, min: null }]]) }));
+  check('у всех конкурентов нет в наличии → окно, вверх 200 → 230', c2.map(p => [p.kind, p.rule, p.toValue]), [['bid', 'comp_out', 230]]);
+  const c3 = buildProposals(overview([camp('2', [item('102', 200, stat({ spend: 500, orders: 5, revenue: 50000 }))])], [prod('102', { marginPct: 16 })]), ctx({}));
+  check('маржа 16% ниже края плана 17,1% → не повышаем', c3.length, 0);
+  // CPC: 1 заказ на 200 кликов, маржа 1500 → потолок за клик 1500 × 40% × 0,5% = 3 ₽; ставка 20 → вниз шагом до 17
+  const c4 = buildProposals(overview([camp('11', [item('111', 20, stat({ spend: 400, orders: 1, revenue: 10000 }))], { payment: 'cpc', bidType: 'unified', can: { pause: true, start: false, bid: true, dailyLimit: false, weeklyBudget: false } })], [prod('111', { marginRub: 1500 })]));
+  check('ставка выше потолка за клик → вниз шагом', c4.map(p => [p.rule, p.toValue]), [['above_bid_ceiling', 17]]);
+  const c5 = buildProposals(overview([camp('12', [item('112', 100, stat({ spend: 1200, orders: 2, revenue: 10000 }))])], [prod('112')]), ctx({ benchDrr: new Map([['112', 10]]) }));
+  check('ДРР 12% при медиане категории 10% — в норме, ставку не снижаем', c5.filter(p => p.kind === 'bid').length, 0);
+  const c6 = buildProposals(overview(
+    Array.from({ length: 7 }, (_, i) => camp(`2${i}`, [item(`12${i}`, 200, stat({ spend: 550 + i * 50, orders: 1, revenue: 10000 }))])),
+    Array.from({ length: 7 }, (_, i) => prod(`12${i}`)), 7.5));
+  const ob = c6.filter(p => p.rule === 'over_budget');
+  check('перерасход площадки: снижаем только 5 товаров с худшим ДРР', [ob.length, ob.every(p => Number(p.sku!.slice(2)) >= 2)], [5, true]);
 
   console.log('Предложения: хранение');
   let r = saveProposals('wb', ps);

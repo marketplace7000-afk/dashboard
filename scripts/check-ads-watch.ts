@@ -7,7 +7,7 @@
 import './_ads-check-env';
 import { readFileSync } from 'node:fs';
 import { parseNmId, parseOzonSku } from '../api/_lib/competitorWatch';
-import { editWatch, autoSuggest, buildWatch, watchParams, saveCabinetSnapshot, getCompetitors, requestRefresh, refreshState, posSeries } from '../api/_lib/ads/cabinet';
+import { editWatch, autoSuggest, buildWatch, watchParams, saveCabinetSnapshot, getCompetitors, requestRefresh, refreshState, posSeries, hiddenCards } from '../api/_lib/ads/cabinet';
 import { adsDb } from '../api/_lib/ads/store';
 import { listTasks, maintainQueue } from '../api/_lib/agentQueue';
 
@@ -118,6 +118,14 @@ const b3 = getCompetitors('wb').watch.find(x => x.key === 'SOTA-RGB')!.links.fin
 maintainQueue(); // заводит расписания по умолчанию
 const rs = refreshState('wb');
 check('цену в проход не отдали — остаётся прошлая со своим временем', [b3.price, b3.feedbacks, b3.priceAt === firstAt, rs.pass!.at > firstAt, rs.pass!.priced, rs.pass!.cards], [3500, 76, true, true, 0, 1]);
+console.log('Карточка не видна покупателям');
+saveCabinetSnapshot('wb', { light: true, errors: [], cards: [], notShown: [390744732] });
+saveCabinetSnapshot('wb', { light: true, errors: [], cards: [{ id: 1, price: 10 }], notShown: [390744732] });
+const h1 = hiddenCards('wb').get('390744732');
+const b4 = getCompetitors('wb').watch.find(x => x.key === 'SOTA-RGB')!.links.find(l => l.id === '390744732')!;
+check('не вернула витрина — помечена, «с» — первый проход, цена прежняя', [b4.hidden, b4.hiddenSince === h1, b4.price, b4.priceAt === firstAt], [true, true, 3500, true]);
+saveCabinetSnapshot('wb', { light: true, errors: [], cards: [{ id: 390744732, price: 3400, qty: 5 }] });
+check('снова на витрине — пометка снята', [hiddenCards('wb').has('390744732'), getCompetitors('wb').watch.find(x => x.key === 'SOTA-RGB')!.links.find(l => l.id === '390744732')!.price], [false, 3400]);
 check('расписание по МСК', rs.slots.map(s => s.time), ['05:40', '11:40', '16:40']);
 check('сразу после прохода пропуска нет', rs.missedAt, null);
 const mskMidnight = Math.floor((Date.now() + 3 * 3600_000) / 86_400_000) * 86_400_000 - 3 * 3600_000;

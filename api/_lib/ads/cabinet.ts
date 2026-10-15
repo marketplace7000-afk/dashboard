@@ -31,6 +31,7 @@ function db(): any {
       CREATE TABLE IF NOT EXISTS ad_comp_card (
         mp TEXT NOT NULL, id TEXT NOT NULL, date TEXT NOT NULL, at INTEGER NOT NULL,
         price REAL, rating REAL, feedbacks INTEGER, stock INTEGER, name TEXT, seller TEXT, photo TEXT, price_at INTEGER,
+        hidden INTEGER, hidden_since INTEGER,
         PRIMARY KEY (mp, id, date));
       -- 15.10: проходы агента по витрине — когда сняты цены (для «цены сняты сегодня в 11:42»).
       CREATE TABLE IF NOT EXISTS ad_comp_pass (
@@ -42,7 +43,8 @@ function db(): any {
         pos REAL, views INTEGER, open_card INTEGER, carts INTEGER, orders INTEGER,
         PRIMARY KEY (mp, date, id));`);
     // price_at появился позже самой таблицы — у баз, созданных до него, добавить колонку.
-    if (!(d.prepare('PRAGMA table_info(ad_comp_card)').all() as any[]).some(c => c.name === 'price_at')) d.exec('ALTER TABLE ad_comp_card ADD COLUMN price_at INTEGER');
+    const have = new Set((d.prepare('PRAGMA table_info(ad_comp_card)').all() as any[]).map(c => c.name));
+    for (const c of ['price_at', 'hidden', 'hidden_since']) if (!have.has(c)) d.exec(`ALTER TABLE ad_comp_card ADD COLUMN ${c} INTEGER`);
     tablesReady = true;
   }
   return d;
@@ -56,9 +58,9 @@ function saveCards(mp: AdMp, cards: any[], at: number): { n: number; priced: num
   const date = mskDay(at);
   // price_at — когда снята именно цена: если в этот проход цену не отдали, остаётся время прошлого замера
   // (менеджер видит «цена от 05:43», а не выдаём утреннюю цену за дневную).
-  const st = d.prepare(`INSERT INTO ad_comp_card (mp, id, date, at, price, rating, feedbacks, stock, name, seller, photo, price_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(mp, id, date) DO UPDATE SET at = excluded.at,
+  const st = d.prepare(`INSERT INTO ad_comp_card (mp, id, date, at, price, rating, feedbacks, stock, name, seller, photo, price_at, hidden, hidden_since)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
+    ON CONFLICT(mp, id, date) DO UPDATE SET at = excluded.at, hidden = 0, hidden_since = NULL,
       price_at = CASE WHEN excluded.price IS NOT NULL OR excluded.stock = 0 THEN excluded.at ELSE ad_comp_card.price_at END,
       price = CASE WHEN excluded.price IS NULL AND excluded.stock = 0 THEN NULL ELSE COALESCE(excluded.price, ad_comp_card.price) END, rating = COALESCE(excluded.rating, ad_comp_card.rating),
       feedbacks = COALESCE(excluded.feedbacks, ad_comp_card.feedbacks), stock = excluded.stock,
@@ -84,6 +86,38 @@ function saveCards(mp: AdMp, cards: any[], at: number): { n: number; priced: num
   return { n, priced };
 }
 
+/**
+ * Номера, которые витрина не вернула (скрыта, заблокирована, не продаётся по адресу браузера агента):
+ * строка дня с hidden = 1; hidden_since — с какого прохода подряд не видна (переносится со вчерашней строки).
+ * Цена и время цены не трогаются — остаётся последняя снятая.
+ */
+function saveNotShown(mp: AdMp, ids: unknown, at: number): number {
+  if (!Array.isArray(ids) || !ids.length) return 0;
+  const d = db();
+  const date = mskDay(at);
+  const prevSt = d.prepare('SELECT hidden, hidden_since FROM ad_comp_card WHERE mp = ? AND id = ? ORDER BY date DESC LIMIT 1');
+  const st = d.prepare(`INSERT INTO ad_comp_card (mp, id, date, at, hidden, hidden_since) VALUES (?, ?, ?, ?, 1, ?)
+    ON CONFLICT(mp, id, date) DO UPDATE SET at = excluded.at, hidden = 1,
+      hidden_since = COALESCE(CASE WHEN ad_comp_card.hidden = 1 THEN ad_comp_card.hidden_since END, excluded.hidden_since)`);
+  let n = 0;
+  for (const raw of ids) {
+    const id = String(raw ?? '').trim();
+    if (!/^\d+$/.test(id)) continue;
+    const prev = prevSt.get(mp, id) as any;
+    st.run(mp, id, date, at, prev?.hidden === 1 && prev.hidden_since ? Number(prev.hidden_since) : at);
+    n++;
+  }
+  return n;
+}
+
+/** Наши карточки, которые сейчас не видны покупателям (последний проход их не нашёл): номер → с какого времени. */
+export function hiddenCards(mp: AdMp): Map<string, number> {
+  const out = new Map<string, number>();
+  const rows = db().prepare(`SELECT id, hidden, hidden_since FROM ad_comp_card c WHERE mp = ? AND date = (SELECT max(date) FROM ad_comp_card x WHERE x.mp = c.mp AND x.id = c.id)`).all(mp) as any[];
+  for (const r of rows) if (r.hidden === 1) out.set(String(r.id), Number(r.hidden_since));
+  return out;
+}
+
 /** WB: позиции наших карточек за вчера и позавчера (отчёт за один день) → история по дням. */
 function savePosDaily(mp: AdMp, daily: any): number {
   if (!daily || typeof daily !== 'object') return 0;
@@ -103,7 +137,7 @@ function savePosDaily(mp: AdMp, daily: any): number {
 }
 
 /** Последняя карточка по каждому номеру + цена сутки и неделю назад (для «−8% за сутки»). */
-export function cardHistory(mp: AdMp, ids: string[]): Map<string, { at: number; date: string; price: number | null; rating: number | null; feedbacks: number | null; stock: number | null; name: string; seller: string; photo: string; price1d: number | null; price7d: number | null }> {
+export function cardHistory(mp: AdMp, ids: string[]): Map<string, { at: number; date: string; price: number | null; rating: number | null; feedbacks: number | null; stock: number | null; name: string; seller: string; photo: string; price1d: number | null; price7d: number | null; hidden: boolean; hiddenSince: number | null }> {
   const out = new Map<string, any>();
   if (!ids.length) return out;
   const d = db();
@@ -122,7 +156,8 @@ export function cardHistory(mp: AdMp, ids: string[]): Map<string, { at: number; 
     let pr = last;
     for (let i = a.length - 1; i >= 0; i--) if (a[i].price_at != null) { pr = a[i]; break; }
     out.set(id, { at: Number(pr.price_at ?? pr.at), date: last.date, price: pr.price, rating: last.rating, feedbacks: last.feedbacks, stock: last.stock,
-      name: last.name ?? '', seller: last.seller ?? '', photo: last.photo ?? '', price1d: before(1), price7d: before(7) });
+      name: last.name ?? '', seller: last.seller ?? '', photo: last.photo ?? '', price1d: before(1), price7d: before(7),
+      hidden: last.hidden === 1, hiddenSince: last.hidden === 1 && last.hidden_since ? Number(last.hidden_since) : null });
   }
   return out;
 }
@@ -159,11 +194,12 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
   const at = Date.now();
   const saved = Array.isArray(data.cards) ? saveCards(mp, data.cards, at) : { n: 0, priced: 0 };
   const cardsN = saved.n;
+  const hiddenN = saveNotShown(mp, data.notShown, at);
   const errN = Array.isArray(data.errors) ? data.errors.length : 0;
-  if (cardsN) d.prepare('INSERT INTO ad_comp_pass (mp, at, light, cards, priced, errors) VALUES (?, ?, ?, ?, ?, ?)').run(mp, at, data.light ? 1 : 0, cardsN, saved.priced, errN);
+  if (cardsN || hiddenN) d.prepare('INSERT INTO ad_comp_pass (mp, at, light, cards, priced, errors) VALUES (?, ?, ?, ?, ?, ?)').run(mp, at, data.light ? 1 : 0, cardsN, saved.priced, errN);
   d.prepare('DELETE FROM ad_comp_pass WHERE mp = ? AND at < ?').run(mp, at - 60 * 86_400_000);
   // Быстрый проход днём (только карточки витрины) — в историю карточек, полный снимок кабинета не трогаем.
-  if (data.light) return `${mp === 'wb' ? 'WB' : 'Ozon'}: быстрое обновление — карточек на витрине ${cardsN}, с ценой ${saved.priced}${errN ? `, ошибок ${errN}` : ''}`;
+  if (data.light) return `${mp === 'wb' ? 'WB' : 'Ozon'}: быстрое обновление — карточек на витрине ${cardsN}, с ценой ${saved.priced}${hiddenN ? `, не видны на витрине ${hiddenN}` : ''}${errN ? `, ошибок ${errN}` : ''}`;
   const posN = savePosDaily(mp, data.daily);
   d.prepare('INSERT INTO ad_cabinet_snapshot (mp, at, json) VALUES (?, ?, ?)').run(mp, at, JSON.stringify(data));
   d.prepare(`DELETE FROM ad_cabinet_snapshot WHERE mp = ? AND id NOT IN (SELECT id FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT ?)`).run(mp, mp, KEEP);
@@ -268,8 +304,9 @@ export function watchParams(mp: AdMp): { watch: number[]; ours: number[] } {
   const row = db().prepare('SELECT json FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT 1').get(mp) as any;
   let snap: any = null;
   try { snap = row ? JSON.parse(row.json) : null; } catch { snap = null; }
-  const ours = buildWatch(mp, snap).watch.filter(p => p.links.length).map(p => Number(p.ourId)).filter(id => Number.isFinite(id) && id > 0);
-  return { watch: watchedIds(mp, 80), ours: [...new Set(ours)].slice(0, 40) };
+  // Все наши товары в наличии (не только с конкурентами): проход заодно проверяет, что карточку видят покупатели.
+  const ours = buildWatch(mp, snap).watch.map(p => Number(p.ourId)).filter(id => Number.isFinite(id) && id > 0);
+  return { watch: watchedIds(mp, 80), ours: [...new Set(ours)].slice(0, 120) };
 }
 
 /**
@@ -402,7 +439,7 @@ const blankLink = (id: string, mp: AdMp): Ads2WatchLink => ({
   id, url: mp === 'wb' ? `https://www.wildberries.ru/catalog/${id}/detail.aspx` : `https://www.ozon.ru/product/${id}/`,
   source: 'manual', status: 'active', title: '', brand: '', seller: '', note: '', photo: '',
   price: null, rating: null, feedbacks: null, stock: null, orders: null, ordersDyn: null, avgPos: null, ctr: null, openCard: null,
-  inAds: null, inPromo: null, gmv: null, drr: null, ordersDays: null, convPdp: null, priceAt: null, price1d: null, price7d: null,
+  inAds: null, inPromo: null, gmv: null, drr: null, ordersDays: null, convPdp: null, priceAt: null, price1d: null, price7d: null, hidden: false, hiddenSince: null,
 });
 
 /** Фото карточки WB по номеру (basket-CDN, как на витрине). */
@@ -466,7 +503,8 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     const h = hist.get(r.id);
     if (!h) return r;
     return { ...r, price: h.price ?? r.price, rating: h.rating ?? r.rating, feedbacks: h.feedbacks ?? r.feedbacks, stock: h.stock ?? r.stock,
-      title: r.title || h.name, seller: r.seller || h.seller, photo: r.photo || h.photo, priceAt: h.at, price1d: h.price1d, price7d: h.price7d };
+      title: r.title || h.name, seller: r.seller || h.seller, photo: r.photo || h.photo, priceAt: h.at, price1d: h.price1d, price7d: h.price7d,
+      hidden: h.hidden, hiddenSince: h.hiddenSince };
   };
   const toLink = (l: CompetitorLink): Ads2WatchLink => {
     const id = String(l.nmId);
@@ -502,12 +540,15 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     const ourId = cat?.id ?? '';
     const ourM = ourId ? idx.get(ourId) : undefined;
     const our = ourId ? fresh({ ...blankLink(ourId, mp), ...(ourM ?? {}), title: cat?.name || ourM?.title || '', photo: cat?.photo || ourM?.photo || (mp === 'wb' ? wbPhoto(ourId) : '') }) : null;
+    // «Не видна покупателям» — тревога, только если товар есть на складе (без остатка карточку и не должно быть видно).
+    if (our?.hidden && !byKey.get(key)?.active) { our.hidden = false; our.hiddenSince = null; }
     // Порядок — как привязаны (15.10, просьба владельца): «Подтвердить» и «Не наш» строку не двигают.
     const ls = (links[key] ?? []).map(toLink);
     return { key, ourId, name: cat?.name || our?.title || key, photo: our?.photo ?? '', our, links: ls };
   });
   // Порядок товаров не зависит от решений менеджера: сначала с привязками, внутри — по нашим заказам (самые продаваемые выше).
-  watch.sort((a, b) => Number(b.links.length > 0) - Number(a.links.length > 0) || (b.our?.orders ?? -1) - (a.our?.orders ?? -1) || a.key.localeCompare(b.key, 'ru'));
+  // Наши карточки, которых не видно покупателям, — сверху: с ними надо разбираться первыми.
+  watch.sort((a, b) => Number(!!b.our?.hidden) - Number(!!a.our?.hidden) || Number(b.links.length > 0) - Number(a.links.length > 0) || (b.our?.orders ?? -1) - (a.our?.orders ?? -1) || a.key.localeCompare(b.key, 'ru'));
   for (const [k, v] of fromSnap) if (!byKey.has(k)) byKey.set(k, v);
   const catalog = [...byKey.entries()].map(([key, v]) => ({ key, name: v.name })).sort((a, b) => a.key.localeCompare(b.key)).slice(0, 2000);
   return { watch, catalog };

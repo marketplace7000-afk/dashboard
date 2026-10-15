@@ -1682,6 +1682,14 @@ code {
 .cmp-sub.good { color: var(--good); }
 .cmp-sub.bad { color: var(--bad); }
 .cmp-sub.warn { color: var(--warn); font-weight: 500; }
+.cmp-gone { color: var(--bad); font-weight: 600; }
+.cmp-gone-card { border: 1px solid var(--bad); background: rgba(220,38,38,.06); display: grid; gap: 8px; }
+.cmp-gone-t { display: flex; gap: 8px; align-items: center; color: var(--bad); font-weight: 700; font-size: 17px; }
+.cmp-gone-t svg, .cmp-gone-row svg { flex-shrink: 0; }
+.cmp-gone-p { margin: 0; font-size: 14.5px; line-height: 1.5; }
+.cmp-gone-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.cmp-gone-row { display: flex; gap: 8px; align-items: flex-start; color: var(--bad); background: rgba(220,38,38,.07); border-radius: 10px; padding: 10px 12px; font-size: 14.5px; line-height: 1.45; }
+.cmp-gone-row svg { margin-top: 2px; }
 .cmp-unit { font-size: 12.5px; font-weight: 400; }
 .cmp-yn { text-align: center; }
 .cmp-btns { white-space: nowrap; margin-top: 6px; }

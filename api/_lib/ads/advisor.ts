@@ -17,7 +17,7 @@
 import { getRnp } from '../rnp';
 import { mskDate } from '../mskDate';
 import { listCampaigns, listChanges, listItems, listFlags, type AdMp } from './store';
-import { compCardSeries, posSeries } from './cabinet';
+import { compCardSeries, posSeries, hiddenCards } from './cabinet';
 import { getAllLinks } from '../competitorWatch';
 import type { Ads2Advisor, Ads2AdvisorCause, Ads2AdvisorProduct, Ads2AdvisorTotals } from '../../../shared/ads2';
 
@@ -35,12 +35,16 @@ const kRub = (v: number) => (Math.abs(v) >= 1_000_000 ? `${(v / 1_000_000).toFix
 const pctCh = (a: number, b: number) => (b > 0 ? Math.round((a / b - 1) * 100) : null);
 const sign = (v: number) => (v > 0 ? `+${v}` : `${v}`);
 const ddmm = (d: string) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
+/** Дата (МСК) момента в мс и «15.10 07:46». */
+const mskDayOf = (ms: number) => new Date(ms + 3 * 3600_000).toISOString().slice(0, 10);
+const dm = (ms: number) => { const s = new Date(ms + 3 * 3600_000).toISOString(); return `${s.slice(8, 10)}.${s.slice(5, 7)} ${s.slice(11, 16)}`; };
 
 /** Приоритет причин просадки: первая найденная — главная. */
-const DOWN_ORDER = ['stock_out', 'ads_off', 'ads_down', 'position_down', 'price_up', 'spp_down', 'comp_cheaper', 'card_conv_down', 'cart_conv_down', 'traffic_down', 'stock_low'] as const;
+const DOWN_ORDER = ['card_hidden', 'stock_out', 'ads_off', 'ads_down', 'position_down', 'price_up', 'spp_down', 'comp_cheaper', 'card_conv_down', 'cart_conv_down', 'traffic_down', 'stock_low'] as const;
 const UP_ORDER = ['ads_up', 'position_up', 'comp_out', 'price_down', 'traffic_up'] as const;
 
 export const ADVISOR_LABEL: Record<string, { label: string; action: string }> = {
+  card_hidden: { label: 'Карточка пропала из выдачи', action: 'Проверить в кабинете: не скрыта ли карточка, нет ли блокировки или требования площадки; рекламу по ней — на паузу до исправления' },
   stock_out: { label: 'Нет остатка', action: 'Пополнить остаток; рекламу по этим товарам держать на паузе до поставки' },
   stock_low: { label: 'Остаток на исходе', action: 'Запланировать поставку; ставки не повышать' },
   ads_off: { label: 'Реклама остановилась', action: 'Проверить кампании: пауза, кончился бюджет или дневной лимит' },
@@ -119,6 +123,7 @@ export async function getAdvisor(mp: AdMp, dateArg?: string): Promise<Ads2Adviso
   for (const k of keys) { const a = adSkuOf(k); if (a) ourIds.add(a); }
   for (const ls of Object.values(links)) for (const l of ls) if (l.status !== 'ignored') compIds.add(String(l.nmId));
   const cards = compCardSeries(mp, [...compIds, ...ourIds], addDays(D, -10), D);
+  const hiddenNow = hiddenCards(mp);
   const wbPos = mp === 'wb' ? posSeries(mp, addDays(D, -10), D) : new Map<string, Map<string, number>>();
   /** Последнее значение ряда витрины на дату (не позже). */
   const onDate = (id: string, date: string) => {
@@ -229,11 +234,26 @@ export async function getAdvisor(mp: AdMp, dateArg?: string): Promise<Ads2Adviso
       }
     }
 
+    // 7. Карточка пропала из выдачи при остатке: витрина её не показывает (проход агента) или переходы
+    //    рухнули больше чем в 5 раз вместе с показами рекламы — так выглядит скрытая/заблокированная карточка.
+    if (stockD != null && stockD > 0) {
+      const adV = at(k, 'adv_views', iD) ?? 0, adVB = avgBase(k, 'adv_views');
+      const hid = adSku ? hiddenNow.get(adSku) : undefined;
+      const collapsed = vD != null && vB >= 20 && vD <= vB * 0.2 && (adVB < 50 || adV <= adVB * 0.2);
+      const mpName = mp === 'wb' ? 'WB' : 'Ozon';
+      const views = vD != null && vB >= 20 ? `переходов в карточку ${nf.format(vD)} против ${nf.format(vB)} в среднем${adVB >= 50 ? `, показов рекламы ${nf.format(adV)} против ${nf.format(adVB)}` : ''}` : '';
+      if (hid != null && (collapsed || mskDayOf(hid) <= D)) {
+        add('card_hidden', 'critical', `Витрина ${mpName} не показывает карточку покупателям (проверено агентом ${dm(hid)}), хотя на складе ${nf.format(stockD)} шт${views ? `; ${views}` : ''}`);
+      } else if (collapsed && o === 0) {
+        add('card_hidden', 'critical', `Карточку почти перестали видеть: ${views}, заказов 0, хотя на складе ${nf.format(stockD)} шт — похоже, карточка скрыта или заблокирована`);
+      }
+    }
+
     const order = delta < 0 ? DOWN_ORDER as readonly string[] : UP_ORDER as readonly string[];
     let primary = order.find(c => causes.some(x => x.code === c)) ?? (delta < 0 ? 'unknown' : 'growth');
     // Редкие продажи (меньше 2 в день): день без заказа — обычный разброс. Если нет «жёсткой»
     // причины (остаток, реклама, позиция, цена, конкурент) — не пугаем выводами о конверсии.
-    const HARD = ['stock_out', 'ads_off', 'ads_down', 'position_down', 'price_up', 'spp_down', 'comp_cheaper'];
+    const HARD = ['card_hidden', 'stock_out', 'ads_off', 'ads_down', 'position_down', 'price_up', 'spp_down', 'comp_cheaper'];
     if (delta < 0 && ob < 2 && o <= Math.floor(ob) && !HARD.includes(primary)) {
       primary = 'low_volume';
       causes.splice(0, causes.length, { code: 'low_volume', level: 'info', text: `В среднем ${f1(ob)} заказа в день — ${o ? 'один заказ' : 'день без заказа'} в пределах обычного разброса`, action: ADVISOR_LABEL.low_volume.action });

@@ -136,6 +136,17 @@ function CmpCells({ l, mp, our, passAt }: { l: Ads2WatchLink; mp: Ads2Mp; our: A
   );
 }
 
+/** Наша карточка не видна покупателям — красная строка в блоке товара. */
+function HiddenNote({ mp, since }: { mp: Ads2Mp; since: number | null }) {
+  return (
+    <div className="cmp-gone-row" role="alert">
+      <WarningOctagonIcon size={18} weight="fill" />
+      <span><b>Карточка не видна покупателям</b>{since ? ` — замечено ${whenRel(since)}` : ''}: витрина {mp === 'wb' ? 'WB' : 'Ozon'} её не показывает, хотя остаток на складе есть.
+        Проверьте в кабинете, не скрыта ли она и нет ли блокировки.</span>
+    </div>
+  );
+}
+
 function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast }: {
   p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; showIgnored: boolean; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
 }) {
@@ -177,6 +188,7 @@ function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast }: {
           {adding ? 'Отмена' : <><PlusIcon size={14} weight="bold" /> Конкурент</>}
         </button>
       </div>
+      {our?.hidden && <HiddenNote mp={mp} since={our.hiddenSince} />}
       {adding && (
         <div className="cmp-add">
           <input className="input" autoFocus value={link} onChange={e => setLink(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') add(); if (e.key === 'Escape') setAdding(false); }}
@@ -211,6 +223,7 @@ function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast }: {
                   <tr key={l.id} className={l.status === 'ignored' ? 'ad2-row-muted' : ''}>
                     <td className="cmp-col-prod">
                       <ProductCell p={{ photo: l.photo, name: l.title || `${mp === 'wb' ? 'артикул' : 'SKU'} ${l.id}`, article: [l.id, l.brand || l.seller].filter(Boolean).join(' · '), link: l.url }} />
+                      {l.hidden && <div className="cmp-note cmp-gone">нет на витрине {mpName} {l.hiddenSince ? `с ${whenRel(l.hiddenSince)}` : ''}</div>}
                       {(l.note || l.source === 'manual') && <div className="muted cmp-note">{l.source === 'manual' ? 'добавлен вручную' : ''}{l.source === 'manual' && l.note ? ' · ' : ''}{l.note}</div>}
                     </td>
                     <CmpCells l={l} mp={mp} our={our} passAt={passAt} />
@@ -244,6 +257,7 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
   const [showIgnored, setShowIgnored] = useState(false);
   const [more, setMore] = useState(15);
   const withLinks = d.watch.filter(p => p.links.length > 0);
+  const gone = d.watch.filter(p => p.our?.hidden);
   const pendingOf = (p: Ads2WatchProduct) => p.links.filter(l => l.status === 'suggested').length;
   const pending = d.watch.reduce((s, p) => s + pendingOf(p), 0);
   const needle = q.trim().toLowerCase();
@@ -277,6 +291,17 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
           <label className="cmp-check"><input type="checkbox" checked={showIgnored} onChange={e => setShowIgnored(e.target.checked)} /> показывать «не наших»</label>
         </div>
       </section>
+      {gone.length > 0 && (
+        <section className="card cmp-gone-card" role="alert">
+          <div className="cmp-gone-t"><WarningOctagonIcon size={20} weight="fill" /> Не видны покупателям: {gone.length} {gone.length === 1 ? 'наша карточка' : 'наших карточек'} при остатке на складе</div>
+          <p className="cmp-gone-p">Витрина {mp === 'wb' ? 'WB' : 'Ozon'} их не показывает: заказов и рекламных показов не будет. Проверьте в кабинете, не скрыта ли карточка,
+            не заблокирована ли, нет ли требования от площадки. Проверено с адреса доставки в браузере агента.</p>
+          <div className="cmp-gone-list">
+            {gone.map(p => <button key={p.key} className="btn btn-sm" onClick={() => { setAll(true); setQ(p.key); setOnlyPending(false); }}>
+              {p.key}{p.our?.hiddenSince ? <span className="muted"> · с {whenRel(p.our.hiddenSince)}</span> : null}</button>)}
+          </div>
+        </section>
+      )}
       {list.length === 0 && <div className="card muted">{all || needle || onlyPending ? 'Ничего не найдено.' : 'Привязок пока нет. Предложения появятся после ночного прохода агента; своего конкурента можно привязать в «Все товары».'}</div>}
       {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} showIgnored={showIgnored} onData={onData} setToast={setToast} />)}
       {list.length > more && <button className="btn" onClick={() => setMore(m => m + 20)}>Показать ещё ({list.length - more})</button>}

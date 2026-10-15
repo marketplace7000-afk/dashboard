@@ -222,14 +222,22 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
       const toBuyer = (retail: number) => Math.round(retail * (1 - mr.spp / 100));
       const fromBuyer = (b: number) => Math.round(mr.spp > 0 ? b / (1 - mr.spp / 100) : b);
       const mAt = (retail: number) => { const v = marginAt(mr, retail); return v == null ? '–' : `${Math.round(v)}%`; };
-      // 6a. Маржа ниже порога / в минус.
-      if (mr.marginPct != null && mr.marginPct < minMargin) {
+      // 6a. Маржа ниже порога / в минус — только у товаров, которые продаются или рекламируются
+      //     (мёртвые карточки без заказов и расхода ленту не засоряют). Уровень: минус — срочно,
+      //     меньше 5% — внимание, ниже порога — к сведению.
+      if (mr.marginPct != null && mr.marginPct < minMargin && (p.orders > 0 || p.spend > 0)) {
         const neg = mr.marginPct < 0;
+        const inp: any = mr.input ?? {};
+        // Что съедает маржу — чтобы было ясно, цена ли решает или расходы.
+        const eats = [`комиссия ${Math.round(inp.commission ?? 0)}%`, `реклама ${Math.round(inp.drr ?? 0)}% (ДРР)`,
+          `логистика и возвраты ${rub((inp.logistic ?? 0) + (inp.storage ?? 0) + (inp.returnCostPerSale ?? 0))}`].join(', ');
+        // Пол дальше чем в полутора ценах — ценой не вытянуть, это про расходы.
+        const reachable = floor != null && floor <= mr.retail * 1.5;
         drafts.push({
-          sku: p.key, code: 'margin_below_floor', level: neg ? 'critical' : 'warn', role: 'price',
+          sku: p.key, code: 'margin_below_floor', level: neg ? 'critical' : mr.marginPct < 5 ? 'warn' : 'info', role: 'price',
           title: neg ? 'Товар продаётся в минус' : `Маржа ниже порога ${minMargin}%`,
-          text: `Маржа ${mr.marginPct}% (${rub(mr.marginRub ?? 0)} с штуки) при цене ЛК ${rub(mr.retail)}${mr.buyer ? ` и цене покупателя ${rub(mr.buyer)}` : ''}; порог ${minMargin}%. ${floor ? `Пол цены ЛК — ${rub(floor)} (маржа ${mAt(floor)})` : 'Порог недостижим при этой себестоимости и расходах'}`,
-          action: floor ? 'Поднять цену ЛК до пола в «Ценах» или снизить расходы (реклама, логистика); если рынок не позволяет — пересмотреть закупку' : 'Проверить себестоимость и расходы в «Ценах»; при верных цифрах — выводить товар или менять закупку',
+          text: `Маржа ${mr.marginPct}% (${rub(mr.marginRub ?? 0)} с штуки) при цене ЛК ${rub(mr.retail)}${mr.buyer ? ` и цене покупателя ${rub(mr.buyer)}` : ''}; порог ${minMargin}%. Съедают: ${eats}. ${reachable ? `Пол цены ЛК — ${rub(floor!)} (маржа ${mAt(floor!)})` : 'Ценой не вытянуть — нужно снижать расходы или пересматривать закупку'}`,
+          action: reachable ? 'Поднять цену ЛК до пола в «Ценах» или снизить ДРР (ставки в «Автопилоте»)' : 'Снизить ДРР (пауза или ставка вниз в «Автопилоте»), проверить себестоимость и логистику; при верных цифрах — выводить товар',
           rub: neg && mr.marginRub != null ? Math.round(Math.abs(mr.marginRub) * p.orders / 7) : null, prod: prodOf(p),
         });
       }

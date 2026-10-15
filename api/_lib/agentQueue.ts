@@ -398,14 +398,23 @@ const DEFAULT_SCHEDULES: { type: AgentTaskType; marketplace: 'wb' | 'ozon'; cron
   { type: 'competitor_watch', marketplace: 'wb', cron: '40 5 * * *' },
   { type: 'competitor_watch', marketplace: 'ozon', cron: '50 5 * * *' },
   // 15.10: днём — быстрые проходы по витрине (цены, рейтинг, остаток конкурентов), без аналитики кабинета.
-  { type: 'competitor_watch', marketplace: 'wb', cron: '40 11,16 * * *', light: true },
-  { type: 'competitor_watch', marketplace: 'ozon', cron: '50 11,16 * * *', light: true },
+  // Вечером 15.10 привязаны к выпускам советника (12:00, 15:30, 17:30): проход за 25–40 минут до выпуска.
+  { type: 'competitor_watch', marketplace: 'wb', cron: '20 11 * * *', light: true },
+  { type: 'competitor_watch', marketplace: 'wb', cron: '50 14,16 * * *', light: true },
+  { type: 'competitor_watch', marketplace: 'ozon', cron: '15 11 * * *', light: true },
+  { type: 'competitor_watch', marketplace: 'ozon', cron: '45 14,16 * * *', light: true },
 ];
+/** Старые расписания по умолчанию, которые заменены новыми: переписать cron, а не плодить дубли. */
+const RESCHEDULED: Record<string, string> = { '40 11,16 * * *': '20 11 * * *', '50 11,16 * * *': '15 11 * * *' };
 
 function ensureDefaultSchedules(d: any): void {
+  for (const [from, to] of Object.entries(RESCHEDULED)) {
+    const r = d.prepare('UPDATE agent_schedules SET cron = ?, next_run_at = ? WHERE cron = ?').run(to, nextCronRun(to, now()), from);
+    if (r.changes) console.warn(`[agents] расписание ${from} → ${to}`);
+  }
   for (const s of DEFAULT_SCHEDULES) {
     const exists = d.prepare(`SELECT 1 FROM agent_schedules WHERE type = ? AND json_extract(params, '$.marketplace') = ?
-      AND COALESCE(json_extract(params, '$.light'), 0) = ?`).get(s.type, s.marketplace, s.light ? 1 : 0);
+      AND COALESCE(json_extract(params, '$.light'), 0) = ? AND (? = 0 OR cron = ?)`).get(s.type, s.marketplace, s.light ? 1 : 0, s.light ? 1 : 0, s.cron);
     if (exists) continue;
     d.prepare('INSERT INTO agent_schedules(type, params, cron, enabled, next_run_at, created_at) VALUES (?, ?, ?, 1, ?, ?)')
       .run(s.type, J(s.light ? { marketplace: s.marketplace, light: true } : { marketplace: s.marketplace }), s.cron, nextCronRun(s.cron, now()), now());

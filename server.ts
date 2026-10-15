@@ -169,4 +169,10 @@ function scheduleCacheWarm() {
   // Интервал — из api/_lib/cronSchedule (одно место истины). Раньше число жило
   // здесь, а /api/meta/status независимо рапортовал «раз в сутки».
   setInterval(run, CRON_WARM_INTERVAL_MS);    // идемпотентно: свежее не перезапрашивает
+
+  // Выпуски советника по МСК (15.10.2026): за 25–40 минут до выпуска — тот же прогрев,
+  // в момент выпуска — сборка сигналов по обеим площадкам (api/_lib/ads/signals.ts).
+  import('./api/_lib/ads/signals')
+    .then(m => m.startIssueScheduler(() => { void run(); }))
+    .catch(e => console.warn('[autovibe] планировщик советника не запущен:', (e as Error).message));
 }

@@ -7,24 +7,21 @@
  *       менеджер подтверждает, отмечает «Не наш» или добавляет своего (кнопка у товара).
  *       Наш товар — первой строкой той же таблицы: цена под ценой, рейтинг под рейтингом.
  *       Строки не прыгают: порядок — как привязаны. Данные свежие: ночью полный проход
- *       Агента 3, днём (11:40, 16:40) и по кнопке «Обновить сейчас» — быстрый по витрине.
+ *       Агента 3, днём (11:20, 14:50, 16:50 — перед выпусками советника) и по кнопке «Обновить сейчас» — быстрый по витрине.
  *   Позиции и рынок — WB: позиции наших карточек в поиске, сравнения карточек;
  *       Ozon: наше место среди продавцов категории и топ рынка.
- *   Советник по продажам — почему в выбранный день просели (или выросли) заказы:
- *       день против среднего за 7 дней, по товарам, с причинами и что сделать.
+ *   Советник по продажам (вечером 15.10) переехал в РНП → лист «Советник» (src/pages/RnpAdvisor.tsx).
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowsClockwiseIcon, MagnifyingGlassIcon, PlusIcon, WarningIcon, WarningOctagonIcon, LightbulbIcon, TrendUpIcon, InfoIcon, CheckCircleIcon, XIcon,
+  ArrowsClockwiseIcon, MagnifyingGlassIcon, PlusIcon, WarningIcon, WarningOctagonIcon, CheckCircleIcon, XIcon,
 } from '@phosphor-icons/react';
 import { apiGet, apiPost, errText } from '../api/http';
-import type {
-  Ads2Mp, Ads2Competitors, Ads2WatchLink, Ads2WatchProduct, Ads2Advisor, Ads2AdvisorProduct, Ads2AdvisorCause,
-} from '../../shared/ads2';
+import type { Ads2Mp, Ads2Competitors, Ads2WatchLink, Ads2WatchProduct } from '../../shared/ads2';
 import { nf0, nf1, rub, num, pct, ddmm, kRub, when, whenRel, ProductCell, PosDyn, PctDyn, MiniLines } from './ads2ui';
 
-type Sheet = 'watch' | 'market' | 'advisor';
-const SHEETS: Array<[Sheet, string]> = [['watch', 'Привязка конкурентов'], ['market', 'Позиции и рынок'], ['advisor', 'Советник по продажам']];
+type Sheet = 'watch' | 'market';
+const SHEETS: Array<[Sheet, string]> = [['watch', 'Привязка конкурентов'], ['market', 'Позиции и рынок']];
 
 const W_STATUS: Record<Ads2WatchLink['status'], { label: string; cls: string }> = {
   active: { label: 'подтверждён', cls: 'good' }, suggested: { label: 'предложен', cls: 'info' }, ignored: { label: 'не наш', cls: '' },
@@ -430,124 +427,8 @@ function MarketSheet({ d, mp }: { d: Ads2Competitors; mp: Ads2Mp }) {
   );
 }
 
-// ─── Лист «Советник по продажам» ────────────────────────────────────────────
-
-const WEEKDAY = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
-const wd = (d: string) => WEEKDAY[new Date(d + 'T12:00:00Z').getUTCDay()];
-
-function CauseLine({ c }: { c: Ads2AdvisorCause }) {
-  const Icon = c.level === 'critical' ? WarningOctagonIcon : c.level === 'warn' ? WarningIcon : c.level === 'good' ? TrendUpIcon : InfoIcon;
-  return (
-    <div className={`adv-cause adv-${c.level}`}>
-      <Icon size={17} weight="fill" />
-      <div><div>{c.text}</div>{c.action && <div className="adv-action">→ {c.action}</div>}</div>
-    </div>
-  );
-}
-
-function Delta({ a, b, money }: { a: number; b: number; money?: boolean }) {
-  if (!b) return null;
-  const v = Math.round((a / b - 1) * 100);
-  if (!v) return <span className="muted adv-delta">как обычно</span>;
-  return <span className={`adv-delta ${v < 0 ? 'bad' : 'good'}`}>{v > 0 ? '+' : ''}{v}% к среднему{money ? '' : ''}</span>;
-}
-
-function AdvTable({ rows, kind }: { rows: Ads2AdvisorProduct[]; kind: 'down' | 'up' }) {
-  if (!rows.length) return <p className="muted">{kind === 'down' ? 'Заметных просадок по товарам нет.' : 'Заметного роста по товарам нет.'}</p>;
-  return (
-    <div className="ad2-scroll adv-scroll">
-      <table className="ad2-table adv-table">
-        <thead><tr><th className="cmp-col-prod">Товар</th><th className="ad2-num">Заказы: день / среднее</th><th className="ad2-num">Выручка: день / среднее</th><th className="ad2-num">Разница</th><th>Что видно в данных и что сделать</th></tr></thead>
-        <tbody>
-          {rows.map(p => (
-            <tr key={p.key}>
-              <td className="cmp-col-prod"><ProductCell p={{ photo: p.photo, name: p.article, article: p.name, link: p.link }} /></td>
-              <td className="ad2-num">{num(p.orders)} / {nf1.format(p.ordersBase)}</td>
-              <td className="ad2-num">{kRub(p.revenue)} / {kRub(p.revenueBase)}</td>
-              <td className={`ad2-num ${p.delta < 0 ? 'ad2-bad' : 'adv-good'}`}>{p.delta > 0 ? '+' : ''}{kRub(p.delta)}</td>
-              <td className="adv-causes">{p.causes.length ? p.causes.map(c => <CauseLine key={c.code + c.text} c={c} />)
-                : <span className="muted">{kind === 'down' ? 'Причина не видна в данных — возможно, спрос; смотреть динамику ещё день' : 'Рост без явной причины в данных'}</span>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function AdvisorSheet({ mp }: { mp: Ads2Mp }) {
-  const [date, setDate] = useState<string | null>(null);
-  const [d, setD] = useState<Ads2Advisor | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const datesRef = useRef<HTMLDivElement | null>(null);
-  // выбранный день — последний справа; на узком экране лента дат прокручивается к нему
-  useEffect(() => { const el = datesRef.current?.querySelector('.adv-date.active') as HTMLElement | null; el?.scrollIntoView({ block: 'nearest', inline: 'center' }); }, [d?.date]);
-  useEffect(() => {
-    setLoading(true);
-    apiGet<Ads2Advisor>(`/api/ads2/advisor?mp=${mp}${date ? `&date=${date}` : ''}`)
-      .then(r => { setD(r.data); setErr(null); }).catch(e => setErr(errText(e))).finally(() => setLoading(false));
-  }, [mp, date]);
-  if (err) return <div className="rnp-alert">Советник не загрузился: {err}</div>;
-  if (!d) return <div className="card muted">Считаю…</div>;
-  const maxDrv = Math.max(1, ...d.drivers.map(x => Math.abs(x.delta)));
-  return (
-    <>
-      <section className="card cmp-card">
-        <div className="cmp-head">
-          <h2>Советник по продажам · {wd(d.date)} {ddmm(d.date)}</h2>
-          {loading && <span className="muted">считаю…</span>}
-        </div>
-        <p className="muted cmp-lead">День сравнивается со средним за 7 дней до него ({ddmm(d.baseFrom)}–{ddmm(d.baseTo)}). Причины — из РНП (заказы, переходы, корзины, реклама, остатки, цена и СПП), позиций в поиске, журнала рекламы и цен привязанных конкурентов.</p>
-        <div className="adv-dates" role="group" aria-label="День" ref={datesRef}>
-          {[...d.dates].reverse().map(x => (
-            <button key={x} className={`adv-date ${x === d.date ? 'active' : ''} ${['сб', 'вс'].includes(wd(x)) ? 'we' : ''}`} onClick={() => setDate(x)}>
-              <span>{wd(x)}</span><b>{ddmm(x)}</b>
-            </button>
-          ))}
-        </div>
-      </section>
-      <section className="ad2-kpis">
-        <div className="card ad2-kpi"><div className="card-title">Заказы</div><div className="ad2-kpi-v">{num(d.day.orders)}</div><Delta a={d.day.orders} b={d.base.orders} /><div className="ad2-kpi-sub">в среднем {nf1.format(d.base.orders)} в день{d.weekAgo ? ` · неделю назад ${num(d.weekAgo.orders)}` : ''}</div></div>
-        <div className="card ad2-kpi"><div className="card-title">Выручка (цена продавца)</div><div className="ad2-kpi-v">{kRub(d.day.revenue)}</div><Delta a={d.day.revenue} b={d.base.revenue} money /><div className="ad2-kpi-sub">в среднем {kRub(d.base.revenue)}{d.weekAgo ? ` · неделю назад ${kRub(d.weekAgo.revenue)}` : ''}</div></div>
-        <div className="card ad2-kpi"><div className="card-title">Реклама</div><div className="ad2-kpi-v">{rub(d.day.spend)}</div><Delta a={d.day.spend} b={d.base.spend} /><div className="ad2-kpi-sub">ДРР {pct(d.day.drr)} · в среднем {pct(d.base.drr)}</div></div>
-        <div className="card ad2-kpi"><div className="card-title">Переходы в карточки</div><div className="ad2-kpi-v">{num(d.day.views)}</div>{d.day.views != null && d.base.views != null && <Delta a={d.day.views} b={d.base.views} />}<div className="ad2-kpi-sub">в корзину {pct(d.day.cartConv)} · в среднем {pct(d.base.cartConv)}</div></div>
-      </section>
-      {d.summary.length > 0 && (
-        <section className="card adv-summary">
-          <h2><LightbulbIcon size={18} weight="fill" /> Вывод</h2>
-          <ul>{d.summary.map(s => <li key={s}>{s}</li>)}</ul>
-        </section>
-      )}
-      {d.drivers.length > 0 && (
-        <section className="card">
-          <h2>Главные причины просадки</h2>
-          <div className="adv-drivers">
-            {d.drivers.map(x => (
-              <div key={x.code} className="adv-driver">
-                <div className="adv-driver-t"><b>{x.label}</b> <span className="muted">· {x.products} тов.</span></div>
-                <div className="adv-bar"><span style={{ width: `${Math.max(3, Math.abs(x.delta) / maxDrv * 100)}%` }} /></div>
-                <div className="adv-driver-v">−{kRub(Math.abs(x.delta))}</div>
-                {x.action && <div className="adv-action adv-driver-a">→ {x.action}</div>}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-      <section className="card ad2-tablecard">
-        <h2>Что просело</h2>
-        <AdvTable rows={d.down} kind="down" />
-      </section>
-      <section className="card ad2-tablecard">
-        <h2>Что выросло</h2>
-        <AdvTable rows={d.up} kind="up" />
-      </section>
-      {d.notes.map(n => <div key={n} className="rnp-note">{n}</div>)}
-    </>
-  );
-}
-
 // ─── Страница ───────────────────────────────────────────────────────────────
+// Лист «Советник по продажам» переехал в РНП → «Советник» (выпуски в течение дня, 15.10.2026).
 
 function Board({ mp }: { mp: Ads2Mp }) {
   const [sheet, setSheet] = useState<Sheet>(() => { try { const s = localStorage.getItem('cmp:sheet') as Sheet; return SHEETS.some(([k]) => k === s) ? s : 'watch'; } catch { return 'watch'; } });
@@ -572,12 +453,10 @@ function Board({ mp }: { mp: Ads2Mp }) {
           ))}
         </div>
       </section>
-      {sheet === 'advisor' ? <AdvisorSheet mp={mp} /> : <>
-        {err && <div className="rnp-alert">Конкуренты не загрузились: {err}</div>}
-        {!d && !err && <div className="card muted">Загружаю…</div>}
-        {d && sheet === 'watch' && <WatchSheet d={d} mp={mp} onData={onData} setToast={setToast} />}
-        {d && sheet === 'market' && <MarketSheet d={d} mp={mp} />}
-      </>}
+      {err && <div className="rnp-alert">Конкуренты не загрузились: {err}</div>}
+      {!d && !err && <div className="card muted">Загружаю…</div>}
+      {d && sheet === 'watch' && <WatchSheet d={d} mp={mp} onData={onData} setToast={setToast} />}
+      {d && sheet === 'market' && <MarketSheet d={d} mp={mp} />}
       {ui}
     </div>
   );

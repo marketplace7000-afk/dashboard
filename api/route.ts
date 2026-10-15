@@ -342,6 +342,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { getAdvisor } = await import('./_lib/ads/advisor');
         return res.status(200).json(await getAdvisor(req.query.mp === 'ozon' ? 'ozon' : 'wb', typeof req.query.date === 'string' ? req.query.date : undefined));
       }
+      // Сигналы и выпуски советника (этап А, 15.10.2026): лист «Советник» в РНП.
+      //   GET  signals?mp=&date=&id=          — выпуски дня, выбранный (или последний) выпуск, сигналы со статусами
+      //   POST signals {mp, run: true}        — собрать выпуск сейчас
+      //   POST signals {id, action: done|snooze|reopen, note?}
+      if (what === 'signals') {
+        const sg = await import('./_lib/ads/signals');
+        const mp = req.query.mp === 'ozon' ? 'ozon' : 'wb';
+        if (req.method === 'POST') {
+          const b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
+          if (b.run) {
+            const issue = await sg.buildIssue(b.mp === 'ozon' ? 'ozon' : 'wb', 'manual', { collect: true });
+            return res.status(200).json(sg.getSignals(issue.mp, issue.date, issue.id));
+          }
+          if (b.id != null) {
+            if (!['done', 'snooze', 'reopen'].includes(b.action)) return res.status(400).json({ ok: false, error: 'action: done, snooze или reopen' });
+            const r = sg.decideSignal(Number(b.id), b.action, 'менеджер', b.note ? String(b.note).slice(0, 300) : null);
+            return res.status(r.ok ? 200 : 404).json(r);
+          }
+          return res.status(400).json({ ok: false, error: 'нужен run или id' });
+        }
+        return res.status(200).json(sg.getSignals(mp, typeof req.query.date === 'string' ? req.query.date : undefined, req.query.id ? Number(req.query.id) : undefined));
+      }
       if (what === 'competitors') {
         const { getCompetitors, editWatch } = await import('./_lib/ads/cabinet');
         if (req.method === 'POST') {

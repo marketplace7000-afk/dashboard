@@ -126,12 +126,12 @@ const b4 = getCompetitors('wb').watch.find(x => x.key === 'SOTA-RGB')!.links.fin
 check('не вернула витрина — помечена, «с» — первый проход, цена прежняя', [b4.hidden, b4.hiddenSince === h1, b4.price, b4.priceAt === firstAt], [true, true, 3500, true]);
 saveCabinetSnapshot('wb', { light: true, errors: [], cards: [{ id: 390744732, price: 3400, qty: 5 }] });
 check('снова на витрине — пометка снята', [hiddenCards('wb').has('390744732'), getCompetitors('wb').watch.find(x => x.key === 'SOTA-RGB')!.links.find(l => l.id === '390744732')!.price], [false, 3400]);
-check('расписание по МСК', rs.slots.map(s => s.time), ['05:40', '11:40', '16:40']);
+check('расписание по МСК (вечер 15.10: быстрые проходы перед выпусками советника)', [...rs.slots.map(s => s.time)].sort(), ['05:40', '11:20', '14:50', '16:50']);
 check('сразу после прохода пропуска нет', rs.missedAt, null);
 const mskMidnight = Math.floor((Date.now() + 3 * 3600_000) / 86_400_000) * 86_400_000 - 3 * 3600_000;
 const tomorrow1230 = mskMidnight + 86_400_000 + 12.5 * 3600_000;
-check('завтра в 12:30 без прохода — пропущено 11:40', refreshState('wb', tomorrow1230).missedAt, mskMidnight + 86_400_000 + (11 * 60 + 40) * 60_000);
-check('завтра в 12:10 — 11:40 ещё ждём (40 минут), но ночной 05:40 пропущен', refreshState('wb', mskMidnight + 86_400_000 + (12 * 60 + 10) * 60_000).missedAt, mskMidnight + 86_400_000 + (5 * 60 + 40) * 60_000);
+check('завтра в 12:30 без прохода — пропущено 11:20', refreshState('wb', tomorrow1230).missedAt, mskMidnight + 86_400_000 + (11 * 60 + 20) * 60_000);
+check('завтра в 11:50 — 11:20 ещё ждём (40 минут), но ночной 05:40 пропущен', refreshState('wb', mskMidnight + 86_400_000 + (11 * 60 + 50) * 60_000).missedAt, mskMidnight + 86_400_000 + (5 * 60 + 40) * 60_000);
 saveCabinetSnapshot('wb', { ...wbData, daily: [{ date: yest, report: { groups: [{ items: [{ nmId: 1417220162, avgPosition: { current: 14 }, views: { current: 900 } }] }] } }] });
 check('позиция WB за день сохраняется', posSeries('wb', yest, yest).get('1417220162')?.get(yest), 14);
 

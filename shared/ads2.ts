@@ -149,7 +149,7 @@ export type Ads2CompRefresh = {
   nextRuns: number[];
   /** Последний проход по витрине: когда сняты цены, сколько карточек и у скольких есть цена. */
   pass: { at: number; light: boolean; cards: number; priced: number; errors: number } | null;
-  /** Расписание по МСК: «05:40» (полный ночной), «11:40», «16:40» (быстрые). */
+  /** Расписание по МСК: «05:40» (полный ночной), «11:20», «14:50», «16:50» (быстрые, перед выпусками советника). */
   slots: { time: string; light: boolean }[];
   /** Плановое обновление наступило больше 40 минут назад, а цен после него нет — время этого слота. */
   missedAt: number | null;
@@ -223,6 +223,73 @@ export type Ads2Advisor = {
   down: Ads2AdvisorProduct[];
   up: Ads2AdvisorProduct[];
   notes: string[];
+};
+
+// ─── Сигналы и выпуски советника (этап А, 15.10.2026) ───────────────────────
+// Один сигнальный слой для всех экранов: товар × код × уровень, «что случилось ·
+// сколько ₽ · что сделать · кому». Живёт, пока условие держится; менеджер отмечает
+// «сделано» или откладывает. Правила — api/_lib/ads/signals.ts.
+
+/** Кому адресован сигнал: реклама, цены, контент карточки, остатки и поставки, сама карточка (скрыта/заблокирована). */
+export type Ads2SignalRole = 'ads' | 'price' | 'content' | 'supply' | 'card';
+
+export const SIGNAL_ROLE_LABEL: Record<Ads2SignalRole, string> = {
+  card: 'Карточки', supply: 'Остатки и поставки', ads: 'Реклама', price: 'Цены', content: 'Контент карточки',
+};
+
+export type Ads2Signal = {
+  id: number; mp: Ads2Mp;
+  /** Ключ РНП товара (WB — nmId, Ozon — артикул) или `camp:<id>` для сигнала по кампании. */
+  sku: string; adSku: string | null;
+  article: string; name: string; photo: string; link: string | null;
+  code: string; level: 'critical' | 'warn' | 'info'; role: Ads2SignalRole;
+  title: string; text: string; action: string;
+  /** Сколько денег на кону (расход впустую, недополученная выручка), ₽. */
+  rub: number | null;
+  /** С какого момента условие держится и сколько это дней подряд. */
+  since: number; lastSeen: number; days: number;
+  status: 'open' | 'done' | 'snoozed' | 'gone';
+  statusAt: number | null; statusBy: string | null; snoozedUntil: number | null; note: string | null;
+};
+
+/** Темп дня: заказы, выручка и расход к моменту выпуска против того же часа в прошлые дни. */
+export type Ads2Pace = {
+  at: number; orders: number; revenue: number; spend: number; drr: number | null;
+  /** Среднее к этому же выпуску за прошлые дни (копится по выпускам; null — базы ещё нет). */
+  base: { orders: number; revenue: number; spend: number; days: number } | null;
+  /** Средний полный день за 7 дней — ориентир, пока база по часам копится. */
+  fullDay: { orders: number; revenue: number; spend: number } | null;
+  note: string | null;
+};
+
+export type Ads2IssueSlot = 'morning' | 'noon' | 'day' | 'evening' | 'manual';
+
+export type Ads2AdvisorIssue = {
+  id: number; mp: Ads2Mp; slot: Ads2IssueSlot; date: string; at: number;
+  pace: Ads2Pace | null;
+  /** Разбор вчерашнего дня (как раньше в «Советнике по продажам»). */
+  yesterday: { date: string; baseFrom: string; baseTo: string; summary: string[]; drivers: Ads2Advisor['drivers'];
+    day: Ads2AdvisorTotals; base: Ads2AdvisorTotals; weekAgo: { orders: number; revenue: number } | null;
+    down: Ads2AdvisorProduct[]; up: Ads2AdvisorProduct[] } | null;
+  /** Снимок сигналов на момент выпуска (статусы — свежие, из таблицы). */
+  signals: Ads2Signal[];
+  /** Когда обновлялись источники (мс): РНП, реклама, витрина конкурентов. */
+  dataAt: { rnp: number | null; ads: number | null; comp: number | null };
+  notes: string[];
+};
+
+export type Ads2SignalsResponse = {
+  ok: true; mp: Ads2Mp; date: string;
+  /** Дни, за которые есть выпуски или можно собрать (последние 14). */
+  dates: string[];
+  /** Расписание выпусков по МСК. */
+  slots: { slot: Ads2IssueSlot; time: string; label: string }[];
+  /** Выпуски выбранного дня. */
+  issues: { id: number; slot: Ads2IssueSlot; at: number }[];
+  issue: Ads2AdvisorIssue | null;
+  /** Сделано сегодня (для свёрнутого блока). */
+  doneToday: Ads2Signal[];
+  building: boolean;
 };
 
 // ─── Автопилот, этап 2 «советник» (14.10.2026) ──────────────────────────────

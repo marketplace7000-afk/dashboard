@@ -104,37 +104,37 @@ export function DailyAiInsights(props: Props) {
 
       {!collapsed && (<>
       {error && (
-        <div className="row gap-8" style={{ color: 'var(--bad)', fontSize: 14.5 }}>
+        <div className="row gap-8" style={{ color: 'var(--bad)', fontSize: 16 }}>
           <WarningIcon size={14} weight="bold" /> {error}
         </div>
       )}
 
       {!ins && !error && !loading && (
-        <div className="muted" style={{ fontSize: 14.5 }}>
+        <div className="muted" style={{ fontSize: 16 }}>
           Инсайт сгенерируется автоматически, когда подгрузятся данные за период.
         </div>
       )}
 
       {ins?.summary && (
-        <div style={{ fontSize: 15, lineHeight: 1.65, color: 'var(--accent-2)' }}>{ins.summary}</div>
+        <div style={{ fontSize: 16.5, lineHeight: 1.65, color: 'var(--accent-2)' }}>{ins.summary}</div>
       )}
       {ins?.insights && ins.insights.length > 0 && (
-        <ul style={{ marginTop: 12, marginBottom: 0, paddingLeft: 20, lineHeight: 1.75, fontSize: 14.5, color: 'var(--accent-2)' }}>
+        <ul style={{ marginTop: 12, marginBottom: 0, paddingLeft: 20, lineHeight: 1.75, fontSize: 16, color: 'var(--accent-2)' }}>
           {ins.insights.slice(0, 5).map((line, i) => <li key={i}>{line}</li>)}
         </ul>
       )}
       {ins?.actions && ins.actions.length > 0 && (
         <>
-          <div style={{ marginTop: 12, fontSize: 14, fontWeight: 600, color: 'var(--accent-2)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+          <div style={{ marginTop: 12, fontSize: 15.5, fontWeight: 600, color: 'var(--accent-2)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
             Действия на неделю
           </div>
-          <ul style={{ marginTop: 6, marginBottom: 0, paddingLeft: 20, lineHeight: 1.75, fontSize: 14.5, color: 'var(--accent-2)' }}>
+          <ul style={{ marginTop: 6, marginBottom: 0, paddingLeft: 20, lineHeight: 1.75, fontSize: 16, color: 'var(--accent-2)' }}>
             {ins.actions.slice(0, 4).map((line, i) => <li key={i}>{line}</li>)}
           </ul>
         </>
       )}
       {ins?.raw && (
-        <pre style={{ whiteSpace: 'pre-wrap', fontSize: 14, marginTop: 10 }}>{ins.raw}</pre>
+        <pre style={{ whiteSpace: 'pre-wrap', fontSize: 15.5, marginTop: 10 }}>{ins.raw}</pre>
       )}
       </>)}
     </div>

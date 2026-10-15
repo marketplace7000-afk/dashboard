@@ -504,13 +504,13 @@ export function LiveOzonPricing() {
       {bundle.error && (
         <div className="row" style={{ gap: 10, padding: 12, background: 'rgba(220,38,38,.08)', borderRadius: 8 }}>
           <WarningIcon size={18} weight="bold" style={{ color: 'var(--bad)' }} />
-          <div className="muted" style={{ fontSize: 15 }}>{bundle.error}</div>
+          <div className="muted" style={{ fontSize: 16.5 }}>{bundle.error}</div>
         </div>
       )}
 
       {visibleRows.length > 0 && (
         <div className="tbl-scroll">
-        <table className="mp-table" style={{ fontSize: 17 }}>
+        <table className="mp-table" style={{ fontSize: 18.5 }}>
           <thead className="mp-head">
             <tr>
               {/* Та же процентная сетка, что на WB (см. LiveWbPricing.tsx, 15.10.2026). */}
@@ -548,32 +548,32 @@ export function LiveOzonPricing() {
                       </div>
                     </td>
                     <td style={{ cursor: 'pointer' }} onClick={() => setExpanded(() => (isOpen ? {} : { [r.product_id]: true }))}>
-                      <div style={{ fontWeight: 700, fontSize: 18, lineHeight: 1.25, wordBreak: 'break-word' }} title={r.name ?? ''}>{r.offer_id}</div>
+                      <div style={{ fontWeight: 700, fontSize: 19.5, lineHeight: 1.25, wordBreak: 'break-word' }} title={r.name ?? ''}>{r.offer_id}</div>
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       <b>{fmt(cur)}</b>
-                      <div className="muted" style={{ fontSize: 14.5 }} title="Наша цена в личном кабинете Ozon — до соинвеста площадки">цена ЛК</div>
+                      <div className="muted" style={{ fontSize: 16 }} title="Наша цена в личном кабинете Ozon — до соинвеста площадки">цена ЛК</div>
                       {oldPrice > cur && (
-                        <div className="muted" style={{ fontSize: 15, textDecoration: 'line-through' }}>{fmt(oldPrice)}</div>
+                        <div className="muted" style={{ fontSize: 16.5, textDecoration: 'line-through' }}>{fmt(oldPrice)}</div>
                       )}
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       <b style={{ color: 'var(--good)' }}>{fmt(buyerPrice)}</b>
                       {buyerFromShowcase > 0
-                  ? <div className="muted" style={{ fontSize: 14.5, color: 'var(--good)' }} title={`Живая цена с витрины ozon.ru (публичная карточка, снята ${showcase?.at ? new Date(showcase.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—'}). Это ровно то, что видит покупатель, с учётом СПП/соинвеста.${showcase?.oldPrice ? ` Зачёркнутая на витрине: ${showcase.oldPrice.toLocaleString('ru-RU')} ₽.` : ''}`}>витрина · СПП {sppReal}%</div>
+                  ? <div className="muted" style={{ fontSize: 16, color: 'var(--good)' }} title={`Живая цена с витрины ozon.ru (публичная карточка, снята ${showcase?.at ? new Date(showcase.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—'}). Это ровно то, что видит покупатель, с учётом СПП/соинвеста.${showcase?.oldPrice ? ` Зачёркнутая на витрине: ${showcase.oldPrice.toLocaleString('ru-RU')} ₽.` : ''}`}>витрина · СПП {sppReal}%</div>
                   : showcaseMem > 0 && showcase
-                    ? <div className="muted" style={{ fontSize: 14.5 }} title={`СПП ${sppReal}% зафиксирован при последней принудительной проверке витрины (${fmtDateClock(showcase.at)}). Пока витрину не проверили заново, цена покупателя = текущая цена ЛК x (1 - СПП): при смене цены продавца в кабинете цена покупателя пересчитывается пропорционально. Чтобы снять витрину и зафиксировать новый СПП, нажмите «Проверить цены на витрине» и введите пароль.`}>витрина · СПП {sppReal}%</div>
+                    ? <div className="muted" style={{ fontSize: 16 }} title={`СПП ${sppReal}% зафиксирован при последней принудительной проверке витрины (${fmtDateClock(showcase.at)}). Пока витрину не проверили заново, цена покупателя = текущая цена ЛК x (1 - СПП): при смене цены продавца в кабинете цена покупателя пересчитывается пропорционально. Чтобы снять витрину и зафиксировать новый СПП, нажмите «Проверить цены на витрине» и введите пароль.`}>витрина · СПП {sppReal}%</div>
                   : buyerFromApi > 0
-                        ? <div className="muted" style={{ fontSize: 14.5 }} title="Реальная цена покупателя со соинвестом — из отчёта о реализации Ozon (факт продаж), как у Культуры Аналитики">факт · СПП {sppReal}%</div>
+                        ? <div className="muted" style={{ fontSize: 16 }} title="Реальная цена покупателя со соинвестом — из отчёта о реализации Ozon (факт продаж), как у Культуры Аналитики">факт · СПП {sppReal}%</div>
                         : buyerFromMemory > 0 && memHist
-                          ? <div style={{ fontSize: 14.5, color: 'var(--warn)' }} title={`Живой скидки сейчас нет — вторая цена восстановлена от цены ЛК по последнему запомненному СПП ${memHist.spp}% (зафиксирован ${memHist.date})`}>≈ по СПП {memHist.spp}% · {memHist.date}</div>
+                          ? <div style={{ fontSize: 16, color: 'var(--warn)' }} title={`Живой скидки сейчас нет — вторая цена восстановлена от цены ЛК по последнему запомненному СПП ${memHist.spp}% (зафиксирован ${memHist.date})`}>≈ по СПП {memHist.spp}% · {memHist.date}</div>
                           : sppReal > 0
-                            ? <div className="muted" style={{ fontSize: 15 }} title="Цена покупателя из таблицы «ДРР и цены» / панели">СПП {sppReal}%</div>
+                            ? <div className="muted" style={{ fontSize: 16.5 }} title="Цена покупателя из таблицы «ДРР и цены» / панели">СПП {sppReal}%</div>
                             : memHist && Number.isFinite(memAgeDays)
                               // Память есть, но старая: честно говорим, что не применяем её.
                               // Старый процент на новой цене — не оценка, а выдумка (04.09).
-                              ? <div style={{ fontSize: 14.5, color: 'var(--warn)' }} title={`Последний известный соинвест ${memHist.spp}% зафиксирован ${memHist.date} — ${memAgeDays} дн назад. Старше ${SPP_MEMORY_DAYS} дней память не применяем: процент мог измениться, и цена вышла бы выдуманной. Показана цена ЛК.`}>нет свежих продаж · СПП {memHist.spp}% устарел ({memAgeDays} дн)</div>
-                              : <div className="muted" style={{ fontSize: 14.5 }} title="Ozon не отдаёт реальную скидку площадки/соинвест в API, и запомненного СПП по товару ещё нет — показываем цену ЛК. Задай «СПП по умолч.» в панели или впиши цену в таблицу">= ЛК · нет скидки в API</div>}
+                              ? <div style={{ fontSize: 16, color: 'var(--warn)' }} title={`Последний известный соинвест ${memHist.spp}% зафиксирован ${memHist.date} — ${memAgeDays} дн назад. Старше ${SPP_MEMORY_DAYS} дней память не применяем: процент мог измениться, и цена вышла бы выдуманной. Показана цена ЛК.`}>нет свежих продаж · СПП {memHist.spp}% устарел ({memAgeDays} дн)</div>
+                              : <div className="muted" style={{ fontSize: 16 }} title="Ozon не отдаёт реальную скидку площадки/соинвест в API, и запомненного СПП по товару ещё нет — показываем цену ЛК. Задай «СПП по умолч.» в панели или впиши цену в таблицу">= ЛК · нет скидки в API</div>}
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       {oi.cost > 0
@@ -583,22 +583,22 @@ export function LiveOzonPricing() {
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       {marginRub !== null ? (
                         <>
-                          <b style={{ fontSize: 18, color: marginPct! >= 30 ? 'var(--good)' : marginPct! >= 15 ? 'var(--warn)' : 'var(--bad)' }}>
+                          <b style={{ fontSize: 19.5, color: marginPct! >= 30 ? 'var(--good)' : marginPct! >= 15 ? 'var(--warn)' : 'var(--bad)' }}>
                             {Math.round(marginPct ?? 0)}%
                           </b>
-                          <div className="muted" style={{ fontSize: 15 }}>{marginRub.toLocaleString('ru-RU')} ₽</div>
+                          <div className="muted" style={{ fontSize: 16.5 }}>{marginRub.toLocaleString('ru-RU')} ₽</div>
                           {Object.keys(kk).length > 0 && (
-                            <div style={{ fontSize: 14.5, color: 'var(--accent)' }} title="Маржа посчитана по ручным значениям из раскрытой строки. Они снимутся сами, как только по этим полям придут новые данные, или кнопкой «Сбросить».">✎ ручной расчёт</div>
+                            <div style={{ fontSize: 16, color: 'var(--accent)' }} title="Маржа посчитана по ручным значениям из раскрытой строки. Они снимутся сами, как только по этим полям придут новые данные, или кнопкой «Сбросить».">✎ ручной расчёт</div>
                           )}
                           {commIsDefault && (
-                            <div style={{ fontSize: 14.5, color: 'var(--warn)' }} title={`Комиссия Ozon не пришла из API — взят дефолт ${OZON_DEFAULTS.commission}%. Раскрой строку и проверь/задай комиссию.`}>⚠ ком. {OZON_DEFAULTS.commission}%</div>
+                            <div style={{ fontSize: 16, color: 'var(--warn)' }} title={`Комиссия Ozon не пришла из API — взят дефолт ${OZON_DEFAULTS.commission}%. Раскрой строку и проверь/задай комиссию.`}>⚠ ком. {OZON_DEFAULTS.commission}%</div>
                           )}
                         </>
                       ) : <span className="muted" title={cost <= 0 ? 'Нет себестоимости в таблице — маржу не считаем' : undefined}>—</span>}
                     </td>
                     <td className="right" style={{ whiteSpace: 'nowrap' }}>
                       {roi !== null && roiInfo ? (
-                        <span style={{ background: ROI_STATUS_COLOR[roiInfo.status].bg, color: ROI_STATUS_COLOR[roiInfo.status].color, padding: '2px 8px', borderRadius: 999, fontWeight: 600, fontSize: 15 }}>
+                        <span style={{ background: ROI_STATUS_COLOR[roiInfo.status].bg, color: ROI_STATUS_COLOR[roiInfo.status].color, padding: '2px 8px', borderRadius: 999, fontWeight: 600, fontSize: 16.5 }}>
                           {roi}%
                         </span>
                       ) : <span className="muted">—</span>}
@@ -658,7 +658,7 @@ export function LiveOzonPricing() {
                               <div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                                   {ozFields.map(f => (
-                                    <label key={f.key} style={{ fontSize: 15 }}>
+                                    <label key={f.key} style={{ fontSize: 16.5 }}>
                                       <div className="muted" style={{ marginBottom: 3 }}>{f.label}{f.suffix ? `, ${f.suffix}` : ''}</div>
                                       <input className="input" type="number" value={f.val}
                                         onChange={(e) => setOzKnob(r.product_id, f.key, e.target.value, (ozAutoRow[f.key] ?? ozAuto(r)[f.key]))}
@@ -675,20 +675,20 @@ export function LiveOzonPricing() {
                               <div>
                                 <div className="card-title" style={{ marginBottom: 8 }}>Расчёт на 1 продажу</div>
                                 <div style={{ display: 'grid', gap: 3 }}>
-                                  <div className="flex-between" style={{ fontSize: 16, fontWeight: 600 }}>
+                                  <div className="flex-between" style={{ fontSize: 17.5, fontWeight: 600 }}>
                                     <span>Цена покупателя (с СПП {oi.spp}%)</span>
                                     <span style={{ color: 'var(--good)' }}>{oc ? fmt(Math.round(oc.buyerPrice)) : '—'}</span>
                                   </div>
                                   {obreak.map((x, i) => (
-                                    <div key={i} className="flex-between muted" style={{ fontSize: 15 }}>
+                                    <div key={i} className="flex-between muted" style={{ fontSize: 16.5 }}>
                                       <span>{x.l}</span><span style={{ color: 'var(--bad)' }}>{fmt(Math.round(x.v))}</span>
                                     </div>
                                   ))}
-                                  <div className="flex-between" style={{ fontSize: 18, fontWeight: 700, borderTop: '1px solid var(--border)', marginTop: 6, paddingTop: 6 }}>
+                                  <div className="flex-between" style={{ fontSize: 19.5, fontWeight: 700, borderTop: '1px solid var(--border)', marginTop: 6, paddingTop: 6 }}>
                                     <span>Чистая прибыль</span>
                                     <span style={{ color: oc && oc.profit >= 0 ? 'var(--good)' : 'var(--bad)' }}>
                                       {oc ? fmt(Math.round(oc.profit)) : '—'}
-                                      {oc && <span style={{ fontSize: 15, fontWeight: 600 }}> · {oc.margin.toFixed(1)}%{oi.cost > 0 ? ` · ROI ${oc.roi.toFixed(0)}%` : ''}</span>}
+                                      {oc && <span style={{ fontSize: 16.5, fontWeight: 600 }}> · {oc.margin.toFixed(1)}%{oi.cost > 0 ? ` · ROI ${oc.roi.toFixed(0)}%` : ''}</span>}
                                     </span>
                                   </div>
                                 </div>

@@ -81,7 +81,7 @@ export function LiveOzonStocks() {
         </div>
         <div className="row gap-8">
           <div className="row" style={{ gap: 8 }}>
-            <span className="muted" style={{ fontSize: 14 }}>Порог дней:</span>
+            <span className="muted" style={{ fontSize: 15.5 }}>Порог дней:</span>
             <input className="input" type="number" value={threshold} onChange={(e) => setThreshold(+e.target.value)} style={{ width: 70 }} />
           </div>
           <button className="btn btn-sm" onClick={bundle.refresh} disabled={bundle.loading}>
@@ -149,8 +149,8 @@ export function LiveOzonStocks() {
                           ? <img src={r.primary_image} alt="" style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover' }} />
                           : <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--bg-2)' }} />}
                       </td>
-                      <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 14 }}>{r.offer_id}</td>
-                      <td style={{ maxWidth: 360, fontSize: 14.5 }}>
+                      <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15.5 }}>{r.offer_id}</td>
+                      <td style={{ maxWidth: 360, fontSize: 16 }}>
                         <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{r.name ?? '—'}</div>
                       </td>
                       <td className="right">{(r.dailySales ?? 0).toFixed(1)}</td>
@@ -191,8 +191,8 @@ export function LiveOzonStocks() {
                           ? <img src={r.primary_image} alt="" style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover' }} />
                           : <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--bg-2)' }} />}
                       </td>
-                      <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 14 }}>{r.offer_id}</td>
-                      <td style={{ maxWidth: 320, fontSize: 14.5 }}>
+                      <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15.5 }}>{r.offer_id}</td>
+                      <td style={{ maxWidth: 320, fontSize: 16 }}>
                         <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{r.name ?? '—'}</div>
                       </td>
                       <td className="right">{r.fbo}</td>
@@ -208,7 +208,7 @@ export function LiveOzonStocks() {
                   ))}
                 </tbody>
               </table>
-              <div className="muted" style={{ fontSize: 13.5, marginTop: 10 }}>
+              <div className="muted" style={{ fontSize: 15.5, marginTop: 10 }}>
                 Прогноз = текущие остатки / средние продажи за 30 дней. Telegram-бот будет слать алерт
                 за N дней до прогнозируемого окончания.
               </div>

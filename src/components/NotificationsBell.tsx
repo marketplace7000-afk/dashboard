@@ -57,7 +57,7 @@ export function NotificationsBell({ onNav }: { onNav: (page: string) => void }) 
           borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.12)', padding: 8,
         }}>
           {alerts.length === 0 ? (
-            <div className="row gap-8" style={{ padding: 14, color: 'var(--muted)', fontSize: 14.5 }}>
+            <div className="row gap-8" style={{ padding: 14, color: 'var(--muted)', fontSize: 16 }}>
               <CheckCircleIcon size={16} weight="bold" style={{ color: 'var(--good)' }} />
               Все спокойно — критичных алертов нет
             </div>
@@ -73,9 +73,9 @@ export function NotificationsBell({ onNav }: { onNav: (page: string) => void }) 
             >
               <div className="row gap-8" style={{ alignItems: 'center' }}>
                 <a.Icon size={15} weight="fill" style={{ color: a.color, flexShrink: 0 }} />
-                <strong style={{ fontSize: 14.5 }}>{a.text}</strong>
+                <strong style={{ fontSize: 16 }}>{a.text}</strong>
               </div>
-              <div className="muted" style={{ fontSize: 13.5, marginTop: 3, paddingLeft: 23, fontFamily: 'ui-monospace, Menlo, monospace' }}>{a.sub}</div>
+              <div className="muted" style={{ fontSize: 15.5, marginTop: 3, paddingLeft: 23, fontFamily: 'ui-monospace, Menlo, monospace' }}>{a.sub}</div>
             </button>
           ))}
         </div>

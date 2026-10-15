@@ -40,7 +40,7 @@ export function AiAdvice({ module, context, disabled }: { module: AdviceModule; 
       <div className="flex-between" style={{ flexWrap: 'wrap', gap: 8 }}>
         <div className="row gap-8" style={{ alignItems: 'center' }}>
           <SparkleIcon size={16} weight="fill" style={{ color: 'var(--accent)' }} />
-          <strong style={{ fontSize: 15, color: 'var(--accent-2)' }}>Совет ИИ по разделу</strong>
+          <strong style={{ fontSize: 16.5, color: 'var(--accent-2)' }}>Совет ИИ по разделу</strong>
         </div>
         {advice
           ? <button className="btn btn-sm" onClick={() => run(true)} disabled={loading} title="Пересчитать (тратит токены)">
@@ -52,7 +52,7 @@ export function AiAdvice({ module, context, disabled }: { module: AdviceModule; 
       </div>
 
       {error && (
-        <div className="row gap-6" style={{ marginTop: 10, color: 'var(--bad)', fontSize: 14.5 }}>
+        <div className="row gap-6" style={{ marginTop: 10, color: 'var(--bad)', fontSize: 16 }}>
           <WarningIcon size={14} weight="bold" /> {error}
         </div>
       )}
@@ -60,7 +60,7 @@ export function AiAdvice({ module, context, disabled }: { module: AdviceModule; 
       {advice && (
         <div style={{ marginTop: 12, display: 'grid', gap: 12 }}>
           {advice.verdict && (
-            <div style={{ fontSize: 15, lineHeight: 1.55, color: 'var(--text)' }}>{advice.verdict}</div>
+            <div style={{ fontSize: 16.5, lineHeight: 1.55, color: 'var(--text)' }}>{advice.verdict}</div>
           )}
 
           {advice.actions?.length > 0 && (
@@ -70,8 +70,8 @@ export function AiAdvice({ module, context, disabled }: { module: AdviceModule; 
                 return (
                   <div key={i} className="row gap-8" style={{ alignItems: 'flex-start', padding: '8px 10px', borderRadius: 8, background: m.bg }}>
                     <m.Icon size={14} weight="bold" style={{ color: m.color, marginTop: 1, flexShrink: 0 }} />
-                    <div style={{ fontSize: 14.5, lineHeight: 1.5 }}>
-                      {a.sku && <span style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 13.5, color: m.color, marginRight: 6 }}>{a.sku}</span>}
+                    <div style={{ fontSize: 16, lineHeight: 1.5 }}>
+                      {a.sku && <span style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15.5, color: m.color, marginRight: 6 }}>{a.sku}</span>}
                       {a.text}
                     </div>
                   </div>
@@ -83,7 +83,7 @@ export function AiAdvice({ module, context, disabled }: { module: AdviceModule; 
           {advice.warnings?.length > 0 && (
             <div style={{ display: 'grid', gap: 4 }}>
               {advice.warnings.map((w, i) => (
-                <div key={i} className="row gap-6" style={{ fontSize: 14, color: 'var(--warn)' }}>
+                <div key={i} className="row gap-6" style={{ fontSize: 15.5, color: 'var(--warn)' }}>
                   <WarningIcon size={13} weight="bold" style={{ flexShrink: 0, marginTop: 2 }} /> {w}
                 </div>
               ))}
@@ -91,10 +91,10 @@ export function AiAdvice({ module, context, disabled }: { module: AdviceModule; 
           )}
 
           {advice.raw && !advice.verdict && (
-            <div className="muted" style={{ fontSize: 14, whiteSpace: 'pre-wrap' }}>{advice.raw}</div>
+            <div className="muted" style={{ fontSize: 15.5, whiteSpace: 'pre-wrap' }}>{advice.raw}</div>
           )}
 
-          <div className="muted" style={{ fontSize: 13 }}>
+          <div className="muted" style={{ fontSize: 15 }}>
             Совет ИИ на основе данных на экране. Это рекомендация — решение за вами.
           </div>
         </div>

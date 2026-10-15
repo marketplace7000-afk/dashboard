@@ -120,7 +120,7 @@ export function LiveOzonCompetitorIndex() {
 
           <div className="card" style={{ display: 'flex', gap: 10, background: 'var(--accent-soft)' }}>
             <InfoIcon size={18} weight="bold" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
-            <div style={{ fontSize: 14.5, color: 'var(--accent-2)' }}>
+            <div style={{ fontSize: 16, color: 'var(--accent-2)' }}>
               <b>{buckets.find((b) => b.key === 'WITHOUT_INDEX')!.count} SKU из {rows.length}</b> Ozon
               не смог сопоставить с аналогами на других площадках (нет валидного матча по EAN/штрихкоду).
               Это нормально для нишевых автотоваров — индекс работает по точным дубликатам. Для полного
@@ -138,7 +138,7 @@ export function LiveOzonCompetitorIndex() {
                   flex: b.count,
                   background: b.color,
                   display: 'grid', placeItems: 'center',
-                  color: '#fff', fontSize: 14, fontWeight: 600,
+                  color: '#fff', fontSize: 15.5, fontWeight: 600,
                 }}>
                   {b.count}
                 </div>
@@ -146,7 +146,7 @@ export function LiveOzonCompetitorIndex() {
             </div>
             <div className="row gap-12" style={{ marginTop: 10, flexWrap: 'wrap' }}>
               {buckets.filter((b) => b.count > 0).map((b) => (
-                <div key={b.key} className="row" style={{ gap: 6, fontSize: 14 }}>
+                <div key={b.key} className="row" style={{ gap: 6, fontSize: 15.5 }}>
                   <span style={{ width: 10, height: 10, borderRadius: 2, background: b.color }} />
                   <span className="muted">{b.label} · {b.count}</span>
                 </div>
@@ -219,8 +219,8 @@ export function LiveOzonCompetitorIndex() {
                             ? <img src={r.primary_image} alt="" style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'cover' }} />
                             : <div style={{ width: 32, height: 32, borderRadius: 6, background: 'var(--bg-2)' }} />}
                         </td>
-                        <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 14 }}>{r.offer_id}</td>
-                        <td style={{ maxWidth: 360, fontSize: 14.5 }}>
+                        <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15.5 }}>{r.offer_id}</td>
+                        <td style={{ maxWidth: 360, fontSize: 16 }}>
                           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
                             {r.name ?? '—'}
                           </div>
@@ -249,7 +249,7 @@ export function LiveOzonCompetitorIndex() {
               </table>
             )}
 
-            <div className="muted" style={{ fontSize: 13.5, marginTop: 12, lineHeight: 1.7 }}>
+            <div className="muted" style={{ fontSize: 15.5, marginTop: 12, lineHeight: 1.7 }}>
               <b>Индекс</b> — нормализованный показатель Ozon (1.0 = на уровне рынка, &gt;1.0 = дороже,
               &lt;1.0 = дешевле).<br />
               <b>Реф. цена рынка</b> — рассчитано как «моя цена / индекс». Это и есть калиброванная Ozon

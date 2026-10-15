@@ -114,7 +114,7 @@ export function LiveOzonPromos() {
         <>
           <div className="card" style={{ display: 'flex', gap: 10, background: 'var(--accent-soft)' }}>
             <InfoIcon size={18} weight="bold" style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
-            <div style={{ fontSize: 14.5, color: 'var(--accent-2)', lineHeight: 1.6 }}>
+            <div style={{ fontSize: 16, color: 'var(--accent-2)', lineHeight: 1.6 }}>
               Только товары <b>в наличии</b>. <b>Цена ЛК</b> — что стоит в кабинете, <b>Цена с СПП</b> —
               что реально платит покупатель (из «ДРР и цены»), <b>% СПП</b> — насколько Ozon снижает
               цену за свой счёт. Высокий % СПП = товар в акции площадки.
@@ -148,8 +148,8 @@ export function LiveOzonPromos() {
                           ? <img src={r.primary_image} alt="" style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover' }} />
                           : <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--bg-2)' }} />}
                       </td>
-                      <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 14 }}>{r.offer_id}</td>
-                      <td style={{ maxWidth: 360, fontSize: 14.5 }}>
+                      <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15.5 }}>{r.offer_id}</td>
+                      <td style={{ maxWidth: 360, fontSize: 16 }}>
                         <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{r.name ?? '—'}</div>
                       </td>
                       <td className="right muted">{fmt(lk)}</td>
@@ -167,7 +167,7 @@ export function LiveOzonPromos() {
               <div className="flex-between" style={{ marginBottom: 12 }}>
                 <div>
                   <h2 style={{ margin: 0 }}>Мы дороже минимума по рынку · &gt;5%</h2>
-                  <div className="muted" style={{ fontSize: 13.5, marginTop: 2 }}>
+                  <div className="muted" style={{ fontSize: 15.5, marginTop: 2 }}>
                     По данным Ozon (агрегированный минимум по площадкам, без ссылок). Источник не всегда точен — проверяйте вручную.
                   </div>
                 </div>
@@ -193,8 +193,8 @@ export function LiveOzonPromos() {
                           ? <img src={r.primary_image} alt="" style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover' }} />
                           : <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--bg-2)' }} />}
                       </td>
-                      <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 14 }}>{r.offer_id}</td>
-                      <td style={{ maxWidth: 360, fontSize: 14.5 }}>
+                      <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15.5 }}>{r.offer_id}</td>
+                      <td style={{ maxWidth: 360, fontSize: 16 }}>
                         <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{r.name ?? '—'}</div>
                       </td>
                       <td className="right"><b>{fmt(my)}</b></td>

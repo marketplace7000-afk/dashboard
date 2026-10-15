@@ -46,7 +46,7 @@ export function LiveOzonProducts({ limit = 20 }: { limit?: number }) {
       {bundle.error && (
         <div className="row" style={{ gap: 10, padding: 12, background: 'rgba(220,38,38,.08)', borderRadius: 8, marginBottom: 12 }}>
           <WarningIcon size={18} weight="bold" style={{ color: 'var(--bad)' }} />
-          <div className="muted" style={{ fontSize: 14 }}>{bundle.error}</div>
+          <div className="muted" style={{ fontSize: 15.5 }}>{bundle.error}</div>
         </div>
       )}
 
@@ -76,12 +76,12 @@ export function LiveOzonProducts({ limit = 20 }: { limit?: number }) {
                     ? <img src={r.primary_image} alt="" style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', background: 'var(--bg-2)' }} />
                     : <div style={{ width: 36, height: 36, borderRadius: 6, background: 'var(--bg-2)' }} />}
                 </td>
-                <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 14 }}>{r.offer_id}</td>
+                <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15.5 }}>{r.offer_id}</td>
                 <td style={{ maxWidth: 360 }}>
-                  <div style={{ fontSize: 14.5, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                  <div style={{ fontSize: 16, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
                     {r.name ?? '—'}
                   </div>
-                  <div className="muted" style={{ fontSize: 13 }}>product_id {r.product_id}</div>
+                  <div className="muted" style={{ fontSize: 15 }}>product_id {r.product_id}</div>
                 </td>
                 <td className="right"><b>{fmt(r.price.price)}</b></td>
                 <td className="right muted">{fmt(r.price.old_price)}</td>

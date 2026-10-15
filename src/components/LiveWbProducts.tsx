@@ -27,7 +27,7 @@ export function LiveWbProducts({ limit = 20 }: { limit?: number }) {
     return (
       <div className="card" style={{ background: 'var(--bg-danger, #fff0f0)', padding: 20 }}>
         <div style={{ fontWeight: 600, color: 'var(--danger, #d00)' }}>Ошибка загрузки WB</div>
-        <div className="muted" style={{ fontSize: 14, marginTop: 6 }}>{bundle.error}</div>
+        <div className="muted" style={{ fontSize: 15.5, marginTop: 6 }}>{bundle.error}</div>
         <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={bundle.refresh}>Повторить</button>
       </div>
     );
@@ -97,8 +97,8 @@ export function LiveWbProducts({ limit = 20 }: { limit?: number }) {
                   )}
                 </td>
                 <td>
-                  <code style={{ fontSize: 14 }}>{r.vendorCode}</code>
-                  <div className="muted" style={{ fontSize: 13 }}>nm{r.nmId}</div>
+                  <code style={{ fontSize: 15.5 }}>{r.vendorCode}</code>
+                  <div className="muted" style={{ fontSize: 15 }}>nm{r.nmId}</div>
                 </td>
                 <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {r.card?.title || r.card?.subjectName || '—'}
@@ -107,7 +107,7 @@ export function LiveWbProducts({ limit = 20 }: { limit?: number }) {
                   {mainSize ? fmt(mainSize.price) : '—'}
                 </td>
                 <td className="right">
-                  <span className="chip warn" style={{ fontSize: 14, padding: '2px 8px' }}>
+                  <span className="chip warn" style={{ fontSize: 15.5, padding: '2px 8px' }}>
                     −{r.discount}%
                   </span>
                 </td>
@@ -126,7 +126,7 @@ export function LiveWbProducts({ limit = 20 }: { limit?: number }) {
       </table>
 
       {bundle.fetchedAt && (
-        <div className="muted" style={{ fontSize: 13, marginTop: 8, textAlign: 'right' }}>
+        <div className="muted" style={{ fontSize: 15, marginTop: 8, textAlign: 'right' }}>
           Данные на {bundle.fetchedAt.toLocaleTimeString('ru-RU')}
         </div>
       )}

@@ -66,7 +66,7 @@ export function AdsInsightPanel({ platform, report }: { platform: 'wb' | 'ozon';
         <div className="row gap-8" style={{ alignItems: 'center' }}>
           <SparkleIcon size={18} weight="fill" style={{ color: 'var(--accent)' }} />
           <b>Рекомендации Claude · {platform === 'wb' ? 'WB' : 'Ozon'}</b>
-          {ins?.generatedAt ? <span className="muted" style={{ fontSize: 14 }}>анализ от {fmtDate(ins.generatedAt)}{ins.model ? ` · ${ins.model}` : ''}</span> : null}
+          {ins?.generatedAt ? <span className="muted" style={{ fontSize: 15.5 }}>анализ от {fmtDate(ins.generatedAt)}{ins.model ? ` · ${ins.model}` : ''}</span> : null}
         </div>
         <div className="row gap-8">
           <button className="btn btn-sm" onClick={() => { setShowJournal((v) => !v); if (!journal) void loadJournal(); }} title="Прошлые запуски анализа">
@@ -78,18 +78,18 @@ export function AdsInsightPanel({ platform, report }: { platform: 'wb' | 'ozon';
         </div>
       </div>
 
-      {error && <div style={{ color: 'var(--bad)', fontSize: 14.5, marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ color: 'var(--bad)', fontSize: 16, marginTop: 8 }}>{error}</div>}
       {!ins && loading && <div className="muted" style={{ marginTop: 10 }}><SpinnerIcon size={14} className="spin" /> Claude смотрит рекламу, заказы, остатки и маржу…</div>}
 
       {ins && (
         <div className="grid" style={{ gap: 12, marginTop: 10 }}>
-          {ins.summary && <div style={{ fontSize: 15, lineHeight: 1.45 }}>{ins.summary}</div>}
+          {ins.summary && <div style={{ fontSize: 16.5, lineHeight: 1.45 }}>{ins.summary}</div>}
 
           {ins.storeActions.length > 0 && (
             <div>
               <div className="card-title" style={{ marginBottom: 4 }}>По магазину</div>
               {ins.storeActions.map((a, i) => (
-                <div key={i} style={{ fontSize: 14.5, padding: '3px 0' }}>
+                <div key={i} style={{ fontSize: 16, padding: '3px 0' }}>
                   <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, marginRight: 8, background: a.priority === 'high' ? 'var(--bad)' : a.priority === 'medium' ? 'var(--warn)' : 'var(--muted)' }} />
                   {a.text}
                 </div>
@@ -101,10 +101,10 @@ export function AdsInsightPanel({ platform, report }: { platform: 'wb' | 'ozon';
             <div>
               <div className="flex-between" style={{ marginBottom: 4 }}>
                 <div className="card-title">По товарам · {ins.items.length}</div>
-                <div className="muted" style={{ fontSize: 14 }} title="Сумма оценок эффекта по всем рекомендациям, ₽ в неделю">итого эффект ≈ <b style={{ color: total >= 0 ? 'var(--good)' : 'var(--bad)' }}>{fmtRub(total)}/нед</b></div>
+                <div className="muted" style={{ fontSize: 15.5 }} title="Сумма оценок эффекта по всем рекомендациям, ₽ в неделю">итого эффект ≈ <b style={{ color: total >= 0 ? 'var(--good)' : 'var(--bad)' }}>{fmtRub(total)}/нед</b></div>
               </div>
               <div className="tbl-scroll">
-                <table style={{ width: '100%', fontSize: 14.5 }}>
+                <table style={{ width: '100%', fontSize: 16 }}>
                   <thead>
                     <tr>
                       <th style={{ textAlign: 'left', width: 170 }}>Артикул</th>
@@ -121,14 +121,14 @@ export function AdsInsightPanel({ platform, report }: { platform: 'wb' | 'ozon';
                         <tr key={it.article}>
                           <td style={{ verticalAlign: 'top' }}>
                             <div style={{ fontWeight: 600 }}>{it.article}</div>
-                            {r && <div className="muted" style={{ fontSize: 13 }}>расход {Math.round(r.spend7).toLocaleString('ru-RU')} ₽ · ДРР {r.drr7 ?? r.drrAds7 ?? '—'}%{r.stockDays !== null ? ` · остаток ${r.stockDays} дн` : ''}</div>}
+                            {r && <div className="muted" style={{ fontSize: 15 }}>расход {Math.round(r.spend7).toLocaleString('ru-RU')} ₽ · ДРР {r.drr7 ?? r.drrAds7 ?? '—'}%{r.stockDays !== null ? ` · остаток ${r.stockDays} дн` : ''}</div>}
                           </td>
                           <td style={{ verticalAlign: 'top' }}>
-                            <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 14, fontWeight: 600, color: m.color, background: m.bg, whiteSpace: 'nowrap' }}>{it.action}</span>
+                            <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 15.5, fontWeight: 600, color: m.color, background: m.bg, whiteSpace: 'nowrap' }}>{it.action}</span>
                           </td>
                           <td style={{ verticalAlign: 'top' }}>
                             <div>{it.why}</div>
-                            <div className="muted" style={{ fontSize: 14 }}>→ {it.step}{it.risk ? ` · риск: ${it.risk}` : ''}</div>
+                            <div className="muted" style={{ fontSize: 15.5 }}>→ {it.step}{it.risk ? ` · риск: ${it.risk}` : ''}</div>
                           </td>
                           <td style={{ verticalAlign: 'top', textAlign: 'right', fontWeight: 600, color: it.effectRub >= 0 ? 'var(--good)' : 'var(--bad)' }}>{fmtRub(it.effectRub)}</td>
                         </tr>
@@ -143,12 +143,12 @@ export function AdsInsightPanel({ platform, report }: { platform: 'wb' | 'ozon';
           {ins.followUp?.lines?.length ? (
             <div>
               <div className="card-title" style={{ marginBottom: 4 }}>Прошлые советы ({fmtDate(ins.followUp.prevAt)}) — что стало</div>
-              {ins.followUp.lines.map((l, i) => <div key={i} className="muted" style={{ fontSize: 14 }}>· {l}</div>)}
+              {ins.followUp.lines.map((l, i) => <div key={i} className="muted" style={{ fontSize: 15.5 }}>· {l}</div>)}
             </div>
           ) : null}
 
           {ins.warnings.length > 0 && (
-            <div className="muted" style={{ fontSize: 14 }}>
+            <div className="muted" style={{ fontSize: 15.5 }}>
               {ins.warnings.map((w, i) => <div key={i}>⚠ {w}</div>)}
             </div>
           )}
@@ -158,13 +158,13 @@ export function AdsInsightPanel({ platform, report }: { platform: 'wb' | 'ozon';
       {showJournal && (
         <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
           <div className="card-title" style={{ marginBottom: 6 }}>Журнал запусков</div>
-          {!journal && <div className="muted" style={{ fontSize: 14 }}>загрузка…</div>}
-          {journal && journal.length === 0 && <div className="muted" style={{ fontSize: 14 }}>пока пусто</div>}
+          {!journal && <div className="muted" style={{ fontSize: 15.5 }}>загрузка…</div>}
+          {journal && journal.length === 0 && <div className="muted" style={{ fontSize: 15.5 }}>пока пусто</div>}
           {journal?.map((e, i) => (
-            <details key={i} style={{ fontSize: 14.5, marginBottom: 4 }}>
+            <details key={i} style={{ fontSize: 16, marginBottom: 4 }}>
               <summary>{fmtDate(e.at)} · {e.items?.length ?? 0} рекомендаций · эффект {fmtRub((e.items ?? []).reduce((s, it) => s + (it.effectRub || 0), 0))}/нед</summary>
-              <div className="muted" style={{ fontSize: 14, margin: '4px 0 6px' }}>{e.summary}</div>
-              {(e.items ?? []).map((it, k) => <div key={k} style={{ fontSize: 14 }}>{it.article} — <b>{it.action}</b>: {it.step} ({fmtRub(it.effectRub)})</div>)}
+              <div className="muted" style={{ fontSize: 15.5, margin: '4px 0 6px' }}>{e.summary}</div>
+              {(e.items ?? []).map((it, k) => <div key={k} style={{ fontSize: 15.5 }}>{it.article} — <b>{it.action}</b>: {it.step} ({fmtRub(it.effectRub)})</div>)}
             </details>
           ))}
         </div>

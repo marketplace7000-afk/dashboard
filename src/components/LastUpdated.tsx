@@ -61,7 +61,7 @@ export function LastUpdated({ namespaces, onRefresh, label, compact }: Props) {
   void tick; // подавляем unused
 
   return (
-    <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap', fontSize: 14 }}>
+    <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap', fontSize: 15.5 }}>
       <span
         className="chip"
         title={

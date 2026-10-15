@@ -342,7 +342,7 @@ export function Finance() {
       <AiAdvice module="finance" context={adviceContext} disabled={!list} />
       <div className="row gap-8" style={{ alignItems: 'flex-start' }}>
         <CurrencyRubIcon size={16} weight="bold" style={{ color: 'var(--muted)', marginTop: 2 }} />
-        <div className="muted" style={{ fontSize: 14.5 }}>
+        <div className="muted" style={{ fontSize: 16 }}>
           Полный P&L по Ozon Finance API: выручка после возвратов, комиссии, логистика, реклама, эквайринг — те же транзакции что Ozon отдаёт в финотчёт.
         </div>
       </div>
@@ -351,7 +351,7 @@ export function Finance() {
       <div className="card" style={{ background: 'var(--bg-3)' }}>
         <div className="flex-between" style={{ flexWrap: 'wrap', gap: 12 }}>
           <div className="row gap-12" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3 }}>Период</span>
+            <span style={{ fontSize: 15.5, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.3 }}>Период</span>
             <input
               type="date"
               className="input"
@@ -389,7 +389,7 @@ export function Finance() {
             </button>
           </div>
         </div>
-        <div className="muted" style={{ fontSize: 13.5, marginTop: 10 }}>
+        <div className="muted" style={{ fontSize: 15.5, marginTop: 10 }}>
           Период <b>{fmtDateRu(dateToIsoStart(from))} — {fmtDateRu(dateToIsoEnd(to))}</b> ({periodDays} дн).
           {fetchedAt && <> · {fromCache ? '📦 из кэша' : '🟢 свежие'} · {agoLabel}</>} · кэш 30 мин.
         </div>
@@ -398,14 +398,14 @@ export function Finance() {
       {error && (
         <div className="card" style={{ background: 'rgba(220,38,38,.08)', color: 'var(--bad)', display: 'flex', gap: 10 }}>
           <WarningIcon size={18} weight="bold" />
-          <span style={{ fontSize: 14.5 }}>{error}</span>
+          <span style={{ fontSize: 16 }}>{error}</span>
         </div>
       )}
 
       {!fetchedAt && !loading && (
         <div className="card" style={{ background: 'var(--accent-soft)', textAlign: 'center', padding: '24px 18px' }}>
           <div style={{ fontWeight: 600, color: 'var(--accent-2)', marginBottom: 6 }}>Данных нет</div>
-          <div className="muted" style={{ fontSize: 14.5, color: 'var(--accent-2)' }}>
+          <div className="muted" style={{ fontSize: 16, color: 'var(--accent-2)' }}>
             Нажми <b>«Обновить из API»</b> — подтянем транзакции из Ozon Finance API.
           </div>
         </div>
@@ -417,7 +417,7 @@ export function Finance() {
           <div className="card">
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <h3 style={{ margin: 0 }}>Выкуп по дням (Ozon)</h3>
-              <span className="muted" style={{ fontSize: 14 }}>по дате операции (operation_date)</span>
+              <span className="muted" style={{ fontSize: 15.5 }}>по дате операции (operation_date)</span>
             </div>
             <DailyChart data={dailyRev} />
           </div>
@@ -426,17 +426,17 @@ export function Finance() {
             <div className="card kpi">
               <span className="d muted">Выкуплено</span>
               <span className="v" style={{ color: 'var(--good)' }}>{fmtRub(revenue)}</span>
-              <span className="d muted" style={{ fontSize: 13 }}>{fromOps.buyoutQty} шт · {fromOps.countOrders} операций</span>
+              <span className="d muted" style={{ fontSize: 15 }}>{fromOps.buyoutQty} шт · {fromOps.countOrders} операций</span>
             </div>
             <div className="card kpi">
               <span className="d muted">Возвраты</span>
               <span className="v" style={{ color: 'var(--bad)' }}>{fmtRub(refunds)}</span>
-              <span className="d muted" style={{ fontSize: 13 }}>{fromOps.returnQty} шт · {fromOps.countReturns} операций</span>
+              <span className="d muted" style={{ fontSize: 15 }}>{fromOps.returnQty} шт · {fromOps.countReturns} операций</span>
             </div>
             <div className="card kpi">
               <span className="d muted">Выручка (нетто)</span>
               <span className="v">{fmtRub(revenueNet)}</span>
-              <span className="d muted" style={{ fontSize: 13 }}>выкуплено − возвраты</span>
+              <span className="d muted" style={{ fontSize: 15 }}>выкуплено − возвраты</span>
             </div>
             <div className="card kpi">
               <span className="d muted">Комиссия МП</span>
@@ -445,14 +445,14 @@ export function Finance() {
             <div className="card kpi">
               <span className="d muted">Фулфилмент</span>
               <span className="v" style={{ color: 'var(--bad)' }}>{fmtRub(fulfillment)}</span>
-              <span className="d muted" style={{ fontSize: 13 }}>логистика</span>
+              <span className="d muted" style={{ fontSize: 15 }}>логистика</span>
             </div>
             <div className="card kpi">
               <span className="d muted">Реклама</span>
               <span className="v" style={{ color: 'var(--bad)' }}>
                 {adSpendPerf != null ? fmtRub(-adSpendPerf) : fmtRub(advertising)}
               </span>
-              <span className="d muted" style={{ fontSize: 13 }}>
+              <span className="d muted" style={{ fontSize: 15 }}>
                 {adSpendPerf != null
                   ? <>Ozon Performance · вне финотчёта{services - advertising !== 0 ? <> · сервисы {fmtRub(services - advertising)}</> : null}</>
                   : (services - advertising !== 0 && <>+ сервисы {fmtRub(services - advertising)}</>)}
@@ -465,7 +465,7 @@ export function Finance() {
             <div className="card kpi" style={{ background: netIncome >= 0 ? 'rgba(22,163,74,.08)' : 'rgba(220,38,38,.08)' }}>
               <span className="d muted">Выплата продавцу</span>
               <span className="v" style={{ color: netIncome >= 0 ? 'var(--good)' : 'var(--bad)' }}>{fmtRub(netIncome)}</span>
-              <span className="d muted" style={{ fontSize: 13 }}>
+              <span className="d muted" style={{ fontSize: 15 }}>
                 {revenue !== 0 && `${((netIncome / revenue) * 100).toFixed(1)}% от выкупленного`}
               </span>
             </div>
@@ -475,7 +475,7 @@ export function Finance() {
           <div className="card" style={{ padding: 0 }}>
             <div className="flex-between" style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
               <h3 style={{ margin: 0 }}>P&L · {periodDays} дн</h3>
-              <span className="muted" style={{ fontSize: 14 }}>группировка по типам операций</span>
+              <span className="muted" style={{ fontSize: 15.5 }}>группировка по типам операций</span>
             </div>
             <table>
               <thead>
@@ -495,7 +495,7 @@ export function Finance() {
                       <td style={{ textAlign: 'right', fontWeight: 600, color: v.sum < 0 ? 'var(--bad)' : v.sum > 0 ? 'var(--good)' : 'var(--text)' }}>
                         {fmtSigned(v.sum)}
                       </td>
-                      <td style={{ textAlign: 'right', paddingRight: 18, color: 'var(--muted)', fontSize: 14 }}>{v.count}</td>
+                      <td style={{ textAlign: 'right', paddingRight: 18, color: 'var(--muted)', fontSize: 15.5 }}>{v.count}</td>
                     </tr>
                   );
                 })}
@@ -503,7 +503,7 @@ export function Finance() {
                   <tr>
                     <td style={{ paddingLeft: 18 }}>Прочее</td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--muted)' }}>{fmtSigned(byCategory.get('other')!.sum)}</td>
-                    <td style={{ textAlign: 'right', paddingRight: 18, color: 'var(--muted)', fontSize: 14 }}>{byCategory.get('other')!.count}</td>
+                    <td style={{ textAlign: 'right', paddingRight: 18, color: 'var(--muted)', fontSize: 15.5 }}>{byCategory.get('other')!.count}</td>
                   </tr>
                 )}
                 <tr style={{ background: 'var(--bg-3)', fontWeight: 700 }}>
@@ -533,7 +533,7 @@ export function Finance() {
                   <tr key={k}>
                     <td style={{ paddingLeft: 18 }}>{k}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: v.sum < 0 ? 'var(--bad)' : v.sum > 0 ? 'var(--good)' : 'var(--text)' }}>{fmtSigned(v.sum)}</td>
-                    <td style={{ textAlign: 'right', paddingRight: 18, color: 'var(--muted)', fontSize: 14 }}>{v.count}</td>
+                    <td style={{ textAlign: 'right', paddingRight: 18, color: 'var(--muted)', fontSize: 15.5 }}>{v.count}</td>
                   </tr>
                 ))}
               </tbody>
@@ -545,7 +545,7 @@ export function Finance() {
             <div className="card" style={{ padding: 0 }}>
               <div className="flex-between" style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
                 <h3 style={{ margin: 0 }}>Детальная разбивка по operation_type</h3>
-                <span className="muted" style={{ fontSize: 14 }}>{detailGroups.length} типов</span>
+                <span className="muted" style={{ fontSize: 15.5 }}>{detailGroups.length} типов</span>
               </div>
               <div style={{ maxHeight: 480, overflowY: 'auto' }}>
                 <table>
@@ -560,11 +560,11 @@ export function Finance() {
                     {detailGroups.map(g => (
                       <tr key={g.type}>
                         <td style={{ paddingLeft: 18 }}>
-                          <div style={{ fontWeight: 500, fontSize: 14.5 }}>{g.name}</div>
-                          <div className="muted" style={{ fontSize: 13, fontFamily: 'ui-monospace, Menlo, monospace' }}>{g.type}</div>
+                          <div style={{ fontWeight: 500, fontSize: 16 }}>{g.name}</div>
+                          <div className="muted" style={{ fontSize: 15, fontFamily: 'ui-monospace, Menlo, monospace' }}>{g.type}</div>
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 600, color: g.sum < 0 ? 'var(--bad)' : g.sum > 0 ? 'var(--good)' : 'var(--text)' }}>{fmtSigned(g.sum)}</td>
-                        <td style={{ textAlign: 'right', paddingRight: 18, color: 'var(--muted)', fontSize: 14 }}>{g.count}</td>
+                        <td style={{ textAlign: 'right', paddingRight: 18, color: 'var(--muted)', fontSize: 15.5 }}>{g.count}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -573,7 +573,7 @@ export function Finance() {
             </div>
           )}
 
-          <div className="muted" style={{ fontSize: 13.5, display: 'flex', gap: 6 }}>
+          <div className="muted" style={{ fontSize: 15.5, display: 'flex', gap: 6 }}>
             <InfoIcon size={13} weight="bold" />
             Выручка, комиссии, логистика, эквайринг, выплата — из Ozon Finance API (финотчёт).
             «Реклама» — фактический расход Ozon Performance за период (биллится отдельно от финотчёта, поэтому в «Выплату продавцу» не входит); та же цифра в разделе «Реклама».

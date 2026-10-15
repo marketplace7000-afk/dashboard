@@ -62,7 +62,7 @@ export function FinanceSummary() {
         <h2 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <CoinsIcon size={18} weight="fill" style={{ color: 'var(--accent)' }} />
           Финансовая сводка · рубль в рубль
-          <span className="chip info" style={{ fontSize: 13, marginLeft: 6 }}>{PERIOD_LABEL[period]} ({periodDates})</span>
+          <span className="chip info" style={{ fontSize: 15, marginLeft: 6 }}>{PERIOD_LABEL[period]} ({periodDates})</span>
         </h2>
         <div className="row gap-8">
           <div className="period-switch">
@@ -149,7 +149,7 @@ export function FinanceSummary() {
           {/* Развёрнутая разбивка */}
           <div
             onClick={() => setExpanded(e => !e)}
-            style={{ marginTop: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, color: 'var(--accent-2)' }}
+            style={{ marginTop: 12, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 15.5, color: 'var(--accent-2)' }}
           >
             {expanded ? <CaretDownIcon size={12} weight="bold" /> : <CaretRightIcon size={12} weight="bold" />}
             {expanded ? 'Свернуть' : 'Показать полную разбивку расходов'}
@@ -165,9 +165,9 @@ export function FinanceSummary() {
                   <div key={mp} className="card" style={{ background: 'var(--bg)' }}>
                     <div className="row gap-8" style={{ marginBottom: 10 }}>
                       <span className="mp-tab-dot" style={{ background: dot, width: 8, height: 8 }} />
-                      <strong style={{ fontSize: 14.5 }}>{label}</strong>
+                      <strong style={{ fontSize: 16 }}>{label}</strong>
                     </div>
-                    <table style={{ fontSize: 14, width: '100%' }}>
+                    <table style={{ fontSize: 15.5, width: '100%' }}>
                       <tbody>
                         <tr><td className="muted">Выручка брутто</td><td className="right"><b>{fmt(m.grossRevenue)}</b></td></tr>
                         <tr><td className="muted">Выручка нетто</td><td className="right"><b>{fmt(m.netRevenue)}</b></td></tr>
@@ -189,7 +189,7 @@ export function FinanceSummary() {
             <div className="card" style={{ marginTop: 12, background: 'rgba(217,119,6,.08)' }}>
               <div className="row gap-8" style={{ alignItems: 'flex-start' }}>
                 <WarningIcon size={16} weight="bold" style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 2 }} />
-                <div style={{ fontSize: 14, lineHeight: 1.55 }}>
+                <div style={{ fontSize: 15.5, lineHeight: 1.55 }}>
                   {shownWarnings.map((w, i) => <div key={i}>{w}</div>)}
                 </div>
               </div>
@@ -197,7 +197,7 @@ export function FinanceSummary() {
           )}
 
           {fin.fetchedAt && (
-            <div className="muted" style={{ fontSize: 13, marginTop: 10, textAlign: 'right' }}>
+            <div className="muted" style={{ fontSize: 15, marginTop: 10, textAlign: 'right' }}>
               Источник: Ozon Finance API + WB finance-api (отчёт о реализации).
               Обновлено: {new Date(fin.fetchedAt).toLocaleTimeString('ru-RU')}.
             </div>

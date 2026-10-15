@@ -63,7 +63,7 @@ export function Seasonality() {
   return (
     <div className="grid" style={{ gap: 18 }}>
       <div className="flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
-        <div className="muted" style={{ fontSize: 14.5, maxWidth: 720 }}>
+        <div className="muted" style={{ fontSize: 16, maxWidth: 720 }}>
           Сезонные коэффициенты по месяцам. <strong>1.0</strong> = средний месяц; выше — пик, ниже — спад.
         </div>
         <button className="btn btn-primary" onClick={reload} disabled={loading}>
@@ -75,7 +75,7 @@ export function Seasonality() {
       {error && (
         <div className="card" style={{ background: 'rgba(220,38,38,.08)', color: 'var(--bad)', display: 'flex', gap: 10, alignItems: 'center' }}>
           <WarningIcon size={18} weight="bold" />
-          <span style={{ fontSize: 14.5 }}>{error}</span>
+          <span style={{ fontSize: 16 }}>{error}</span>
         </div>
       )}
 
@@ -84,12 +84,12 @@ export function Seasonality() {
         <div className="card" style={{ padding: '12px 14px', background: 'var(--accent-soft, var(--bg-3))' }}>
           <div className="row gap-8" style={{ marginBottom: 8 }}>
             <CalendarBlankIcon size={14} weight="bold" style={{ color: 'var(--accent)' }} />
-            <strong style={{ fontSize: 14.5 }}>{MONTHS[curMonth]} — что в спросе сейчас</strong>
+            <strong style={{ fontSize: 16 }}>{MONTHS[curMonth]} — что в спросе сейчас</strong>
           </div>
           <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
             {currentMonthInsight.slice(0, 8).map(r => (
               <span key={r.category} style={{
-                padding: '4px 10px', borderRadius: 999, fontSize: 14,
+                padding: '4px 10px', borderRadius: 999, fontSize: 15.5,
                 background: r.combined >= 1.15 ? 'rgba(22,163,74,.10)'
                           : r.combined <= 0.85 ? 'rgba(220,38,38,.10)'
                           : 'var(--bg-3)',
@@ -109,12 +109,12 @@ export function Seasonality() {
         <div className="card" style={{ padding: '10px 14px' }}>
           <div className="row gap-8" style={{ marginBottom: 6 }}>
             <LightbulbIcon size={14} weight="bold" style={{ color: 'var(--warn)' }} />
-            <strong style={{ fontSize: 14.5 }}>Ближайшие пики (3 мес)</strong>
-            <span className="muted" style={{ fontSize: 13.5 }}>— подумай о закупке сейчас, чтобы успеть к ним</span>
+            <strong style={{ fontSize: 16 }}>Ближайшие пики (3 мес)</strong>
+            <span className="muted" style={{ fontSize: 15.5 }}>— подумай о закупке сейчас, чтобы успеть к ним</span>
           </div>
           <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
             {nextPeaks.map(p => (
-              <span key={p.category} className="chip" style={{ fontSize: 14 }}>
+              <span key={p.category} className="chip" style={{ fontSize: 15.5 }}>
                 <strong>{p.category}</strong> · {MONTHS[p.peakIdx]} ×{p.peakVal.toFixed(2)}
               </span>
             ))}
@@ -139,11 +139,11 @@ export function Seasonality() {
               <div className="flex-between" style={{ marginBottom: 4 }}>
                 <div className="row gap-8">
                   <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
-                  <strong style={{ fontSize: 14.5 }}>{c.category}</strong>
+                  <strong style={{ fontSize: 16 }}>{c.category}</strong>
                 </div>
-                <span className="muted" style={{ fontSize: 13 }}>{c.skus} SKU</span>
+                <span className="muted" style={{ fontSize: 15 }}>{c.skus} SKU</span>
               </div>
-              <div className="muted" style={{ fontSize: 13.5, marginBottom: 10 }}>
+              <div className="muted" style={{ fontSize: 15.5, marginBottom: 10 }}>
                 {curCombined !== null && (
                   <>сейчас ({MONTHS[curMonth]}): <strong style={{ color: coefColor(curCombined) }}>×{curCombined.toFixed(2)}</strong></>
                 )}
@@ -156,10 +156,10 @@ export function Seasonality() {
                 <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '2px 0' }}>
                   <thead>
                     <tr>
-                      <th style={{ textAlign: 'left', fontSize: 12, color: 'var(--muted)', padding: '4px 4px' }}>МП</th>
+                      <th style={{ textAlign: 'left', fontSize: 14, color: 'var(--muted)', padding: '4px 4px' }}>МП</th>
                       {MONTHS.map((m, i) => (
                         <th key={m} style={{
-                          textAlign: 'center', fontSize: 12, fontWeight: 700,
+                          textAlign: 'center', fontSize: 14, fontWeight: 700,
                           color: i === curMonth ? 'var(--accent)' : 'var(--muted)',
                           padding: '4px 2px',
                           background: i === curMonth ? 'var(--accent-soft, var(--bg-3))' : undefined,
@@ -177,14 +177,14 @@ export function Seasonality() {
                       if (!hasData) {
                         return (
                           <tr key={mp}>
-                            <td style={{ fontSize: 13, fontWeight: 600, color: labelColor, padding: '6px 4px' }}>{label}</td>
-                            <td colSpan={12} style={{ fontSize: 13, color: 'var(--muted)', padding: '6px 4px' }}>нет данных</td>
+                            <td style={{ fontSize: 15, fontWeight: 600, color: labelColor, padding: '6px 4px' }}>{label}</td>
+                            <td colSpan={12} style={{ fontSize: 15, color: 'var(--muted)', padding: '6px 4px' }}>нет данных</td>
                           </tr>
                         );
                       }
                       return (
                         <tr key={mp}>
-                          <td style={{ fontSize: 13, fontWeight: 600, color: labelColor, padding: '6px 4px' }}>{label}</td>
+                          <td style={{ fontSize: 15, fontWeight: 600, color: labelColor, padding: '6px 4px' }}>{label}</td>
                           {arr.map((v, i) => {
                             const isCur = i === curMonth;
                             return (
@@ -198,7 +198,7 @@ export function Seasonality() {
                                   <span style={{ color: 'var(--muted)' }}>—</span>
                                 ) : (
                                   <>
-                                    <div style={{ fontSize: 14, fontWeight: 600, color: coefColor(v) }}>{v.toFixed(2)}</div>
+                                    <div style={{ fontSize: 15.5, fontWeight: 600, color: coefColor(v) }}>{v.toFixed(2)}</div>
                                     <div style={{
                                       height: 3,
                                       borderRadius: 2,
@@ -218,7 +218,7 @@ export function Seasonality() {
                 </table>
               </div>
 
-              <div style={{ background: 'var(--bg-3)', borderRadius: 8, padding: '10px 12px', marginTop: 10, fontSize: 14, lineHeight: 1.5, color: 'var(--muted)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <div style={{ background: 'var(--bg-3)', borderRadius: 8, padding: '10px 12px', marginTop: 10, fontSize: 15.5, lineHeight: 1.5, color: 'var(--muted)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                 <LightbulbIcon size={13} weight="bold" style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 2 }} />
                 <span>{c.insight}</span>
               </div>

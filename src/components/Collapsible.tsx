@@ -19,7 +19,7 @@ export function Collapsible({ title, defaultOpen = false, chip, children }: Prop
       >
         <div className="row" style={{ gap: 8 }}>
           {open ? <CaretDownIcon size={14} weight="bold" /> : <CaretRightIcon size={14} weight="bold" />}
-          <span style={{ fontWeight: 600, fontSize: 15 }}>{title}</span>
+          <span style={{ fontWeight: 600, fontSize: 16.5 }}>{title}</span>
           {chip}
         </div>
       </div>

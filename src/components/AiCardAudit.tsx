@@ -63,7 +63,7 @@ export function AiCardAudit() {
       <div className="card" style={{ background: 'var(--accent-soft)' }}>
         <div className="row gap-8" style={{ alignItems: 'flex-start' }}>
           <SparkleIcon size={18} weight="fill" style={{ color: 'var(--accent-2)', flexShrink: 0, marginTop: 2 }} />
-          <div style={{ fontSize: 14.5, color: 'var(--accent-2)', lineHeight: 1.55 }}>
+          <div style={{ fontSize: 16, color: 'var(--accent-2)', lineHeight: 1.55 }}>
             <strong>AI-аудит карточки через Claude Sonnet 4.6.</strong> Анализируется до 6 фото товара (vision) + название, описание, характеристики, цена.
             Стоимость одного аудита ~0.5–1.5 ₽ в зависимости от количества фото. Ответы кэшируются на 6 часов.
           </div>
@@ -80,10 +80,10 @@ export function AiCardAudit() {
               placeholder="Найти товар или артикул…"
               value={filter}
               onChange={e => setFilter(e.target.value)}
-              style={{ flex: 1, padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-2)', fontSize: 14.5 }}
+              style={{ flex: 1, padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-2)', fontSize: 16 }}
             />
           </div>
-          <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>{products.length} из {bundle.products.length} карточек</div>
+          <div className="muted" style={{ fontSize: 15, marginBottom: 8 }}>{products.length} из {bundle.products.length} карточек</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {products.map(p => (
               <div
@@ -99,8 +99,8 @@ export function AiCardAudit() {
                   ? <img src={p.primary_image} alt="" style={{ width: 44, height: 44, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
                   : <div style={{ width: 44, height: 44, borderRadius: 6, background: 'var(--bg-2)', flexShrink: 0 }} />}
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 14, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{p.name || '—'}</div>
-                  <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{p.offer_id} · {photoCount(p)} фото</div>
+                  <div style={{ fontSize: 15.5, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{p.name || '—'}</div>
+                  <div className="muted" style={{ fontSize: 14, marginTop: 2 }}>{p.offer_id} · {photoCount(p)} фото</div>
                 </div>
               </div>
             ))}
@@ -119,8 +119,8 @@ export function AiCardAudit() {
           {selected && (
             <>
               <div className="card">
-                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>{selected.name}</div>
-                <div className="muted" style={{ fontSize: 14, marginBottom: 10 }}>
+                <div style={{ fontSize: 16.5, fontWeight: 600, marginBottom: 6 }}>{selected.name}</div>
+                <div className="muted" style={{ fontSize: 15.5, marginBottom: 10 }}>
                   Артикул: <code>{selected.offer_id}</code> · Цена: {selected.price ? `${parseFloat(selected.price).toLocaleString('ru-RU')} ₽` : '—'} · Фото: {photoCount(selected)}
                 </div>
                 <div className="row gap-8" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
@@ -144,7 +144,7 @@ export function AiCardAudit() {
               {error && (
                 <div className="card" style={{ background: 'rgba(220,38,38,.08)', display: 'flex', gap: 10 }}>
                   <WarningIcon size={18} weight="bold" style={{ color: 'var(--bad)' }} />
-                  <div style={{ fontSize: 14.5 }}>{error}</div>
+                  <div style={{ fontSize: 16 }}>{error}</div>
                 </div>
               )}
 
@@ -170,7 +170,7 @@ export function AiCardAudit() {
                   <Section title="Что сделать" icon={<SparkleIcon size={16} weight="fill" style={{ color: 'var(--accent)' }} />} items={audit.actions} highlight />
 
                   {audit.raw && (
-                    <div className="card muted" style={{ fontSize: 14, whiteSpace: 'pre-wrap' }}>
+                    <div className="card muted" style={{ fontSize: 15.5, whiteSpace: 'pre-wrap' }}>
                       <div style={{ marginBottom: 6, fontWeight: 600 }}>Сырой ответ (не удалось распарсить JSON):</div>
                       {audit.raw}
                     </div>
@@ -191,9 +191,9 @@ function Section({ title, icon, items, highlight }: { title: string; icon: React
     <div className="card" style={highlight ? { background: 'var(--accent-soft)' } : undefined}>
       <div className="row gap-8" style={{ marginBottom: 10, alignItems: 'center' }}>
         {icon}
-        <strong style={{ fontSize: 15 }}>{title}</strong>
+        <strong style={{ fontSize: 16.5 }}>{title}</strong>
       </div>
-      <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.7, fontSize: 14.5 }}>
+      <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.7, fontSize: 16 }}>
         {items.map((s, i) => <li key={i}>{s}</li>)}
       </ul>
     </div>

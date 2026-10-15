@@ -71,7 +71,7 @@ export function LiveOzonKpi() {
         <WarningIcon size={18} weight="bold" style={{ color: 'var(--bad)' }} />
         <div>
           <b style={{ color: 'var(--bad)' }}>Ozon API недоступен</b>
-          <div className="muted" style={{ fontSize: 14 }}>{s.error}</div>
+          <div className="muted" style={{ fontSize: 15.5 }}>{s.error}</div>
         </div>
       </div>
     );

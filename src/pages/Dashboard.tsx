@@ -114,7 +114,7 @@ export function Dashboard({ onNav }: { onNav: (k: string) => void }) {
         {/* Обе площадки теперь считают ОДНО окно, заканчивающееся сегодня. Сегодня
             неполный — говорим об этом прямо, иначе цифра ниже кабинета выглядит
             как ошибка платформы, а не как свойство ещё не закрытых суток. */}
-        <span className="chip info" style={{ fontSize: 12 }} title="WB и Ozon считаются за одно и то же окно, включая сегодняшний день. Сегодня ещё не закрыт: площадки досчитывают его в течение суток, поэтому к вечеру цифра вырастет.">
+        <span className="chip info" style={{ fontSize: 14 }} title="WB и Ozon считаются за одно и то же окно, включая сегодняшний день. Сегодня ещё не закрыт: площадки досчитывают его в течение суток, поэтому к вечеру цифра вырастет.">
           данные за {periodRange(period)} · WB и Ozon · сегодня неполный день
         </span>
       </div>
@@ -155,7 +155,7 @@ export function Dashboard({ onNav }: { onNav: (k: string) => void }) {
             {delta(totalRevenue, prevRevenue)} к {prevLabel(period)}
             {scope === 'all' && <span className="muted" style={{ marginLeft: 6 }}>· WB + Ozon</span>}
           </div>
-          <div className="d muted" style={{ fontSize: 11 }}>
+          <div className="d muted" style={{ fontSize: 13 }}>
             сумма заказов · выкуп и прибыль — в финсводке выше
             {showWb && wb.sticky && (
               <span style={{ color: 'var(--warn)' }} title="Свежий ответ WB пришёл пустым или с ошибкой. Чтобы цифра не «пропала», показываем прошлую — и честно указываем, на какой момент она верна. Нажмите «Обновить», чтобы попробовать снова.">
@@ -238,7 +238,7 @@ export function Dashboard({ onNav }: { onNav: (k: string) => void }) {
             </tbody>
           </table>
           {ozon.error && (
-            <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+            <div className="muted" style={{ fontSize: 14, marginTop: 10 }}>
               Ozon API ошибка: {ozon.error}
             </div>
           )}
@@ -251,7 +251,7 @@ export function Dashboard({ onNav }: { onNav: (k: string) => void }) {
             <h2>Цены</h2>
             <span className="chip info"><span className="dot" /> WB + Ozon</span>
           </div>
-          <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>Цены, скидки, маржа и ROI по каждому SKU.</div>
+          <div className="muted" style={{ marginTop: 6, fontSize: 14.5 }}>Цены, скидки, маржа и ROI по каждому SKU.</div>
           <div style={{ marginTop: 12 }}>
             <button className="btn btn-sm" onClick={() => onNav('prices')}>Открыть модуль →</button>
           </div>
@@ -262,7 +262,7 @@ export function Dashboard({ onNav }: { onNav: (k: string) => void }) {
             <h2>Отзывы</h2>
             <span className="chip info"><span className="dot" /> WB Feedbacks</span>
           </div>
-          <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>Неотвеченные отзывы WB + черновики ответов от Claude.</div>
+          <div className="muted" style={{ marginTop: 6, fontSize: 14.5 }}>Неотвеченные отзывы WB + черновики ответов от Claude.</div>
           <div style={{ marginTop: 12 }}>
             <button className="btn btn-sm" onClick={() => onNav('reviews')}>Открыть очередь →</button>
           </div>

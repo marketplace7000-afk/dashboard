@@ -50,15 +50,15 @@ export function TelegramLiveStatus() {
           </h2>
           <span className="chip warn"><span className="dot" /> не подключено</span>
         </div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
+        <div style={{ fontSize: 14.5, color: 'var(--muted)', lineHeight: 1.6 }}>
           Скелет интеграции готов. Чтобы подключить — создаём бота через <b>@BotFather</b>,
           вставляем токен в <code>.env</code>:
         </div>
-        <pre style={{ background: 'var(--bg-2)', padding: 12, borderRadius: 8, fontSize: 12, margin: '10px 0', overflow: 'auto' }}>
+        <pre style={{ background: 'var(--bg-2)', padding: 12, borderRadius: 8, fontSize: 14, margin: '10px 0', overflow: 'auto' }}>
 {`VITE_TELEGRAM_BOT_TOKEN=123456789:AAH...
 VITE_TELEGRAM_CHAT_ID=-1001234567890`}
         </pre>
-        <div className="muted" style={{ fontSize: 12 }}>
+        <div className="muted" style={{ fontSize: 14 }}>
           После — перезапуск <code>npm run dev</code>, и здесь появятся: статус бота, кнопка
           тестового сообщения, последние входящие команды.
         </div>
@@ -84,7 +84,7 @@ VITE_TELEGRAM_CHAT_ID=-1001234567890`}
             Telegram Bot · ошибка
           </h2>
         </div>
-        <div className="muted" style={{ fontSize: 12.5 }}>{state.message}</div>
+        <div className="muted" style={{ fontSize: 14 }}>{state.message}</div>
       </div>
     );
   }
@@ -132,7 +132,7 @@ VITE_TELEGRAM_CHAT_ID=-1001234567890`}
             ? <><SpinnerIcon size={13} weight="bold" className="spin" /> Отправляем…</>
             : <><PaperPlaneTiltIcon size={13} weight="bold" /> Отправить тестовое сообщение</>}
         </button>
-        {sendResult && <span className="muted" style={{ fontSize: 12 }}>{sendResult}</span>}
+        {sendResult && <span className="muted" style={{ fontSize: 14 }}>{sendResult}</span>}
       </div>
     </div>
   );

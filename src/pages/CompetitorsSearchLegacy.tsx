@@ -137,7 +137,7 @@ export function Competitors() {
       <div className="card" style={{ background: 'var(--accent-soft)' }}>
         <div className="row gap-8" style={{ alignItems: 'flex-start' }}>
           <SparkleIcon size={18} weight="fill" style={{ color: 'var(--accent-2)', flexShrink: 0, marginTop: 2 }} />
-          <div style={{ fontSize: 13, color: 'var(--accent-2)', lineHeight: 1.55 }}>
+          <div style={{ fontSize: 14.5, color: 'var(--accent-2)', lineHeight: 1.55 }}>
             <strong>Парсинг конкурентов {mp === 'wb' ? 'Wildberries' : 'Ozon'}</strong> — топ выдачи по запросу.
             Данные идут из серверного кэша (фоновый сборщик с троттлом), площадка не банит.
             Выберите карточку как «нашу» — Claude сравнит её с остальными.
@@ -158,7 +158,7 @@ export function Competitors() {
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Запрос для поиска конкурентов…"
-              style={{ width: '100%', padding: '9px 12px 9px 32px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-2)', fontSize: 13 }}
+              style={{ width: '100%', padding: '9px 12px 9px 32px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-2)', fontSize: 14.5 }}
             />
           </div>
           <button type="submit" className="btn btn-primary" disabled={loading}>
@@ -183,11 +183,11 @@ export function Competitors() {
       {error && (
         <div className="card" style={{ background: 'rgba(220,38,38,.08)', display: 'flex', gap: 10 }}>
           <WarningIcon size={18} weight="bold" style={{ color: 'var(--bad)' }} />
-          <div style={{ fontSize: 13 }}>{error}</div>
+          <div style={{ fontSize: 14.5 }}>{error}</div>
         </div>
       )}
       {notice && !error && (
-        <div className="muted" style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
+        <div className="muted" style={{ fontSize: 14, display: 'flex', gap: 6, alignItems: 'center' }}>
           <InfoIcon size={12} weight="bold" /> {notice}
         </div>
       )}
@@ -196,7 +196,7 @@ export function Competitors() {
         <div className="grid grid-4">
           <div className="card kpi"><div className="card-title">Найдено карточек</div><div className="v">{items.length}</div></div>
           <div className="card kpi"><div className="card-title">Средняя цена</div><div className="v">{RU(Math.round(stats.avgPrice))} ₽</div></div>
-          <div className="card kpi"><div className="card-title">Диапазон цен</div><div className="v" style={{ fontSize: 18 }}>{RU(Math.round(stats.minPrice))} – {RU(Math.round(stats.maxPrice))} ₽</div></div>
+          <div className="card kpi"><div className="card-title">Диапазон цен</div><div className="v" style={{ fontSize: 19 }}>{RU(Math.round(stats.minPrice))} – {RU(Math.round(stats.maxPrice))} ₽</div></div>
           <div className="card kpi"><div className="card-title">Средний рейтинг</div><div className="v">{stats.avgRating.toFixed(2)} <StarIcon size={14} weight="fill" style={{ color: '#f59e0b', verticalAlign: -1 }} /></div><div className="d muted">отзывов всего: {RU(stats.totalFeedbacks)}</div></div>
         </div>
       )}
@@ -206,8 +206,8 @@ export function Competitors() {
           <div className="flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
             <div className="row gap-8">
               <SparkleIcon size={16} weight="fill" style={{ color: 'var(--accent)' }} />
-              <strong style={{ fontSize: 14 }}>«Наша» карточка выбрана:</strong>
-              <span className="muted" style={{ fontSize: 13 }}>{items[selectedOurIdx]?.name?.slice(0, 80)}…</span>
+              <strong style={{ fontSize: 15 }}>«Наша» карточка выбрана:</strong>
+              <span className="muted" style={{ fontSize: 14.5 }}>{items[selectedOurIdx]?.name?.slice(0, 80)}…</span>
             </div>
             <button className="btn btn-primary" onClick={runAi} disabled={aiLoading}>
               {aiLoading ? <SpinnerIcon size={14} className="spin" /> : <SparkleIcon size={14} weight="fill" />}
@@ -225,31 +225,31 @@ export function Competitors() {
 
       {summary && (
         <div className="card" style={{ background: 'var(--accent-soft)' }}>
-          <h2 style={{ marginTop: 0, color: 'var(--accent-2)', fontSize: 16 }}>
+          <h2 style={{ marginTop: 0, color: 'var(--accent-2)', fontSize: 17 }}>
             <SparkleIcon size={16} weight="fill" /> Анализ от Claude
           </h2>
-          {summary.position && <p style={{ fontSize: 13.5, lineHeight: 1.55 }}><strong>Позиция:</strong> {summary.position}</p>}
-          {summary.priceGap && <p style={{ fontSize: 13.5, lineHeight: 1.55 }}><strong>Цена:</strong> {summary.priceGap}</p>}
-          {summary.ratingGap && <p style={{ fontSize: 13.5, lineHeight: 1.55 }}><strong>Рейтинг:</strong> {summary.ratingGap}</p>}
+          {summary.position && <p style={{ fontSize: 15, lineHeight: 1.55 }}><strong>Позиция:</strong> {summary.position}</p>}
+          {summary.priceGap && <p style={{ fontSize: 15, lineHeight: 1.55 }}><strong>Цена:</strong> {summary.priceGap}</p>}
+          {summary.ratingGap && <p style={{ fontSize: 15, lineHeight: 1.55 }}><strong>Рейтинг:</strong> {summary.ratingGap}</p>}
           {summary.advantages && summary.advantages.length > 0 && (
             <>
-              <div style={{ marginTop: 10, fontSize: 13, fontWeight: 600 }}>Преимущества:</div>
-              <ul style={{ margin: '6px 0 0', paddingLeft: 20, fontSize: 13, lineHeight: 1.65 }}>{summary.advantages.map((s, i) => <li key={i}>{s}</li>)}</ul>
+              <div style={{ marginTop: 10, fontSize: 14.5, fontWeight: 600 }}>Преимущества:</div>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 20, fontSize: 14.5, lineHeight: 1.65 }}>{summary.advantages.map((s, i) => <li key={i}>{s}</li>)}</ul>
             </>
           )}
           {summary.gaps && summary.gaps.length > 0 && (
             <>
-              <div style={{ marginTop: 10, fontSize: 13, fontWeight: 600 }}>Где обходят:</div>
-              <ul style={{ margin: '6px 0 0', paddingLeft: 20, fontSize: 13, lineHeight: 1.65 }}>{summary.gaps.map((s, i) => <li key={i}>{s}</li>)}</ul>
+              <div style={{ marginTop: 10, fontSize: 14.5, fontWeight: 600 }}>Где обходят:</div>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 20, fontSize: 14.5, lineHeight: 1.65 }}>{summary.gaps.map((s, i) => <li key={i}>{s}</li>)}</ul>
             </>
           )}
           {summary.actions && summary.actions.length > 0 && (
             <>
-              <div style={{ marginTop: 10, fontSize: 13, fontWeight: 600 }}>Что сделать:</div>
-              <ul style={{ margin: '6px 0 0', paddingLeft: 20, fontSize: 13, lineHeight: 1.65 }}>{summary.actions.map((s, i) => <li key={i}>{s}</li>)}</ul>
+              <div style={{ marginTop: 10, fontSize: 14.5, fontWeight: 600 }}>Что сделать:</div>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 20, fontSize: 14.5, lineHeight: 1.65 }}>{summary.actions.map((s, i) => <li key={i}>{s}</li>)}</ul>
             </>
           )}
-          {summary.raw && <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{summary.raw}</pre>}
+          {summary.raw && <pre style={{ whiteSpace: 'pre-wrap', fontSize: 14 }}>{summary.raw}</pre>}
         </div>
       )}
 
@@ -283,30 +283,30 @@ export function Competitors() {
                       ? <img src={it.image} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                       : <div style={{ width: 44, height: 44, borderRadius: 6, background: 'var(--bg-2)' }} />}
                   </td>
-                  <td style={{ maxWidth: 360, fontSize: 13 }}>
+                  <td style={{ maxWidth: 360, fontSize: 14.5 }}>
                     <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
                       {it.name}
                     </div>
-                    <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{it.platform === 'wb' ? 'nmId' : 'sku'} {it.id}</div>
+                    <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>{it.platform === 'wb' ? 'nmId' : 'sku'} {it.id}</div>
                   </td>
-                  <td style={{ fontSize: 12 }}>
+                  <td style={{ fontSize: 14 }}>
                     <div>{it.brand || '—'}</div>
-                    <div className="muted" style={{ fontSize: 11 }}>{it.seller || ''}</div>
+                    <div className="muted" style={{ fontSize: 13 }}>{it.seller || ''}</div>
                   </td>
-                  <td className="right" style={{ fontSize: 13 }}>
+                  <td className="right" style={{ fontSize: 14.5 }}>
                     <div><strong>{RU(Math.round(it.price))} ₽</strong></div>
-                    {it.oldPrice && it.oldPrice > it.price && <div className="muted" style={{ fontSize: 11, textDecoration: 'line-through' }}>{RU(Math.round(it.oldPrice))} ₽</div>}
+                    {it.oldPrice && it.oldPrice > it.price && <div className="muted" style={{ fontSize: 13, textDecoration: 'line-through' }}>{RU(Math.round(it.oldPrice))} ₽</div>}
                   </td>
-                  <td className="right" style={{ fontSize: 13 }}>
+                  <td className="right" style={{ fontSize: 14.5 }}>
                     {it.rating ? <>{it.rating.toFixed(2)} <StarIcon size={12} weight="fill" style={{ color: '#f59e0b' }} /></> : '—'}
                   </td>
-                  <td className="right muted" style={{ fontSize: 12 }}>{RU(it.reviews || 0)}</td>
+                  <td className="right muted" style={{ fontSize: 14 }}>{RU(it.reviews || 0)}</td>
                   <td>
                     <div className="row gap-8" style={{ justifyContent: 'flex-end' }}>
                       {it.platform === 'wb' && (
                         <button
                           className="btn"
-                          style={{ padding: '4px 8px', fontSize: 12 }}
+                          style={{ padding: '4px 8px', fontSize: 14 }}
                           onClick={(e) => { e.stopPropagation(); openDeep(it); }}
                           title="Разобрать карточку и фото через Claude Vision"
                         >
@@ -338,13 +338,13 @@ export function Competitors() {
             <div className="flex-between" style={{ marginBottom: 12 }}>
               <div className="row gap-8">
                 <CameraIcon size={18} weight="fill" style={{ color: 'var(--accent)' }} />
-                <strong style={{ fontSize: 15 }}>Разбор карточки конкурента</strong>
+                <strong style={{ fontSize: 16 }}>Разбор карточки конкурента</strong>
               </div>
               <button className="btn" style={{ padding: '4px 8px' }} onClick={closeDeep}><XIcon size={14} weight="bold" /></button>
             </div>
 
-            <div style={{ fontSize: 13, marginBottom: 4 }}>{deepCard?.name || deepItem.name}</div>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+            <div style={{ fontSize: 14.5, marginBottom: 4 }}>{deepCard?.name || deepItem.name}</div>
+            <div className="muted" style={{ fontSize: 14, marginBottom: 12 }}>
               {(deepCard?.brand || deepItem.brand) || '—'} · {deepItem.platform === 'wb' ? 'nmId' : 'sku'} {deepItem.id} · {RU(Math.round(deepItem.price))} ₽
               {deepItem.rating ? <> · {deepItem.rating.toFixed(2)}★</> : null}
               {deepCard ? <> · фото: {deepCard.photoCount}</> : null}
@@ -366,12 +366,12 @@ export function Competitors() {
             )}
 
             {deepLoading && (
-              <div className="row gap-8 muted" style={{ fontSize: 13, padding: '12px 0' }}>
+              <div className="row gap-8 muted" style={{ fontSize: 14.5, padding: '12px 0' }}>
                 <SpinnerIcon size={16} className="spin" /> Скачиваю фото и анализирую через Claude Vision…
               </div>
             )}
             {deepError && (
-              <div className="card" style={{ background: 'rgba(220,38,38,.08)', fontSize: 13 }}>
+              <div className="card" style={{ background: 'rgba(220,38,38,.08)', fontSize: 14.5 }}>
                 <WarningIcon size={15} weight="bold" style={{ color: 'var(--bad)' }} /> {deepError}
               </div>
             )}
@@ -381,7 +381,7 @@ export function Competitors() {
                 {typeof deepAudit.score === 'number' && (
                   <div className="row gap-8">
                     <SparkleIcon size={16} weight="fill" style={{ color: 'var(--accent)' }} />
-                    <strong style={{ fontSize: 14 }}>Оценка карточки: {deepAudit.score}/100</strong>
+                    <strong style={{ fontSize: 15 }}>Оценка карточки: {deepAudit.score}/100</strong>
                   </div>
                 )}
                 {renderList('Сильные стороны', deepAudit.strengths)}
@@ -390,7 +390,7 @@ export function Competitors() {
                 {renderList('Чего не хватает в контенте', deepAudit.missingContent)}
                 {renderList('Проблемы из отзывов', deepAudit.reviewProblems)}
                 {renderList('Что бы мы улучшили / переняли', deepAudit.actions)}
-                {deepAudit.raw && <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{deepAudit.raw}</pre>}
+                {deepAudit.raw && <pre style={{ whiteSpace: 'pre-wrap', fontSize: 14 }}>{deepAudit.raw}</pre>}
               </div>
             )}
           </div>
@@ -404,8 +404,8 @@ function renderList(title: string, items?: string[]) {
   if (!items || items.length === 0) return null;
   return (
     <div>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{title}:</div>
-      <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, lineHeight: 1.6 }}>
+      <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 4 }}>{title}:</div>
+      <ul style={{ margin: 0, paddingLeft: 20, fontSize: 14.5, lineHeight: 1.6 }}>
         {items.map((s, i) => <li key={i}>{s}</li>)}
       </ul>
     </div>

@@ -53,8 +53,8 @@ export function Telegram() {
         <div className="tg-header">
           <div className="tg-avatar">AV</div>
           <div>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>Avto Vibe · ИП Алешко</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>bot · в сети</div>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>Avto Vibe · ИП Алешко</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>bot · в сети</div>
           </div>
         </div>
         <div className="tg-body">

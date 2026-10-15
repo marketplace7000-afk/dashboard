@@ -128,20 +128,20 @@ export function Login({ onLogin }: { onLogin: () => void }) {
     return (
       <div className="login-wrap">
         <div className="login-card" style={{ textAlign: 'center', padding: 40 }}>
-          <div className="brand" style={{ padding: 0, marginBottom: 18, fontSize: 22, justifyContent: 'center' }}>
+          <div className="brand" style={{ padding: 0, marginBottom: 18, fontSize: 23, justifyContent: 'center' }}>
             <span>Avto Vibe</span>
           </div>
           {tgState !== 'denied' ? (
             <>
               <SpinnerIcon size={28} weight="bold" className="spin" style={{ color: 'var(--accent)' }} />
-              <p style={{ marginTop: 14, color: 'var(--muted)', fontSize: 13 }}>Проверяем доступ по Telegram…</p>
+              <p style={{ marginTop: 14, color: 'var(--muted)', fontSize: 14.5 }}>Проверяем доступ по Telegram…</p>
             </>
           ) : (
             <>
               {error && (
                 <div style={{
                   background: 'rgba(220,38,38,.08)', color: 'var(--bad)',
-                  padding: '10px 12px', borderRadius: 8, fontSize: 12.5, marginBottom: 14,
+                  padding: '10px 12px', borderRadius: 8, fontSize: 14, marginBottom: 14,
                   display: 'flex', gap: 8, alignItems: 'center', textAlign: 'left',
                 }}>
                   <WarningIcon size={14} weight="bold" /> {error}
@@ -182,7 +182,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
-        <div className="brand" style={{ padding: 0, marginBottom: 18, fontSize: 22 }}>
+        <div className="brand" style={{ padding: 0, marginBottom: 18, fontSize: 23 }}>
           <span>Avto Vibe</span>
         </div>
         <h2>Вход в кабинет</h2>
@@ -204,7 +204,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         {error && (
           <div style={{
             background: 'rgba(220,38,38,.08)', color: 'var(--bad)',
-            padding: '8px 12px', borderRadius: 8, fontSize: 12.5, marginBottom: 12,
+            padding: '8px 12px', borderRadius: 8, fontSize: 14, marginBottom: 12,
             display: 'flex', gap: 8, alignItems: 'center',
           }}>
             <WarningIcon size={14} weight="bold" /> {error}
@@ -221,7 +221,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           {loading ? 'Проверка…' : 'Войти'}
         </button>
 
-        <div style={{ marginTop: 14, fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>
+        <div style={{ marginTop: 14, fontSize: 14, color: 'var(--muted)', textAlign: 'center' }}>
           Кабинет продавца: <b style={{ color: 'var(--text)' }}>ИП Алешко</b> · WB&nbsp;+&nbsp;Ozon
         </div>
       </form>

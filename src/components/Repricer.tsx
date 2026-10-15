@@ -49,14 +49,14 @@ export function Repricer() {
 
   const num = (k: keyof RepricerSettings, label: string, suffix: string) => (
     <label style={{ display: 'grid', gap: 4 }}>
-      <span className="card-title" style={{ fontSize: 13 }}>{label}</span>
+      <span className="card-title" style={{ fontSize: 14.5 }}>{label}</span>
       <span className="row gap-8">
         <input
           type="number" className="input" style={{ width: 90 }}
           value={String(draft?.[k] ?? '')}
           onChange={e => draft && setDraft({ ...draft, [k]: Number(e.target.value) })}
         />
-        <span className="muted" style={{ fontSize: 13 }}>{suffix}</span>
+        <span className="muted" style={{ fontSize: 14.5 }}>{suffix}</span>
       </span>
     </label>
   );
@@ -66,7 +66,7 @@ export function Repricer() {
       <div className="card" style={{ background: 'var(--accent-soft)' }}>
         <div className="row gap-8" style={{ alignItems: 'flex-start' }}>
           <InfoIcon size={16} weight="bold" style={{ color: 'var(--accent-2)', flexShrink: 0, marginTop: 2 }} />
-          <div style={{ fontSize: 14, color: 'var(--accent-2)', lineHeight: 1.55 }}>
+          <div style={{ fontSize: 15, color: 'var(--accent-2)', lineHeight: 1.55 }}>
             <strong>Репрайсер предлагает, а не ставит цены.</strong> Ничего в Wildberries отсюда не
             отправляется: агент считает, какую цену имело бы смысл поставить, и объясняет почему.
             Решение и простановка — за менеджером.
@@ -78,7 +78,7 @@ export function Repricer() {
         <div className="card" style={{ borderColor: 'var(--warn)' }}>
           <div className="row gap-8" style={{ alignItems: 'flex-start' }}>
             <WarningIcon size={16} weight="bold" style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 2 }} />
-            <div style={{ fontSize: 14, lineHeight: 1.55 }}>
+            <div style={{ fontSize: 15, lineHeight: 1.55 }}>
               <strong>Пороги пока предварительные.</strong> Минимальная маржа, шаг и частота выставлены
               нами по умолчанию и не согласованы. Пока это так, считайте предложения прикидкой:
               цифры честные, но правила — наши, а не ваши.
@@ -89,7 +89,7 @@ export function Repricer() {
 
       <div className="card">
         <div className="flex-between" style={{ marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 17 }}>Пороги</h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>Пороги</h2>
           <div className="row gap-8">
             <button className="btn btn-sm" onClick={() => void load()} disabled={loading}>
               {loading ? <SpinnerIcon size={13} className="spin" /> : <ArrowsClockwiseIcon size={13} weight="bold" />}
@@ -103,7 +103,7 @@ export function Repricer() {
         {draft && (
           <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <label style={{ display: 'grid', gap: 4 }}>
-              <span className="card-title" style={{ fontSize: 13 }}>Стратегия</span>
+              <span className="card-title" style={{ fontSize: 14.5 }}>Стратегия</span>
               <select
                 className="input" value={draft.strategy}
                 onChange={e => setDraft({ ...draft, strategy: e.target.value as Strategy })}
@@ -118,7 +118,7 @@ export function Repricer() {
             {num('maxStepPct', 'Шаг за раз', '% от цены')}
             {num('minIntervalHours', 'Не чаще чем раз в', 'ч')}
             <label style={{ display: 'grid', gap: 4, flex: 1, minWidth: 220 }}>
-              <span className="card-title" style={{ fontSize: 13 }}>Стоп-лист (артикулы через запятую)</span>
+              <span className="card-title" style={{ fontSize: 14.5 }}>Стоп-лист (артикулы через запятую)</span>
               <input
                 className="input" value={draft.stopList.join(', ')}
                 onChange={e => setDraft({ ...draft, stopList: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
@@ -128,16 +128,16 @@ export function Repricer() {
         )}
         {draft && (
           <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
-            <div className="card-title" style={{ fontSize: 13 }}>План маржи месяца — для советника и пола цены (ниже плана менеджеры не получают KPI; «край» = план + запас; цель — к чему стремимся)</div>
+            <div className="card-title" style={{ fontSize: 14.5 }}>План маржи месяца — для советника и пола цены (ниже плана менеджеры не получают KPI; «край» = план + запас; цель — к чему стремимся)</div>
             <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
               {([['month', 'Месяц', 'ГГГГ-ММ'], ['wb', 'План WB', '%'], ['ozon', 'План Ozon', '%'], ['guardPct', 'Запас над планом', 'п.п.'], ['targetPct', 'Цель', '%']] as const).map(([k, label, suffix]) => (
                 <label key={k} style={{ display: 'grid', gap: 4 }}>
-                  <span className="card-title" style={{ fontSize: 13 }}>{label}</span>
+                  <span className="card-title" style={{ fontSize: 14.5 }}>{label}</span>
                   <span className="row gap-8">
                     <input type={k === 'month' ? 'text' : 'number'} step="0.1" className="input" style={{ width: k === 'month' ? 100 : 90 }}
                       value={String(draft.marginPlan?.[k] ?? '')}
                       onChange={e => setDraft({ ...draft, marginPlan: { ...draft.marginPlan, [k]: k === 'month' ? e.target.value : Number(e.target.value) } })} />
-                    <span className="muted" style={{ fontSize: 13 }}>{suffix}</span>
+                    <span className="muted" style={{ fontSize: 14.5 }}>{suffix}</span>
                   </span>
                 </label>
               ))}
@@ -147,18 +147,18 @@ export function Repricer() {
       </div>
 
       {error && (
-        <div className="card"><div className="row gap-8" style={{ fontSize: 14, color: 'var(--bad)' }}>
+        <div className="card"><div className="row gap-8" style={{ fontSize: 15, color: 'var(--bad)' }}>
           <WarningIcon size={14} weight="bold" /> {error}
         </div></div>
       )}
 
       <div className="card">
-        <h2 style={{ margin: '0 0 12px', fontSize: 17 }}>
+        <h2 style={{ margin: '0 0 12px', fontSize: 18 }}>
           Предложения {data ? `(${data.suggestions.filter(s => s.suggestedPrice != null).length})` : ''}
         </h2>
-        {loading && !data && <div className="muted" style={{ fontSize: 14 }}>Считаем…</div>}
+        {loading && !data && <div className="muted" style={{ fontSize: 15 }}>Считаем…</div>}
         {data && !data.suggestions.length && (
-          <div className="muted" style={{ fontSize: 14 }}>
+          <div className="muted" style={{ fontSize: 15 }}>
             Пока не по чему считать: закрепите конкурентов за товарами на вкладке рядом, и после
             ночного сбора цен здесь появятся предложения.
           </div>
@@ -191,7 +191,7 @@ export function Repricer() {
                       {s.marginSuggested != null && s.marginSuggested !== s.marginNow && ` → ${s.marginSuggested}%`}
                     </td>
                     <td className="right">{RU(s.market.min)}{s.market.total ? ` (из ${s.market.total})` : ''}</td>
-                    <td className="muted" style={{ fontSize: 14, lineHeight: 1.5, minWidth: 280 }}>
+                    <td className="muted" style={{ fontSize: 15, lineHeight: 1.5, minWidth: 280 }}>
                       {s.blocker ? <><WarningIcon size={12} weight="bold" /> </> : null}{s.reason}
                     </td>
                   </tr>
@@ -201,7 +201,7 @@ export function Repricer() {
           </div>
         )}
         {!!data?.skipped.length && (
-          <div className="muted" style={{ fontSize: 14, marginTop: 10, lineHeight: 1.55 }}>
+          <div className="muted" style={{ fontSize: 15, marginTop: 10, lineHeight: 1.55 }}>
             {/* Пропущенные показываем явно: молчаливо короткий список читается как
                 «больше ничего и не надо», а это неправда. */}
             Пропущено {data.skipped.length}: {data.skipped.slice(0, 8).map(s => `${s.sku} — ${s.why}`).join('; ')}

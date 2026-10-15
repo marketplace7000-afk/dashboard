@@ -19,7 +19,7 @@ function renderMarkdown(text: string): React.ReactNode {
     if (m.index > last) parts.push(text.slice(last, m.index));
     if (m[1] != null) parts.push(<strong key={key++}>{m[1]}</strong>);
     else if (m[2] != null) parts.push(
-      <code key={key++} style={{ background: 'rgba(0,0,0,.06)', padding: '1px 4px', borderRadius: 4, fontSize: 12 }}>{m[2]}</code>
+      <code key={key++} style={{ background: 'rgba(0,0,0,.06)', padding: '1px 4px', borderRadius: 4, fontSize: 14 }}>{m[2]}</code>
     );
     last = re.lastIndex;
   }
@@ -118,7 +118,7 @@ export function AiChatBubble({ currentPage }: Props) {
           <span style={{
             position: 'absolute', top: 6, right: 6,
             background: '#fff', color: '#6366f1',
-            fontSize: 10, fontWeight: 700,
+            fontSize: 12, fontWeight: 700,
             borderRadius: 10, padding: '1px 6px',
           }}>{Math.min(history.length, 99)}</span>
         )}
@@ -147,8 +147,8 @@ export function AiChatBubble({ currentPage }: Props) {
         <div className="row gap-8">
           <SparkleIcon size={18} weight="fill" />
           <div>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>AI-копилот</div>
-            <div style={{ fontSize: 11, opacity: 0.85 }}>Claude знает твои продажи, отзывы и рекламу</div>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>AI-копилот</div>
+            <div style={{ fontSize: 13, opacity: 0.85 }}>Claude знает твои продажи, отзывы и рекламу</div>
           </div>
         </div>
         <div className="row gap-8">
@@ -174,7 +174,7 @@ export function AiChatBubble({ currentPage }: Props) {
         {history.length === 0 && (
           <div style={{ textAlign: 'center', padding: '20px 8px' }}>
             <ChatCircleDotsIcon size={36} weight="duotone" style={{ color: 'var(--muted)', opacity: 0.6 }} />
-            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8, lineHeight: 1.55 }}>
+            <div style={{ fontSize: 14.5, color: 'var(--muted)', marginTop: 8, lineHeight: 1.55 }}>
               Спроси о продажах, отзывах, ценах, конкурентах или о любом твоём товаре.
               <br />
               Контекст обновляется раз в 30 минут из кэша WB/Ozon.
@@ -187,7 +187,7 @@ export function AiChatBubble({ currentPage }: Props) {
                   style={{
                     background: 'var(--accent-soft)', border: '1px solid var(--border)',
                     color: 'var(--accent-2)', padding: '8px 12px', borderRadius: 10,
-                    fontSize: 12.5, textAlign: 'left', cursor: 'pointer', lineHeight: 1.4,
+                    fontSize: 14, textAlign: 'left', cursor: 'pointer', lineHeight: 1.4,
                   }}
                 >
                   {s}
@@ -209,7 +209,7 @@ export function AiChatBubble({ currentPage }: Props) {
               borderRadius: 12,
               background: m.role === 'user' ? 'var(--accent)' : 'var(--bg-2)',
               color: m.role === 'user' ? '#fff' : 'var(--text)',
-              fontSize: 13, lineHeight: 1.5,
+              fontSize: 14.5, lineHeight: 1.5,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
             }}>
               {m.role === 'assistant' ? renderMarkdown(m.content) : m.content}
@@ -221,7 +221,7 @@ export function AiChatBubble({ currentPage }: Props) {
           <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
             <div style={{
               padding: '9px 12px', borderRadius: 12, background: 'var(--bg-2)',
-              fontSize: 13, color: 'var(--muted)',
+              fontSize: 14.5, color: 'var(--muted)',
               display: 'inline-flex', alignItems: 'center', gap: 6,
             }}>
               <SpinnerIcon size={14} className="spin" /> Думаю…
@@ -232,7 +232,7 @@ export function AiChatBubble({ currentPage }: Props) {
 
       {error && (
         <div style={{
-          fontSize: 12, color: 'var(--bad)', padding: '6px 14px',
+          fontSize: 14, color: 'var(--bad)', padding: '6px 14px',
           background: 'rgba(220,38,38,.06)', borderTop: '1px solid var(--border)',
         }}>
           {error}
@@ -254,7 +254,7 @@ export function AiChatBubble({ currentPage }: Props) {
           style={{
             flex: 1, resize: 'none', maxHeight: 100,
             padding: '8px 10px', border: '1px solid var(--border)',
-            borderRadius: 10, fontSize: 13, background: 'var(--bg-2)',
+            borderRadius: 10, fontSize: 14.5, background: 'var(--bg-2)',
             fontFamily: 'inherit', outline: 'none',
           }}
         />

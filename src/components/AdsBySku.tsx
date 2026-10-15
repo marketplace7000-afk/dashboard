@@ -85,7 +85,7 @@ export function AdsBySku({ platform }: { platform: 'wb' | 'ozon' }) {
       <div className="row gap-8" style={{ justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
         <div>
           <div className="card-title">Реклама по артикулам</div>
-          <div className="muted" style={{ fontSize: 12 }}>
+          <div className="muted" style={{ fontSize: 14 }}>
             расход и ДРР по каждому товару из API площадки — не из таблицы.
             ДРР считается как расход ÷ выручка по всем заказам, как у вас в учёте
           </div>
@@ -95,7 +95,7 @@ export function AdsBySku({ platform }: { platform: 'wb' | 'ozon' }) {
             className="input"
             value={days}
             onChange={e => setDays(Number(e.target.value))}
-            style={{ width: 'auto', padding: '6px 8px', fontSize: 12 }}
+            style={{ width: 'auto', padding: '6px 8px', fontSize: 14 }}
           >
             <option value={7}>7 дней</option>
             <option value={14}>14 дней</option>
@@ -105,7 +105,7 @@ export function AdsBySku({ platform }: { platform: 'wb' | 'ozon' }) {
             className="input"
             value={sort}
             onChange={e => setSort(e.target.value as SortKey)}
-            style={{ width: 'auto', padding: '6px 8px', fontSize: 12 }}
+            style={{ width: 'auto', padding: '6px 8px', fontSize: 14 }}
             title="Сортировка"
           >
             <option value="spend">по расходу ↓</option>
@@ -183,13 +183,13 @@ export function AdsBySku({ platform }: { platform: 'wb' | 'ozon' }) {
                     <tr key={`${r.platform}:${r.sku}`}>
                       <td>
                         <div style={{ fontWeight: 600 }}>{r.sku}</div>
-                        {r.category && <div className="muted" style={{ fontSize: 11 }}>{r.category}</div>}
+                        {r.category && <div className="muted" style={{ fontSize: 13 }}>{r.category}</div>}
                       </td>
                       <td style={{ textAlign: 'right' }}>{rub(r.spend)}</td>
                       <td style={{ textAlign: 'right' }} className="muted">
                         {r.prevSpend ? rub(r.prevSpend) : '—'}
                         {deltaSpend !== null && (
-                          <div style={{ fontSize: 11, color: deltaSpend > 0 ? 'var(--bad)' : 'var(--good)' }}>
+                          <div style={{ fontSize: 13, color: deltaSpend > 0 ? 'var(--bad)' : 'var(--good)' }}>
                             {deltaSpend > 0 ? '+' : ''}{deltaSpend}%
                           </div>
                         )}
@@ -206,12 +206,12 @@ export function AdsBySku({ platform }: { platform: 'wb' | 'ozon' }) {
                             показываем и второй, чтобы сверка с кабинетом была
                             возможна (аудит 04.09: 127,5% против 36,1% у одного SKU). */}
                         {r.drrBase === 'ads-only' && (
-                          <div className="muted" style={{ fontSize: 10, fontWeight: 400 }}>
+                          <div className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
                             от выручки рекламы
                           </div>
                         )}
                         {r.drrBase === 'all-orders' && r.revenue > 0 && r.spend > 0 && (
-                          <div className="muted" style={{ fontSize: 10, fontWeight: 400 }}
+                          <div className="muted" style={{ fontSize: 12, fontWeight: 400 }}
                             title="Так ДРР считает рекламный кабинет площадки: расход ÷ выручка от рекламы. Основная цифра выше — расход ÷ выручка по всем заказам (ваша формула).">
                             в кабинете {Math.round((r.spend / r.revenue) * 1000) / 10}%
                           </div>
@@ -226,7 +226,7 @@ export function AdsBySku({ platform }: { platform: 'wb' | 'ozon' }) {
             </table>
           </div>
 
-          <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+          <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
             «Было» — тот же по длине период до текущего. Норма ДРР задаётся по категории;
             она порог, а факт считается из API. {data?.diagnostics}
           </div>

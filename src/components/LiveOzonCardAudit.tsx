@@ -85,7 +85,7 @@ export function LiveOzonCardAudit() {
 
       <div className="card" style={{ background: 'var(--accent-soft)' }}>
         <h2 style={{ marginTop: 0 }}>Что проверяем сейчас (через Ozon API)</h2>
-        <div className="grid grid-3" style={{ gap: 12, fontSize: 13 }}>
+        <div className="grid grid-3" style={{ gap: 12, fontSize: 14.5 }}>
           <div className="row" style={{ gap: 8 }}>
             <CheckCircleIcon size={16} weight="fill" style={{ color: 'var(--good)' }} />
             <span>Кол-во фото в карточке</span>
@@ -99,8 +99,8 @@ export function LiveOzonCardAudit() {
             <span>Маркетинговая цена</span>
           </div>
         </div>
-        <h2 style={{ fontSize: 14, marginTop: 18, marginBottom: 8 }}>Что добавим в полной версии (запрос Дмитрия)</h2>
-        <div className="grid grid-2" style={{ gap: 10, fontSize: 13 }}>
+        <h2 style={{ fontSize: 15, marginTop: 18, marginBottom: 8 }}>Что добавим в полной версии (запрос Дмитрия)</h2>
+        <div className="grid grid-2" style={{ gap: 10, fontSize: 14.5 }}>
           <div className="row" style={{ gap: 8 }}>
             <XCircleIcon size={16} weight="fill" style={{ color: 'var(--muted)' }} />
             <span>Сравнение нашего описания vs описаний топ-3 конкурентов (LLM-анализ)</span>
@@ -181,8 +181,8 @@ export function LiveOzonCardAudit() {
                           ? <img src={r.primary_image} alt="" style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover' }} />
                           : <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--bg-2)' }} />}
                       </td>
-                      <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12 }}>{r.offer_id}</td>
-                      <td style={{ maxWidth: 360, fontSize: 13 }}>
+                      <td className="muted" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 14 }}>{r.offer_id}</td>
+                      <td style={{ maxWidth: 360, fontSize: 14.5 }}>
                         <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{r.name ?? '—'}</div>
                       </td>
                       <td className="right">{r._checks.photos}</td>
@@ -224,8 +224,8 @@ export function LiveOzonCardAudit() {
                     {archivedRows.map((r) => (
                       <tr key={r.id} style={{ opacity: 0.7 }}>
                         <td style={{ paddingLeft: 18 }}>
-                          <div style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12 }}>{r.offer_id}</div>
-                          <div className="muted" style={{ fontSize: 12 }}>{r.name ?? '—'}</div>
+                          <div style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 14 }}>{r.offer_id}</div>
+                          <div className="muted" style={{ fontSize: 14 }}>{r.name ?? '—'}</div>
                         </td>
                         <td className="right">{[r.primary_image, ...(r.images ?? [])].filter((u) => u && !isPlaceholderImage(u)).length}</td>
                         <td style={{ textAlign: 'center', paddingRight: 18 }}>

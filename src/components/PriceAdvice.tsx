@@ -10,7 +10,8 @@ import type { Ads2Mp, Ads2Signal, Ads2SignalsResponse } from '../../shared/ads2'
 
 export function PriceAdvice({ mp }: { mp: Ads2Mp }) {
   const [sig, setSig] = useState<Ads2Signal[] | null>(null);
-  const [open, setOpen] = useState(() => { try { return localStorage.getItem('prices:advice') !== '0'; } catch { return true; } });
+  // Свёрнут по умолчанию (15.10.2026): лист «Цены» — про таблицу, полная лента советов живёт в РНП → «Советник».
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('prices:advice') === '1'; } catch { return false; } });
   useEffect(() => {
     let alive = true;
     apiGet<Ads2SignalsResponse>(`/api/ads2/signals?mp=${mp}`)

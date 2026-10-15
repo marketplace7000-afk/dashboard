@@ -55,7 +55,7 @@ export function Positions() {
       <div className="card" style={{ background: 'var(--bg-2)' }}>
         <div className="row gap-8" style={{ marginBottom: 10 }}>
           <MagnifyingGlassIcon size={16} weight="bold" style={{ color: 'var(--accent)' }} />
-          <strong style={{ fontSize: 14 }}>Позиция товара в поиске WB по запросу</strong>
+          <strong style={{ fontSize: 15 }}>Позиция товара в поиске WB по запросу</strong>
         </div>
         <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
           <input className="input" placeholder="Ключевой запрос (напр. CarPlay адаптер)" value={query}
@@ -66,8 +66,8 @@ export function Positions() {
             <ArrowsClockwiseIcon size={14} weight="bold" className={busy ? 'spin' : ''} /> Проверить
           </button>
         </div>
-        {error && <div style={{ color: 'var(--bad)', fontSize: 13, marginTop: 8 }}><WarningIcon size={14} weight="bold" /> {error}</div>}
-        <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+        {error && <div style={{ color: 'var(--bad)', fontSize: 14.5, marginTop: 8 }}><WarningIcon size={14} weight="bold" /> {error}</div>}
+        <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
           Сканируем топ-500 органической выдачи (без рекламы) и находим ваш nmId. История проверок сохраняется локально.
         </div>
       </div>
@@ -91,11 +91,11 @@ export function Positions() {
               <div key={r.id} className="card" style={{ background: 'var(--bg-2)' }}>
                 <div className="flex-between" style={{ flexWrap: 'wrap', gap: 8 }}>
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>«{r.query}»</div>
-                    <div className="muted" style={{ fontSize: 12 }}>nmId {r.nmId}</div>
+                    <div style={{ fontWeight: 600, fontSize: 14.5 }}>«{r.query}»</div>
+                    <div className="muted" style={{ fontSize: 14 }}>nmId {r.nmId}</div>
                   </div>
                   <div className="row gap-12" style={{ alignItems: 'center' }}>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: last.position == null ? 'var(--muted)' : last.position <= 20 ? 'var(--good)' : last.position <= 100 ? 'var(--warn)' : 'var(--bad)' }}>
+                    <div style={{ fontSize: 21, fontWeight: 700, color: last.position == null ? 'var(--muted)' : last.position <= 20 ? 'var(--good)' : last.position <= 100 ? 'var(--warn)' : 'var(--bad)' }}>
                       {fmtPos(last.position)}
                     </div>
                     {trend === 'up' && <TrendUpIcon size={18} weight="bold" style={{ color: 'var(--good)' }} />}
@@ -110,7 +110,7 @@ export function Positions() {
                   </div>
                 </div>
                 {hist.length > 1 && (
-                  <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                  <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
                     История: {hist.slice(-10).map(h => fmtPos(h.position)).join(' → ')}
                   </div>
                 )}

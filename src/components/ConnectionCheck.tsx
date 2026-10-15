@@ -84,7 +84,7 @@ export function ConnectionCheck({ compact = false }: { compact?: boolean }) {
       </div>
 
       {!compact && (
-        <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+        <div className="muted" style={{ fontSize: 14, marginBottom: 12 }}>
           Вызовы идут через vite dev-proxy: ключи WB и Ozon берутся из <code>.env</code> и
           подставляются в заголовки на стороне сервера разработки. В прод-сборке такая же логика
           переедет на backend.
@@ -106,14 +106,14 @@ export function ConnectionCheck({ compact = false }: { compact?: boolean }) {
                 {r.status === 'err' && <XCircleIcon size={18} weight="fill" style={{ color: 'var(--bad)' }} />}
               </span>
               <div>
-                <div style={{ fontWeight: 500, fontSize: 13 }}>{p.name}</div>
+                <div style={{ fontWeight: 500, fontSize: 14.5 }}>{p.name}</div>
                 {r.message && (
-                  <div className="muted" style={{ fontSize: 11.5, marginTop: 2, wordBreak: 'break-word' }}>
+                  <div className="muted" style={{ fontSize: 13.5, marginTop: 2, wordBreak: 'break-word' }}>
                     {r.message}
                   </div>
                 )}
               </div>
-              <div className="muted" style={{ fontSize: 11 }}>{r.ms != null ? `${r.ms} мс` : ''}</div>
+              <div className="muted" style={{ fontSize: 13 }}>{r.ms != null ? `${r.ms} мс` : ''}</div>
               <button className="btn btn-sm" onClick={() => runOne(p)}>
                 {r.status === 'idle' ? 'тест' : 'повторить'}
               </button>

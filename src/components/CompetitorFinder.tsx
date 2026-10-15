@@ -54,7 +54,7 @@ export function CompetitorFinder({ query, myPrice }: { query: string; myPrice?: 
 
   if (state === 'loading') {
     return (
-      <div className="row gap-8" style={{ fontSize: 12.5, color: 'var(--muted)', padding: '6px 0' }}>
+      <div className="row gap-8" style={{ fontSize: 14, color: 'var(--muted)', padding: '6px 0' }}>
         <SpinnerIcon size={14} weight="bold" className="spin" /> Ищем по витринам WB и Ozon… (до 20 сек)
       </div>
     );
@@ -63,16 +63,16 @@ export function CompetitorFinder({ query, myPrice }: { query: string; myPrice?: 
   return (
     <div style={{ marginTop: 4 }}>
       <div className="row gap-8" style={{ marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <strong style={{ fontSize: 12.5 }}>Конкуренты по запросу «{query.slice(0, 60)}»</strong>
+        <strong style={{ fontSize: 14 }}>Конкуренты по запросу «{query.slice(0, 60)}»</strong>
         <button className="btn btn-sm" onClick={run}>Обновить</button>
       </div>
       {errs.length > 0 && (
-        <div className="row gap-6" style={{ fontSize: 12, color: 'var(--warn)', marginBottom: 6 }}>
+        <div className="row gap-6" style={{ fontSize: 14, color: 'var(--warn)', marginBottom: 6 }}>
           <WarningIcon size={13} weight="bold" /> {errs.join(' · ')} — показана вторая площадка
         </div>
       )}
       {items.length === 0 ? (
-        <div className="muted" style={{ fontSize: 12.5 }}>Витрины ничего не вернули (возможно, временный блок площадки — попробуй ещё раз чуть позже).</div>
+        <div className="muted" style={{ fontSize: 14 }}>Витрины ничего не вернули (возможно, временный блок площадки — попробуй ещё раз чуть позже).</div>
       ) : (
         <div style={{ display: 'grid', gap: 6 }}>
           {items.map((it) => {
@@ -88,16 +88,16 @@ export function CompetitorFinder({ query, myPrice }: { query: string; myPrice?: 
                   ? <img src={it.image} alt="" style={{ width: 34, height: 44, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
                   : <div style={{ width: 34, height: 44, borderRadius: 6, background: 'var(--bg-3)', flexShrink: 0 }} />}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
-                  <div className="muted" style={{ fontSize: 11 }}>
+                  <div style={{ fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
+                  <div className="muted" style={{ fontSize: 13 }}>
                     <span style={{ color: it.platform === 'wb' ? '#cb11ab' : '#005bff', fontWeight: 700 }}>{it.platform === 'wb' ? 'WB' : 'Ozon'}</span>
                     {it.seller ? ` · ${it.seller}` : ''}
                     {it.rating ? <> · <StarIcon size={10} weight="fill" style={{ color: '#f59e0b', verticalAlign: -1 }} /> {it.rating}{it.reviews ? ` (${it.reviews})` : ''}</> : ''}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: cheaper ? 'var(--bad)' : 'var(--text)' }}>{fmt(it.price)}</div>
-                  {cheaper && <div style={{ fontSize: 10.5, color: 'var(--bad)' }}>дешевле нас</div>}
+                  <div style={{ fontWeight: 700, fontSize: 14.5, color: cheaper ? 'var(--bad)' : 'var(--text)' }}>{fmt(it.price)}</div>
+                  {cheaper && <div style={{ fontSize: 12.5, color: 'var(--bad)' }}>дешевле нас</div>}
                 </div>
                 <ArrowSquareOutIcon size={14} weight="bold" style={{ color: 'var(--muted)', flexShrink: 0 }} />
               </a>
@@ -105,7 +105,7 @@ export function CompetitorFinder({ query, myPrice }: { query: string; myPrice?: 
           })}
         </div>
       )}
-      <div className="muted" style={{ fontSize: 10.5, marginTop: 6 }}>
+      <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
         Поиск по названию на публичных витринах. Это продавцы похожих/таких же товаров — Ozon не раскрывает, кто именно стоит за «минимальной ценой» индекса.
       </div>
     </div>

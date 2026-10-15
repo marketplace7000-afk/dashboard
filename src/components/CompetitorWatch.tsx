@@ -77,17 +77,17 @@ export function CompetitorWatch({ sku, ourPrice }: { sku: string; ourPrice: numb
   return (
     <div style={{ marginTop: 14 }}>
       <div className="row gap-8" style={{ alignItems: 'center', marginBottom: 8 }}>
-        <strong style={{ fontSize: 13 }}>Конкуренты и рынок</strong>
-        <span className="muted" style={{ fontSize: 11 }}>Wildberries</span>
+        <strong style={{ fontSize: 14.5 }}>Конкуренты и рынок</strong>
+        <span className="muted" style={{ fontSize: 13 }}>Wildberries</span>
       </div>
 
       {/* Сводка по рынку. Если считать не по чему — пишем причину, а не прочерк. */}
       {loading ? (
-        <div className="muted" style={{ fontSize: 12 }}>Загружаем…</div>
+        <div className="muted" style={{ fontSize: 14 }}>Загружаем…</div>
       ) : data?.reason ? (
-        <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>{data.reason}</div>
+        <div className="muted" style={{ fontSize: 14, marginBottom: 10 }}>{data.reason}</div>
       ) : (
-        <div className="row gap-12" style={{ flexWrap: 'wrap', marginBottom: 10, fontSize: 12 }}>
+        <div className="row gap-12" style={{ flexWrap: 'wrap', marginBottom: 10, fontSize: 14 }}>
           <span>Наша цена: <b>{rub(data?.ourPrice ?? null)}</b></span>
           <span className="muted">|</span>
           <span>Минимум по рынку: <b>{rub(data?.min ?? null)}</b></span>
@@ -125,11 +125,11 @@ export function CompetitorWatch({ sku, ourPrice }: { sku: string; ourPrice: numb
           Добавить
         </button>
       </div>
-      {msg && <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>{msg}</div>}
+      {msg && <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>{msg}</div>}
 
       {/* Кого отслеживаем */}
       {active.length > 0 && (
-        <table style={{ width: '100%', fontSize: 12, marginBottom: 10 }}>
+        <table style={{ width: '100%', fontSize: 14, marginBottom: 10 }}>
           <tbody>
             {active.map(c => (
               <tr key={c.nmId}>
@@ -144,7 +144,7 @@ export function CompetitorWatch({ sku, ourPrice }: { sku: string; ourPrice: numb
                 <td className="right" style={{ width: 110 }}>
                   <b>{rub(c.price)}</b>
                   {/* Дата замера: цена может быть вчерашней, и это надо видеть. */}
-                  {c.priceDate && <div className="muted" style={{ fontSize: 10 }}>на {c.priceDate.slice(5).split('-').reverse().join('.')}</div>}
+                  {c.priceDate && <div className="muted" style={{ fontSize: 12 }}>на {c.priceDate.slice(5).split('-').reverse().join('.')}</div>}
                 </td>
                 <td className="right" style={{ width: 90 }}>
                   <button className="btn btn-sm" disabled={busy} onClick={() => void send({ nmId: c.nmId, remove: true })}>
@@ -160,11 +160,11 @@ export function CompetitorWatch({ sku, ourPrice }: { sku: string; ourPrice: numb
       {/* Найдено системой — ждёт решения человека */}
       {suggested.length > 0 && (
         <div style={{ marginTop: 6 }}>
-          <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+          <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
             Система нашла похожие товары. В расчёт рынка они не идут, пока вы их не подтвердите.
           </div>
           {suggested.map(c => (
-            <div key={c.nmId} className="row gap-8" style={{ alignItems: 'center', fontSize: 12, padding: '2px 0' }}>
+            <div key={c.nmId} className="row gap-8" style={{ alignItems: 'center', fontSize: 14, padding: '2px 0' }}>
               <a href={`https://www.wildberries.ru/catalog/${c.nmId}/detail.aspx`} target="_blank" rel="noreferrer" style={{ flex: 1 }}>
                 {c.title || `nm${c.nmId}`}
               </a>

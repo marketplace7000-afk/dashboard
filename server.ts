@@ -97,8 +97,9 @@ app.listen(PORT, '0.0.0.0', () => {
     .catch(e => console.warn('[costs] таймер сверки не запущен:', (e as Error).message));
   startTelegramBotSafe();
   // Раздел «Склад»: заказы FBS WB/Ozon каждые 5 мин, полный проход раз в час (только чтение API).
-  import('./api/_lib/sklad/ordersPoller')
-    .then(m => m.scheduleOrdersPoller())
+  // Раздел «Склад» в архиве (api/_lib/sklad/archive.ts) — опрос не запускаем.
+  import('./api/_lib/sklad/archive')
+    .then(a => a.SKLAD_ARCHIVED ? console.warn('[sklad-orders] раздел «Склад» в архиве — опрос заказов выключен') : import('./api/_lib/sklad/ordersPoller').then(m => m.scheduleOrdersPoller()))
     .catch(e => console.warn('[sklad-orders] опрос не запущен:', (e as Error).message));
   // Агент 2 «Отзывы и вопросы»: сбор каждые 30 мин + черновики + чаты, карточки, Яндекс.Диск каждые 6 ч.
   import('./api/_lib/reviews')

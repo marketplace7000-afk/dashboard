@@ -271,6 +271,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ─── /api/sklad/* — раздел «Склад»: товары, склады, пользователи ──────────
   if (section === 'sklad') {
+    // Раздел в архиве (api/_lib/sklad/archive.ts) — как будто его нет.
+    const { SKLAD_ARCHIVED } = await import('./_lib/sklad/archive');
+    if (SKLAD_ARCHIVED) return res.status(404).json({ error: 'not_found' });
     const { handleSklad } = await import('./_lib/sklad/handler');
     return handleSklad(req, res, rest, authUser(req));
   }

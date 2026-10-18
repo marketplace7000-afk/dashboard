@@ -24,6 +24,10 @@ import { apiGet, setUnauthorizedHandler } from './api/http';
 import { ROLE_LABEL, type Role } from './api/sklad';
 import { noteSwallowed } from './utils/log';
 
+// Раздел «Склад» в архиве (18.10.2026): меню и страница скрыты, сервер тоже
+// закрыт (api/_lib/sklad/archive.ts). Вернуть — false здесь и SKLAD_ENABLED=1 на сервере.
+const SKLAD_ARCHIVED = true;
+
 type Page = 'dashboard' | 'sklad' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | 'ads' | 'competitors' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
@@ -39,7 +43,8 @@ type Page = 'dashboard' | 'sklad' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'mo
 const NAV_TOP: { key: Page; Icon: any; label: string }[] = [
   { key: 'dashboard',   Icon: GaugeIcon,           label: 'Дашборд' },
   // 18.10.2026: учёт товара на складах и фулфилментах (замена таблицы «Склад (orig)»).
-  { key: 'sklad',       Icon: WarehouseIcon,       label: 'Склад' },
+  // В архиве по решению владельца (см. SKLAD_ARCHIVED ниже) — пункт скрыт.
+  ...(SKLAD_ARCHIVED ? [] : [{ key: 'sklad' as Page, Icon: WarehouseIcon, label: 'Склад' }]),
 ];
 const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   { key: 'prices',      Icon: TagIcon,             label: 'Цены' },
@@ -86,7 +91,7 @@ export function App() {
   // закрывает им остальное сам, здесь только меню.
   const [me, setMe] = useState<{ name: string; role: Role; sections: string[] } | null>(null);
   const restricted = !!me && me.sections.every(s => s === 'sklad');
-  const allowed = (k: Page) => !me || me.sections.includes(k);
+  const allowed = (k: Page) => !(SKLAD_ARCHIVED && k === 'sklad') && (!me || me.sections.includes(k));
 
   useEffect(() => {
     if (!logged) { setMe(null); return; }
@@ -96,7 +101,7 @@ export function App() {
         const u = r.data?.user;
         const m = u ? { name: u.name, role: u.role, sections: u.sections ?? OWNER.sections } : OWNER;
         setMe(m);
-        if (!m.sections.includes('dashboard')) setPage((m.sections[0] as Page) ?? 'sklad');
+        if (!m.sections.includes('dashboard')) setPage((m.sections.find(s => !(SKLAD_ARCHIVED && s === 'sklad')) as Page) ?? 'dashboard');
         // Как только вошли — греем ВСЕ данные фоном, чтобы вкладки открывались
         // мгновенно без ожидания «загрузка…» на каждой (просьба клиента 20.07).
         if (!m.sections.every(s => s === 'sklad')) prefetchAll();
@@ -114,7 +119,8 @@ export function App() {
   if (!me) return null;
 
   // Страница вне открытых разделов (переход с Дашборда, старое состояние) — показываем первую доступную.
-  const view: Page = allowed(page) ? page : ((me.sections[0] as Page) ?? 'sklad');
+  const firstAllowed = (me.sections as Page[]).find(allowed);
+  const view: Page | null = allowed(page) ? page : firstAllowed ?? null;
 
   // Выбор пункта меню: переключаем страницу и закрываем мобильный drawer.
   const goTo = (k: Page) => { setPage(k); setMobileNavOpen(false); };
@@ -176,7 +182,7 @@ export function App() {
           >
             <ListIcon size={20} weight="bold" />
           </button>
-          <h1>{TITLES[view]}</h1>
+          <h1>{view ? TITLES[view] : ''}</h1>
           <div className="topbar-meta">
             <span className="chip">
               {new Date().toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
@@ -206,6 +212,7 @@ export function App() {
           {view === 'settings' && <Settings />}
           {view === 'modules' && <Modules />}
           {view === 'collectors' && <AgentHosts />}
+          {view === null && <div className="card muted">Для вашей учётной записи сейчас нет доступных разделов.</div>}
         </div>
       </main>
 

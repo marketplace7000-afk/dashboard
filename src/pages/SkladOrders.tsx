@@ -175,6 +175,7 @@ function ManualBlock({ m }: { m: NonNullable<OrdersCompare['manual']>[number] })
           <tbody>{shown.map(i => <tr key={i.article}><td>{i.article}</td><td className="num">{i.site}</td><td className="num">{i.table}</td>
             <td className={i.site !== i.table ? 'num sk-bad' : 'num'}>{i.table - i.site > 0 ? '+' : ''}{i.table - i.site}</td></tr>)}</tbody></table>
       )}
+      {(m.fbo ?? []).length > 0 && <div className="muted sk-hint">Не входят в сумму — поставки FBO, записанные в таблице как «Ozon»: {(m.fbo ?? []).map(f => `${f.article} × ${f.qty} (${f.note}, строка ${f.row})`).join("; ")}</div>}
       <div className="muted sk-hint">Небольшая разница бывает, когда заказ сделан вечером, а внесён в таблицу на следующий день. После перехода на сайт эти заказы будут списываться автоматически, по номерам.</div>
     </div>
   );

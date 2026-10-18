@@ -99,6 +99,8 @@ async function main() {
   const whMap = new Map(cat.listWarehouses().map(w => [w.name.toLowerCase(), w.id]));
   check('виды отгрузок', ['WB', 'Ozon', 'Яндекс', 'Я.Kit', 'ФФ СПБ', 'Прочая отгрузка', 'Прочее', ''].map(d0 => hist.shipmentKind(d0, whMap).kind),
     ['sale_wb', 'sale_ozon', 'sale_ym', 'sale_ykit', 'transfer_out', 'writeoff', 'writeoff', 'other_out']);
+  check('поставка FBO, записанная как Ozon/WB', [hist.shipmentKind('Ozon', whMap, 'Новосибирск 15.10').kind, hist.shipmentKind('WB', whMap, 'fbs').kind, hist.shipmentKind('Ozon', whMap, '0123-4567-1').kind],
+    ['fbo_ozon', 'sale_wb', 'sale_ozon']);
   check('виды приёмки', ([['Поставка', true], ['Поставка', false], ['355', true], ['Возврат Ozon', false], ['Входящий остаток', true]] as const)
     .map(([e, p]) => hist.receiptKind(e, p)), ['purchase', 'arrival', 'purchase', 'return_ozon', 'opening']);
   const R = (row: number, date: unknown, sku: string, qty: unknown, d0: unknown, e: unknown, f: unknown, g: string) => ({ row, date, sku, qty, d: d0, e, f, g });

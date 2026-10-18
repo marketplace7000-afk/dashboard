@@ -7,6 +7,7 @@
  * пока расхождений нет, сайту можно доверить списание (этап 4).
  */
 import { getSkladDb } from './db';
+import { isFboNote } from './importHistory';
 
 export type CompareReport = {
   checkedAt: number; days: number; orders: number; matched: number;
@@ -22,7 +23,9 @@ export type CompareReport = {
    * за полные прошедшие дни окна.
    */
   manual: Array<{ wh: string; mp: string; from: string; to: string;
-    items: Array<{ article: string; site: number; table: number }> }>;
+    items: Array<{ article: string; site: number; table: number }>;
+    /** Поставки FBO, записанные в таблице как «Ozon» (в E город и дата) — в сумму не входят. */
+    fbo: Array<{ row: number; article: string; qty: number; note: string }> }>;
 };
 
 /** Склады, где Apps Script заказы не пишет (их вносят вручную сводно). */
@@ -71,16 +74,18 @@ export function compareOrders(rows: SheetRow[], days: number): CompareReport {
       site.set(k, (site.get(k) ?? 0) + o.qty);
     }
     const table = new Map<string, number>();
+    const fbo: Array<{ row: number; article: string; qty: number; note: string }> = [];
     for (const r of rows) {
       const ts = sheetTs(r.date);
       if (ts === null || ts < mFrom || ts >= mTo || r.from.toLowerCase() !== name.toLowerCase() || r.dest.toLowerCase() !== 'ozon') continue;
+      if (isFboNote(r.ref)) { fbo.push({ row: r.row, article: r.sku, qty: r.qty, note: r.ref }); continue; }
       const k = r.sku.toUpperCase();
       table.set(k, (table.get(k) ?? 0) + r.qty);
     }
     const items = [...new Set([...site.keys(), ...table.keys()])].sort()
       .map(a => ({ article: a, site: site.get(a) ?? 0, table: table.get(a) ?? 0 }));
     const day = (ts: number) => new Date(ts + MSK).toISOString().slice(0, 10);
-    rep.manual.push({ wh: name, mp: 'ozon', from: day(mFrom), to: day(mTo - 1), items });
+    rep.manual.push({ wh: name, mp: 'ozon', from: day(mFrom), to: day(mTo - 1), items, fbo });
   }
 
   for (const o of orders) {

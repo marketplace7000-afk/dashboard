@@ -126,7 +126,9 @@ async function main() {
   const rep2 = cmp.compareOrders([
     { row: 30, date: ySerial, sku: 'HDMI-WIRELESS-G146', qty: 2, dest: 'Ozon', ref: 'fbs', from: 'Склад Уфа' },
     { row: 31, date: ySerial, sku: 'MANIC-STICK-GREY-HX-2607', qty: 2, dest: 'Ozon', ref: '', from: 'Склад Уфа' },
+    { row: 32, date: ySerial, sku: 'HDMI-WIRELESS-G146', qty: 10, dest: 'Ozon', ref: 'Новосибирск 15.10', from: 'Склад Уфа' },
   ], 3);
+  check('поставка FBO, записанная как Ozon, — отдельно, не в сумме', rep2.manual[0].fbo.map(x => [x.row, x.qty]), [[32, 10]]);
   check('сумма по артикулу: HDMI сошлось, MANIC на 1 больше в таблице', rep2.manual[0].items, [
     { article: 'HDMI-WIRELESS-G146', site: 2, table: 2 }, { article: 'MANIC-STICK-GREY-HX-2607', site: 1, table: 2 }]);
   check('заказы ручного склада не попадают в «нет в таблице»', rep2.missingInTable.some(x => x.orderId.startsWith('0200-')), false);

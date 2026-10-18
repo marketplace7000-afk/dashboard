@@ -48,10 +48,19 @@ export function sheetDate(v: unknown): number | null {
 const norm = (v: unknown) => String(v ?? '').trim();
 const lc = (v: unknown) => norm(v).toLowerCase();
 
-export function shipmentKind(dest: string, whByName: Map<string, number>): { kind: MovementKind; counterWh: number | null } {
+/**
+ * Поставка FBO, записанная в «Отгрузку» как WB/Ozon: в E город и дата
+ * («Новосибирск 15.10»), а не номер заказа и не «fbs». Так «Склад Уфа»
+ * отгружает поставки на склады площадок (найдено при сверке 18.10.2026).
+ */
+export function isFboNote(ref: string): boolean {
+  return /\d{1,2}\.\d{1,2}/.test(ref) && !/^\d+-\d+-\d+$/.test(ref) && !/инвентар/i.test(ref);
+}
+
+export function shipmentKind(dest: string, whByName: Map<string, number>, ref = ''): { kind: MovementKind; counterWh: number | null } {
   const d = lc(dest);
-  if (d === 'wb') return { kind: 'sale_wb', counterWh: null };
-  if (d === 'ozon') return { kind: 'sale_ozon', counterWh: null };
+  if (d === 'wb') return { kind: isFboNote(ref) ? 'fbo_wb' : 'sale_wb', counterWh: null };
+  if (d === 'ozon') return { kind: isFboNote(ref) ? 'fbo_ozon' : 'sale_ozon', counterWh: null };
   if (d === 'яндекс' || d === 'ям') return { kind: 'sale_ym', counterWh: null };
   if (d === 'я.kit') return { kind: 'sale_ykit', counterWh: null };
   if (d === 'прочее' || d === 'прочая отгрузка') return { kind: 'writeoff', counterWh: null };
@@ -123,7 +132,7 @@ export function applyHistory(receipts: SheetRow[], shipments: SheetRow[], by: Au
       if (ts === null) { rep.skipped.push({ sheet, row: r.row, reason: `дата «${norm(r.date)}»` }); return; }
       const pid = findProduct(sku, normBarcode(r.f));
       if (sheet === 'Отгрузка') {
-        const k = shipmentKind(norm(r.d), whByName);
+        const k = shipmentKind(norm(r.d), whByName, norm(r.e));
         insertMovement({ ts, whId: wh, sign: -1, kind: k.kind, counterWh: k.counterWh,
           counterpart: k.counterWh ? whName.get(k.counterWh)! : norm(r.d), ref: norm(r.e), status: k.kind === 'transfer_out' ? 'received' : 'done',
           note: `Отгрузка, строка ${r.row}`, source: 'sheet', lines: [{ productId: pid, qty }] }, sys);

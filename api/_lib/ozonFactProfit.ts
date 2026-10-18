@@ -1,13 +1,17 @@
 // Факт-прибыль Ozon из РЕАЛЬНЫХ финансовых операций (как считает КАН) — вместо
-// прогноза по тарифам. Источник: /v3/finance/transaction/list за последние 30 дней.
+// прогноза по тарифам. Источник: начисления v1/finance/accrual/by-day за последние
+// 30 дней (ozonAccruals). До 18.10.2026 здесь был v3/finance/transaction/list —
+// Ozon отключил его 08.09.2026, и факт месяц стоял на данных от 08.09.
 //
-// По каждой доставленной продаже (OperationAgentDeliveredToCustomer):
-//   accruals_for_sale  — выручка продавца (≈ цена продавца)
-//   sale_commission    — комиссия Ozon (отрицательная)
-//   services[].price   — логистика доставки на этой операции (отрицательные)
-//   amount             — начислено за эту продажу (выручка − комиссия − логистика доставки)
+// По каждой продаже (начисление POSTING с posting.products[].commission и
+// положительной sale_amount), по каждому товару отправления:
+//   commission.sale_amount — выручка продавца (≈ цена продавца)
+//   commission.commission  — комиссия Ozon (отрицательная)
+//   delivery.services[]    — логистика доставки этого товара (отрицательные)
+//   выплата                — total_amount начисления; если товаров в отправлении
+//                            несколько — выручка − комиссия − логистика товара
 //
-// ВАЖНО: amount НЕ включает склад/рекламу/эквайринг — Ozon проводит их отдельными
+// ВАЖНО: выплата НЕ включает склад/рекламу/эквайринг — Ozon проводит их отдельными
 // операциями, не привязанными к SKU. Поэтому это «начислено за продажу», а не
 // полная чистая выплата (её КАН аллоцирует эвристикой). Реальны здесь комиссия и
 // логистика доставки — их и показываем как факт против прогноза по тарифам.
@@ -17,6 +21,8 @@
 
 import { fetchWithRetry } from './fetchRetry';
 import { cacheGet, cacheSet, isFresh } from './cache';
+import { getAccrualsForDay, datesBetween } from './ozonAccruals';
+import { mskDate } from './mskDate';
 
 const BASE = 'https://api-seller.ozon.ru';
 const CACHE_KEY = 'ozon-fact-profit:v1';
@@ -91,34 +97,32 @@ function isoDaysAgo(days: number): string {
 async function compute(): Promise<OzonFactProfit> {
   const skuMap = await buildSkuMap();
   const from = isoDaysAgo(30);
-  const to = new Date().toISOString();
 
   const acc: Record<string, { units: number; revenue: number; commission: number; logistic: number; payout: number }> = {};
-  let page = 1;
-  let pageCount = 1;
-  do {
-    const tr = await ozReq('v3/finance/transaction/list', {
-      filter: { date: { from, to }, operation_type: [], transaction_type: 'all' },
-      page, page_size: 1000,
-    });
-    const result = tr?.result ?? {};
-    pageCount = result.page_count ?? 1;
-    for (const o of (result.operations ?? [])) {
-      if (o?.operation_type !== 'OperationAgentDeliveredToCustomer') continue;
-      const items: any[] = o?.items ?? [];
-      if (!items.length) continue;
-      const offer = skuMap[String(items[0]?.sku ?? '')];
-      if (!offer) continue;
-      const services = (o?.services ?? []).reduce((s: number, x: any) => s + (Number(x?.price) || 0), 0);
-      const cur = acc[offer] ?? (acc[offer] = { units: 0, revenue: 0, commission: 0, logistic: 0, payout: 0 });
-      cur.units += 1;
-      cur.revenue += Number(o?.accruals_for_sale) || 0;
-      cur.commission += Math.abs(Number(o?.sale_commission) || 0);
-      cur.logistic += Math.abs(services);
-      cur.payout += Number(o?.amount) || 0;
+  const amt = (m: any) => Number(m?.amount) || 0;
+  for (const day of datesBetween(mskDate(29), mskDate(0))) {
+    const accruals = await getAccrualsForDay(day).catch(() => []);
+    for (const a of accruals) {
+      const products = (a.posting?.products ?? []).filter(p => p.commission);
+      if (!products.length) continue;
+      const single = products.length === 1;
+      for (const p of products) {
+        const sale = amt(p.commission?.sale_amount ?? p.commission?.seller_price);
+        if (sale <= 0) continue;                       // возврат, не продажа
+        const offer = skuMap[String(p.sku ?? '')];
+        if (!offer) continue;
+        const qty = Math.max(1, Number(p.quantity) || 1);
+        const commission = amt(p.commission?.commission ?? p.commission?.sale_commission);
+        const logistic = (p.delivery?.services ?? []).reduce((s: number, x: any) => s + amt(x?.accrued), 0);
+        const cur = acc[offer] ?? (acc[offer] = { units: 0, revenue: 0, commission: 0, logistic: 0, payout: 0 });
+        cur.units += qty;
+        cur.revenue += sale;
+        cur.commission += Math.abs(commission);
+        cur.logistic += Math.abs(logistic);
+        cur.payout += single ? amt(a.total_amount) : sale + commission + logistic;
+      }
     }
-    page += 1;
-  } while (page <= pageCount && page <= 25);
+  }
 
   const items: Record<string, OzonFactRow> = {};
   for (const [offer, v] of Object.entries(acc)) {

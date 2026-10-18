@@ -312,7 +312,7 @@ export async function ozonSkuToProductMap(): Promise<Map<string, number>> {
   return map;
 }
 
-// Возвращает map числовой sku (из finance/transaction items) → offer_id (артикул
+// Возвращает map числовой sku (из items операций Ozon-финансов) → offer_id (артикул
 // продавца). Нужен для джойна себестоимости Ozon: COGS в таблице закупок лежит по
 // артикулу (offer_id), а транзакции отдают только числовой sku.
 export async function ozonSkuToOfferMap(): Promise<Map<string, string>> {

@@ -1,5 +1,5 @@
 /**
- * Хук сводных финансов: тянет Ozon (finance/transaction/totals + list)
+ * Хук сводных финансов: тянет Ozon (/api/ozon-finance — начисления accrual/by-day в формате бывших totals + list)
  * и WB (reportDetailByPeriod), сшивает с себестоимостью из Google-таблицы
  * закупок, возвращает готовый FinanceSummary.
  *
@@ -122,34 +122,12 @@ async function fetchOzonAdSpend(days: number): Promise<number | undefined> {
   }
 }
 
-// Ozon transaction/list не принимает окно > 1 месяца ("too long period, only one
-// month allowed"). Режем длинные окна (30 дней) на куски ≤28 дней и склеиваем
-// операции — иначе за 30 дней список падал 400 (баг 23.07).
-async function ozonFinanceListChunked(fromISO: string, toISO: string): Promise<any> {
-  const from = new Date(fromISO).getTime();
-  const to = new Date(toISO).getTime();
-  const MAX = 28 * 86_400_000;
-  if (to - from <= MAX) return ozonFinanceListCached(fromISO, toISO);
-  const operations: any[] = [];
-  let cur = from;
-  while (cur < to) {
-    const chunkTo = Math.min(cur + MAX, to);
-    const r = await ozonFinanceListCached(new Date(cur).toISOString(), new Date(chunkTo).toISOString()).catch(() => null);
-    const ops = r?.data?.result?.operations;
-    if (Array.isArray(ops)) operations.push(...ops);
-    cur = chunkTo + 1;
-  }
-  return { data: { result: { operations } }, fromCache: false, fetchedAt: Date.now() };
-}
-
 async function load(period: FinancePeriod, procurement: ReturnType<typeof useProcurement>['items']): Promise<FinanceState> {
   const warnings: string[] = [];
   const days = dayBack(period);
   const now = new Date();
   const from = new Date(now); from.setDate(from.getDate() - days); from.setHours(0, 0, 0, 0);
   const to = new Date(now); to.setHours(23, 59, 59, 999);
-  const fromISO = from.toISOString();
-  const toISO = to.toISOString();
   // WB финансовый отчёт о реализации — недельный/месячный, за «день» данных нет.
   // Всегда запрашиваем фиксированное МЕСЯЧНОЕ окно, чтобы ключ кэша совпадал с тем,
   // что прогревает cron (режим cron-only: браузер читает только прогретый кэш).
@@ -159,11 +137,14 @@ async function load(period: FinancePeriod, procurement: ReturnType<typeof usePro
   const toDate = mskDate(0);
 
   // Параллельно: Ozon финансы (всегда есть) + WB отчёт (может быть пустым)
-  const ozonTotalsP = ozonFinanceTotalsCached(fromISO, toISO).catch(e => {
+  // Окно Ozon — МСК-даты: сервер собирает начисления по дням (лимита «месяц» больше нет).
+  const ozFrom = mskDate(days);
+  const ozTo = mskDate(0);
+  const ozonTotalsP = ozonFinanceTotalsCached(ozFrom, ozTo).catch(e => {
     warnings.push(`Ozon totals: ${String(e?.message ?? e).slice(0, 120)}`);
     return null;
   });
-  const ozonListP = ozonFinanceListChunked(fromISO, toISO).catch(e => {
+  const ozonListP = ozonFinanceListCached(ozFrom, ozTo).catch(e => {
     warnings.push(`Ozon list: ${String(e?.message ?? e).slice(0, 120)}`);
     return null;
   });

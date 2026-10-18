@@ -5,8 +5,10 @@
  * подозрительные удержания и провал выкупа — нет. Данные о них лежат в отчёте
  * реализации, надо только взять операции типа штраф и удержание».
  *
- * Ozon: /v3/finance/transaction/list — там каждая операция названа своим типом.
- * Проверено на живом кабинете 10.08 (30 дней): помимо ожидаемых расходов
+ * Ozon: начисления v1/finance/accrual/by-day (через ozonAccruals; старый
+ * v3/finance/transaction/list Ozon отключил 08.09.2026, с тех пор здесь были
+ * цифры месячной давности). Тип каждого начисления — из справочника
+ * v1/finance/accrual/types. Проверено на живом кабинете 10.08 (30 дней): помимо ожидаемых расходов
  * (эквайринг, логистика, возвраты, упаковка, реклама) там лежат DefectFine*
  * («Превышение индекса ошибок»), декомпенсации, страхование, бейджи, подписки,
  * утилизация — то, что клиент и называет «подозрительными удержаниями».
@@ -15,7 +17,7 @@
  * deduction, acceptance. Читаем ПРОГРЕТЫЙ кэш, живьём в WB не ходим: у отчёта
  * лимит 1 запрос в минуту.
  */
-import { fetchWithRetry } from './fetchRetry';
+import { getLegacyOpsLastDays, type AccrualGroup } from './ozonAccruals';
 import { cacheGet, cacheSet, isFresh, cacheGetNewestByPrefix, makeUpstreamCachePrefix } from './cache';
 
 const RESULT_KEY = 'penalties:v1';
@@ -52,70 +54,35 @@ const abs = (v: any) => Math.abs(Number(v) || 0);
  * Ожидаемые расходы: они и должны быть, это не «удержание», а себестоимость
  * продажи. Всё остальное отрицательное считаем удержанием и показываем.
  * Список консервативный: лучше показать лишнее, чем спрятать реальный штраф.
+ * Статьи — из ozonAccruals.groupOfType: продажа и возврат, логистика, упаковка,
+ * логистика возвратов, эквайринг, реклама (учтена в ДРР), хранение.
  */
-const OZON_EXPECTED = new Set([
-  'OperationAgentDeliveredToCustomer',
-  'OperationAgentStornoDeliveredToCustomer',
-  'MarketplaceRedistributionOfAcquiringOperation',   // эквайринг
-  'OperationItemReturn',                             // возвраты и невыкуп
-  'ClientReturnAgentOperation',                      // возврат денег покупателю
-  'OperationMarketplaceCostPerClick',                // реклама «оплата за клик»
-  'OperationMarketplaceServiceStorage',              // хранение
-  'OperationMarketplacePackageRedistribution',       // упаковка
-  'OperationMarketplacePackageMaterialsProvision',
-  'OperationMarketplaceItemTemporaryStorageRedistribution',
-  'OperationPromotionWithCostPerOrder',              // реклама (учтена в ДРР)
-  'MarketplaceServiceItemCrossdocking',              // кросс-докинг поставки
-  'OperationMarketplaceSupplyAdditional',            // обработка грузоместа
+const OZON_EXPECTED = new Set<AccrualGroup>([
+  'sale', 'return', 'logistics', 'packaging', 'returnLogistics', 'acquiring', 'ads', 'storage',
 ]);
 
-/** Штрафы: превышение индекса ошибок и декомпенсации. Остальное — удержания. */
-const isOzonFine = (type: string) =>
-  type.startsWith('DefectFine') || type.includes('Decompensation') || type.includes('Fine');
-
-async function ozonPenalties(days: number): Promise<{ rows: PenaltyRow[]; total: number }> {
-  const from = new Date(Date.now() - days * 86_400_000).toISOString();
-  const to = new Date().toISOString();
+async function ozonPenalties(days: number): Promise<{ rows: PenaltyRow[]; total: number; failedDays: number }> {
+  const { ops, failedDays } = await getLegacyOpsLastDays(days);
   const acc = new Map<string, PenaltyRow>();
   let total = 0;
-  let page = 1, pageCount = 1;
-  do {
-    const res = await fetchWithRetry('https://api-seller.ozon.ru/v3/finance/transaction/list', {
-      method: 'POST',
-      headers: {
-        'Client-Id': process.env.OZON_CLIENT_ID ?? '',
-        'Api-Key': process.env.OZON_API_KEY ?? '',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        filter: { date: { from, to }, operation_type: [], transaction_type: 'all' },
-        page, page_size: 1000,
-      }),
-    }, { maxRetries: 2, timeoutMs: 60_000 });
-    if (!res.ok) break;
-    const j: any = await res.json().catch(() => null);
-    const result = j?.result ?? {};
-    pageCount = result.page_count ?? 1;
-    for (const o of (result.operations ?? [])) {
-      const amount = Number(o?.amount) || 0;
-      if (amount >= 0) continue;                       // начисления нас тут не интересуют
-      const code = String(o?.operation_type ?? '');
-      if (OZON_EXPECTED.has(code)) continue;
-      const kind: PenaltyRow['kind'] = isOzonFine(code) ? 'fine' : 'deduction';
-      const key = `${kind}:${code}`;
-      const row = acc.get(key) ?? {
-        platform: 'ozon' as const, kind, code,
-        title: String(o?.operation_type_name ?? code),
-        amount: 0, count: 0,
-      };
-      row.amount = Math.round(row.amount + abs(amount));
-      row.count += 1;
-      acc.set(key, row);
-      total += abs(amount);
-    }
-    page += 1;
-  } while (page <= pageCount && page <= 25);
-  return { rows: [...acc.values()], total: Math.round(total) };
+  for (const o of ops) {
+    if (o.amount >= 0) continue;                       // начисления нас тут не интересуют
+    if (OZON_EXPECTED.has(o.group)) continue;
+    const code = o.operation_type;
+    // Штрафы: превышение индекса ошибок и прочие DefectFine*. Остальное — удержания.
+    const kind: PenaltyRow['kind'] = o.group === 'fine' ? 'fine' : 'deduction';
+    const key = `${kind}:${code}`;
+    const row = acc.get(key) ?? {
+      platform: 'ozon' as const, kind, code,
+      title: o.operation_type_name || code,
+      amount: 0, count: 0,
+    };
+    row.amount = Math.round(row.amount + abs(o.amount));
+    row.count += 1;
+    acc.set(key, row);
+    total += abs(o.amount);
+  }
+  return { rows: [...acc.values()], total: Math.round(total), failedDays: failedDays.length };
 }
 
 // ─── Wildberries ─────────────────────────────────────────────────────────────
@@ -175,9 +142,10 @@ function wbPenalties(): { rows: PenaltyRow[]; total: number; found: boolean } {
 async function compute(days: number): Promise<Penalties> {
   const notes: string[] = [];
 
-  let ozon = { rows: [] as PenaltyRow[], total: 0 };
+  let ozon = { rows: [] as PenaltyRow[], total: 0, failedDays: 0 };
   try { ozon = await ozonPenalties(days); }
   catch (e) { notes.push(`Ozon: ${String((e as Error)?.message ?? e).slice(0, 80)}`); }
+  if (ozon.failedDays) notes.push(`Ozon: начисления не загрузились за ${ozon.failedDays} дн.`);
 
   const wb = wbPenalties();
   if (!wb.found) notes.push('WB: финотчёт ещё не прогрет (обновляется кроном)');

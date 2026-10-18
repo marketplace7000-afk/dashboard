@@ -657,6 +657,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ─── /api/ozon-finance ── финансы Ozon за период (18.10.2026) ─────────────
+  // Замена отключённых v3/finance/transaction/totals и /list: начисления
+  // v1/finance/accrual/by-day по дням, отданные в старом формате (totals + operations),
+  // чтобы раздел «Финансы» и сводка считали как раньше. from/to — МСК-даты YYYY-MM-DD.
+  if (section === 'ozon-finance') {
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    const from = String(req.query.from ?? '');
+    const to = String(req.query.to ?? '');
+    if (!re.test(from) || !re.test(to) || from > to) return res.status(400).json({ ok: false, error: 'bad_dates' });
+    if ((Date.parse(to) - Date.parse(from)) / 86_400_000 > 186) return res.status(400).json({ ok: false, error: 'too_long_period' });
+    try {
+      const { getLegacyOps, legacyTotals } = await import('./_lib/ozonAccruals');
+      const { ops, days, failedDays } = await getLegacyOps(from, to);
+      const operations = ops.map(({ group: _g, ...o }) => o);
+      res.setHeader('cache-control', 'no-store');
+      return res.status(200).json({
+        ok: true, from, to, days, failedDays,
+        totals: { result: legacyTotals(ops) },
+        list: { result: { operations, page_count: 1, row_count: operations.length } },
+      });
+    } catch (e) {
+      return res.status(502).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
+    }
+  }
+
   // ─── /api/ozon-sku-ads ── расход рекламы Ozon по каждому SKU (для ДРР) ──────
   if (section === 'ozon-sku-ads') {
     const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);

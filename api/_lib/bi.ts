@@ -1,6 +1,10 @@
 /**
  * BI-сводка: ОПиУ, разложение рубля выручки, ДДС по неделям, воронка.
  *
+ * 18.10.2026: транзакции Ozon — из начислений v1/finance/accrual/by-day
+ * (ozonAccruals). Старый v3/finance/transaction/list отключён 08.09.2026, и
+ * сводка до этой правки показывала цифры месячной давности.
+ *
  * Клиент 05.08 попросил перетянуть визуал из чужого BI-дашборда («из BI дашборда
  * можем их визуал перетянуть к нам»). Считаем всё из ОДНОГО прохода по
  * транзакциям Ozon — это те же операции, что площадка кладёт в финотчёт, поэтому
@@ -12,7 +16,7 @@
  *    карточек Ozon в API продавца нет.
  *  • WB здесь пока не участвует: его финотчёт недельный и приходит с задержкой.
  */
-import { fetchWithRetry } from './fetchRetry';
+import { getLegacyOpsLastDays, type AccrualGroup } from './ozonAccruals';
 import { cacheGet, cacheSet, isFresh } from './cache';
 import { noteSwallowed } from './log';
 
@@ -48,14 +52,16 @@ function weekKey(iso: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Куда отнести операцию в разложении рубля. */
-function classify(type: string): 'commission' | 'logistics' | 'ads' | 'acquiring' | 'storage' | 'returns' | 'other' {
-  if (type === 'MarketplaceRedistributionOfAcquiringOperation') return 'acquiring';
-  if (type === 'OperationMarketplaceCostPerClick' || type === 'OperationPromotionWithCostPerOrder') return 'ads';
-  if (type === 'OperationMarketplaceServiceStorage') return 'storage';
-  if (type === 'OperationItemReturn' || type === 'ClientReturnAgentOperation') return 'returns';
-  if (type.includes('Delivery') || type.includes('Supply') || type.includes('Package') || type.includes('Crossdocking')) return 'logistics';
-  return 'other';
+/** Куда отнести операцию в разложении рубля (статья из ozonAccruals). */
+function classify(group: AccrualGroup): 'logistics' | 'ads' | 'acquiring' | 'storage' | 'returns' | 'other' {
+  switch (group) {
+    case 'acquiring': return 'acquiring';
+    case 'ads': return 'ads';
+    case 'storage': return 'storage';
+    case 'return': case 'returnLogistics': return 'returns';
+    case 'logistics': case 'packaging': return 'logistics';
+    default: return 'other';
+  }
 }
 
 async function compute(days: number): Promise<BiSummary> {
@@ -71,48 +77,27 @@ async function compute(days: number): Promise<BiSummary> {
   const weeks = new Map<string, { income: number; outcome: number }>();
   let ops = 0;
 
-  let page = 1, pageCount = 1;
-  do {
-    const res = await fetchWithRetry('https://api-seller.ozon.ru/v3/finance/transaction/list', {
-      method: 'POST',
-      headers: {
-        'Client-Id': process.env.OZON_CLIENT_ID ?? '',
-        'Api-Key': process.env.OZON_API_KEY ?? '',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        filter: { date: { from, to }, operation_type: [], transaction_type: 'all' },
-        page, page_size: 1000,
-      }),
-    }, { maxRetries: 2, timeoutMs: 60_000 });
-    if (!res.ok) break;
-    const j: any = await res.json().catch(() => null);
-    const result = j?.result ?? {};
-    pageCount = result.page_count ?? 1;
+  const { ops: list, failedDays } = await getLegacyOpsLastDays(days);
+  for (const o of list) {
+    ops++;
+    const amount = o.amount;
+    payout += amount;
 
-    for (const o of (result.operations ?? [])) {
-      ops++;
-      const amount = Number(o?.amount) || 0;
-      const type = String(o?.operation_type ?? '');
-      payout += amount;
+    const wk = weekKey(o.operation_date.slice(0, 10) || to);
+    const cell = weeks.get(wk) ?? { income: 0, outcome: 0 };
+    if (amount >= 0) cell.income += amount; else cell.outcome += Math.abs(amount);
+    weeks.set(wk, cell);
 
-      const wk = weekKey(String(o?.operation_date ?? o?.operation_date_time ?? to));
-      const cell = weeks.get(wk) ?? { income: 0, outcome: 0 };
-      if (amount >= 0) cell.income += amount; else cell.outcome += Math.abs(amount);
-      weeks.set(wk, cell);
-
-      if (type === 'OperationAgentDeliveredToCustomer') {
-        revenue += Number(o?.accruals_for_sale) || 0;
-        commission += Math.abs(Number(o?.sale_commission) || 0);
-        // Услуги внутри операции продажи — это логистика и обработка.
-        buckets.logistics += (o?.services ?? []).reduce((s: number, x: any) => s + Math.abs(Number(x?.price) || 0), 0);
-        continue;
-      }
-      if (amount >= 0) continue;                        // прочие начисления не расход
-      buckets[classify(type)] += Math.abs(amount);
+    if (o.group === 'sale') {
+      revenue += o.accruals_for_sale;
+      commission += Math.abs(o.sale_commission);
+      // Услуги внутри операции продажи — это логистика и обработка.
+      buckets.logistics += Math.abs(o.delivery_charge);
+      continue;
     }
-    page += 1;
-  } while (page <= pageCount && page <= 25);
+    if (amount >= 0) continue;                        // прочие начисления не расход
+    buckets[classify(o.group)] += Math.abs(amount);
+  }
 
   const totalCosts = commission + buckets.logistics + buckets.ads + buckets.acquiring
     + buckets.storage + buckets.returns + buckets.other;
@@ -183,6 +168,7 @@ async function compute(days: number): Promise<BiSummary> {
     revenue: R(revenue), netProfit: R(netProfit),
     fetchedAt: Date.now(),
     diagnostics: `Ozon: операций ${ops}, недель ${cashflow.length}` +
+      (failedDays.length ? ` · начисления не загрузились за ${failedDays.length} дн.` : '') +
       (funnelAvailable ? '' : ' · воронка: отчёт рекламы ещё собирается') +
       ` · итог по кассе ${R(payout).toLocaleString('ru-RU')} ₽`,
   };

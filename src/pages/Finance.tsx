@@ -5,7 +5,7 @@ import {
 import {
   ozonFinanceTotalsCached, ozonFinanceListCached, clearFinCache,
   groupOperationsByType, groupOperationsByTxnType,
-  dateToIsoStart, dateToIsoEnd, readFinCache, OzonFinTotals, OzonFinList,
+  dateToIsoStart, dateToIsoEnd, readFinTotalsCache, readFinListCache, OzonFinTotals, OzonFinList,
 } from '../api/ozonFinance';
 import { ozonGetDailyExpenses, parseRu } from '../api/ozonAds';
 import { AiAdvice } from '../components/AiAdvice';
@@ -162,12 +162,9 @@ export function Finance() {
 
   // Чтение кэша на mount/смену периода
   useEffect(() => {
-    const fromISO = dateToIsoStart(from);
-    const toISO = dateToIsoEnd(to);
-    const tBody = { date: { from: fromISO, to: toISO }, posting_number: '', transaction_type: 'all' };
-    const lBody = { filter: { date: { from: fromISO, to: toISO }, operation_type: [], posting_number: '', transaction_type: 'all' }, page_size: 1000 };
-    const tC = readFinCache<OzonFinTotals>('/v3/finance/transaction/totals', tBody);
-    const lC = readFinCache<OzonFinList>('/v3/finance/transaction/list:all', lBody);
+    // Период — МСК-даты как есть: сервер собирает начисления Ozon по дням.
+    const tC = readFinTotalsCache(from, to);
+    const lC = readFinListCache(from, to);
     if (tC) setTotals(tC.data.result);
     if (lC) setList(lC.data.result);
     const ts = [tC, lC].filter(Boolean).map(c => c!.fetchedAt);
@@ -197,11 +194,9 @@ export function Finance() {
     setLoading(true);
     setError(null);
     try {
-      const fromISO = dateToIsoStart(from);
-      const toISO = dateToIsoEnd(to);
       const [tR, lR] = await Promise.all([
-        ozonFinanceTotalsCached(fromISO, toISO, force),
-        ozonFinanceListCached(fromISO, toISO, { pageSize: 1000 }, force),
+        ozonFinanceTotalsCached(from, to, force),
+        ozonFinanceListCached(from, to, force),
       ]);
       setTotals(tR.data.result);
       setList(lR.data.result);
@@ -271,6 +266,9 @@ export function Finance() {
         r.fulfillment += delivery;
         r.countReturns += 1;
         if (op.items?.length) r.returnQty += op.items.length;
+      } else if (op.type === 'services' && /^(Delivery|Package):/.test(op.operation_type)) {
+        // Логистика и упаковка отдельными начислениями (accrual/by-day) — это фулфилмент.
+        r.fulfillment += op.amount || 0;
       } else if (op.type === 'services') {
         r.services += op.amount || 0;
         if (/Advert|Promo/i.test(op.operation_type)) r.advertising += op.amount || 0;

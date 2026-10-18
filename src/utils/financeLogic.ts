@@ -92,6 +92,8 @@ export function buildOzonFinance(
       ads += Math.abs(op.amount || 0);
     } else if (/Storage|FBOStorage|Warehousing/i.test(code)) {
       storage += Math.abs(op.amount || 0);
+    } else if (/^(Delivery|Package):/.test(code)) {
+      // Логистика/упаковка отдельным начислением — уже в processing_and_delivery итогов.
     } else if (op.type === 'services' || op.type === 'compensation' || op.type === 'other') {
       // Не реклама/хранение, но из тех же категорий — относим в «прочее»
       const isExpense = op.amount < 0;

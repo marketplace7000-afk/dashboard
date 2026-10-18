@@ -25,6 +25,7 @@ import { getWbBuyerPrices } from './wbBuyerPrices';
 import { getOzonBuyerPrices } from './ozonBuyerPrices';
 import { getWbCommissions } from './wbCommissions';
 import { getOzonFactProfit } from './ozonFactProfit';
+import { warmOzonAccruals } from './ozonAccruals';
 import { getWbBoxTariffs } from './wbBoxTariffs';
 
 import { getWbStock } from './wbStock';
@@ -142,9 +143,9 @@ export async function handleCron(req: VercelRequest, res: VercelResponse) {
     { upstream: ozonUpstream(), path: 'v1/analytics/data', method: 'POST', body: ozAnalytics(30, ['ordered_units','revenue'], ['day'], 1000), ns: 'ozon-seller', ttl: TTL_OZON, cool: C_LT },
     { upstream: ozonUpstream(), path: 'v1/analytics/data', method: 'POST', body: ozAnalytics(7,  ['ordered_units','revenue'], ['sku'], 200), ns: 'ozon-seller', ttl: TTL_OZON, cool: C_LT },
     { upstream: ozonUpstream(), path: 'v1/analytics/data', method: 'POST', body: ozAnalytics(30, ['ordered_units','revenue'], ['sku'], 300), ns: 'ozon-seller', ttl: TTL_OZON, cool: C_LT },
-    { upstream: ozonUpstream(), path: 'v3/finance/transaction/totals', method: 'POST', body: { date: { from: isoT(7),  to: isoT(0) }, posting_number: '', transaction_type: 'all' }, ns: 'ozon-seller', ttl: TTL_OZON, cool: C_LT },
-    { upstream: ozonUpstream(), path: 'v3/finance/transaction/totals', method: 'POST', body: { date: { from: isoT(30), to: isoT(0) }, posting_number: '', transaction_type: 'all' }, ns: 'ozon-seller', ttl: TTL_OZON, cool: C_LT },
-    { upstream: ozonUpstream(), path: 'v3/finance/transaction/list', method: 'POST', body: { filter: { date: { from: isoT(7), to: isoT(0) }, operation_type: [], posting_number: '', transaction_type: 'all' }, page: 1, page_size: 1000 }, ns: 'ozon-seller', ttl: TTL_OZON, cool: C_LT },
+    // Финансы Ozon: v3/finance/transaction/totals и /list Ozon отключил 08.09.2026
+    // (к 18.10.2026 — 404). Начисления теперь — v1/finance/accrual/by-day по одному
+    // дню; их греет warmOzonAccruals ниже (кэш по дням в ozonAccruals), а не этот цикл.
     // v5/product/info/prices греется ОТДЕЛЬНО (см. ниже): список листается
     // курсором, а здешний цикл делает ровно один запрос на цель.
     { upstream: ozonUpstream(), path: 'v4/product/info/stocks', method: 'POST', body: { filter: { visibility: 'ALL' }, limit: 100 }, ns: 'ozon-seller', ttl: TTL_OZON, cool: C_LT },
@@ -503,8 +504,9 @@ export async function handleCron(req: VercelRequest, res: VercelResponse) {
   void getWbStock().catch(() => null); // тёплый кэш остатков WB для фильтра «В продаже»
   // Экономика карточек WB по nmId (комиссия + объём) — полный обход карточек.
   void getWbCardEcon().catch(() => null);
-  // Факт-прибыль Ozon из финансовых операций (реальная выплата/шт).
-  void getOzonFactProfit().catch(() => null);
+  // Начисления Ozon за 31 день (по дню на запрос, свежие дни перечитываются раз в час),
+  // затем факт-прибыль из них — реальная выплата/шт.
+  void warmOzonAccruals(31).then(() => getOzonFactProfit()).catch(() => null);
 
   // Прогрев конкурентов — ПОСЛЕ ответа, fire-and-forget (search.wb.ru/ozon бывают
   // медленными/банят, не должны задерживать прогрев кабинета).

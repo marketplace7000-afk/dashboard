@@ -1,28 +1,36 @@
-// Ozon Finance API — реальные финансовые транзакции (после возвратов и комиссий).
-// Используется те же креды что и для Seller API (Client-Id + Api-Key из .env),
-// идёт через vite-прокси /ozon/* → api-seller.ozon.ru.
+// Ozon Finance — реальные финансовые операции (после возвратов и комиссий).
+// 18.10.2026: Ozon отключил v3/finance/transaction/totals и /list (08.09.2026,
+// теперь 404) — экраны месяц показывали кэш от 08.09. Теперь сервер собирает
+// начисления v1/finance/accrual/by-day по дням и отдаёт их в прежнем формате
+// через /api/ozon-finance (см. api/_lib/ozonAccruals.ts). Типы ниже — прежние.
 import { noteSwallowed } from '../utils/log';
 
-const PROXY_BASE = '/ozon';
+type RangeResp = { ok: boolean; totals: OzonFinTotals; list: OzonFinList; failedDays?: string[]; error?: string };
 
-async function ozonFetch<T>(path: string, body: any): Promise<T> {
-  const res = await fetch(PROXY_BASE + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    if (res.status === 503 && text.includes('warming_up')) {
-      throw new Error('Данные ещё загружаются фоновым сборщиком — обновятся автоматически.');
-    }
-    throw new Error(`Ozon ${res.status}: ${text.slice(0, 240)}`);
-  }
-  return res.json() as Promise<T>;
+// Дата YYYY-MM-DD по Москве: принимаем и готовую дату, и ISO-момент.
+function toMskDay(v: string): string {
+  if (/^d{4}-d{2}-d{2}$/.test(v)) return v;
+  return new Date(Date.parse(v) + 3 * 3_600_000).toISOString().slice(0, 10);
 }
 
-// ─── /v3/finance/transaction/totals ────────────────────────────────────────
-// Возвращает сводные суммы по типам операций за период.
+// Totals и list приходят одним ответом — параллельные вызовы склеиваем.
+const inflight = new Map<string, Promise<RangeResp>>();
+function ozonFinanceRange(from: string, to: string): Promise<RangeResp> {
+  const f = toMskDay(from), t = toMskDay(to);
+  const key = f + '|' + t;
+  const running = inflight.get(key);
+  if (running) return running;
+  const p = (async () => {
+    const res = await fetch(`/api/ozon-finance?from=${f}&to=${t}`, { credentials: 'include' });
+    const text = await res.text().catch(() => '');
+    if (!res.ok) throw new Error(`Ozon ${res.status}: ${text.slice(0, 240)}`);
+    return JSON.parse(text) as RangeResp;
+  })().finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
+// ─── Итоги за период (формат бывшего v3/finance/transaction/totals) ─────────
 export type OzonFinTotals = {
   result: {
     accruals_for_sale: number;          // выручка от продаж
@@ -37,18 +45,15 @@ export type OzonFinTotals = {
 };
 
 export async function ozonFinanceTotals(fromISO: string, toISO: string): Promise<OzonFinTotals> {
-  return ozonFetch<OzonFinTotals>('/v3/finance/transaction/totals', {
-    date: { from: fromISO, to: toISO },
-    posting_number: '',
-    transaction_type: 'all',
-  });
+  return (await ozonFinanceRange(fromISO, toISO)).totals;
 }
 
-// ─── /v3/finance/transaction/list ──────────────────────────────────────────
-// Детальный список операций — для drill-down (откуда взялась цифра).
+// ─── Операции за период (формат бывшего v3/finance/transaction/list) ───────
+// Детальный список — для drill-down (откуда взялась цифра). operation_type —
+// старый код, где есть аналог, иначе «Группа:ИмяТипа» (Delivery:…, Advertising:…).
 export type OzonFinOperation = {
   operation_id: number;
-  operation_type: string;          // OperationAgentDeliveredToCustomer / OperationItemReturn / OperationMarketplaceServiceItemAdvertisingCharge / ...
+  operation_type: string;          // OperationAgentDeliveredToCustomer / OperationItemReturn / Delivery:LastMileCourier / Advertising:PayPerClick / ...
   operation_type_name: string;     // человекочитаемое название
   operation_date: string;
   delivery_charge: number;
@@ -70,21 +75,8 @@ export type OzonFinList = {
   };
 };
 
-export async function ozonFinanceList(
-  fromISO: string,
-  toISO: string,
-  opts: { page?: number; pageSize?: number; operationTypes?: string[]; transactionType?: 'all' | 'orders' | 'returns' | 'services' | 'compensation' | 'transferDelivery' | 'other' } = {},
-): Promise<OzonFinList> {
-  return ozonFetch<OzonFinList>('/v3/finance/transaction/list', {
-    filter: {
-      date: { from: fromISO, to: toISO },
-      operation_type: opts.operationTypes || [],
-      posting_number: '',
-      transaction_type: opts.transactionType || 'all',
-    },
-    page: opts.page ?? 1,
-    page_size: opts.pageSize ?? 1000,
-  });
+export async function ozonFinanceList(fromISO: string, toISO: string): Promise<OzonFinList> {
+  return (await ozonFinanceRange(fromISO, toISO)).list;
 }
 
 // ─── Утилиты ───────────────────────────────────────────────────────────────
@@ -159,53 +151,37 @@ export function clearFinCache() {
   }
 }
 
-export async function ozonFinanceTotalsCached(fromISO: string, toISO: string, force = false) {
-  const path = '/v3/finance/transaction/totals';
-  const body = { date: { from: fromISO, to: toISO }, posting_number: '', transaction_type: 'all' };
-  const cached = readFinCache<OzonFinTotals>(path, body);
+// Ключи кэша — новые: под старыми (/v3/...) в браузерах лежат цифры от 08.09.
+const TOTALS_PATH = '/api/ozon-finance:totals';
+const LIST_PATH = '/api/ozon-finance:list';
+export function finCacheBody(fromISO: string, toISO: string) {
+  return { from: toMskDay(fromISO), to: toMskDay(toISO) };
+}
+
+export function readFinTotalsCache(fromISO: string, toISO: string) {
+  return readFinCache<OzonFinTotals>(TOTALS_PATH, finCacheBody(fromISO, toISO));
+}
+export function readFinListCache(fromISO: string, toISO: string) {
+  return readFinCache<OzonFinList>(LIST_PATH, finCacheBody(fromISO, toISO));
+}
+
+async function cachedPart<T>(path: string, fromISO: string, toISO: string, force: boolean, pick: (r: RangeResp) => T) {
+  const body = finCacheBody(fromISO, toISO);
+  const cached = readFinCache<T>(path, body);
   if (!force && cached && Date.now() - cached.fetchedAt < cached.ttlMs) {
     return { data: cached.data, fromCache: true, fetchedAt: cached.fetchedAt };
   }
-  const data = await ozonFinanceTotals(fromISO, toISO);
-  const payload: Cached<OzonFinTotals> = { data, fetchedAt: Date.now(), ttlMs: DEFAULT_TTL };
+  const data = pick(await ozonFinanceRange(fromISO, toISO));
+  const payload: Cached<T> = { data, fetchedAt: Date.now(), ttlMs: DEFAULT_TTL };
   try { localStorage.setItem(cacheKey(path, body), JSON.stringify(payload)); }
   catch (e) { noteSwallowed('ozon-finance', 'ответ не закэширован', e); }
   return { data, fromCache: false, fetchedAt: payload.fetchedAt };
 }
 
-export async function ozonFinanceListCached(
-  fromISO: string,
-  toISO: string,
-  opts: { pageSize?: number; operationTypes?: string[]; transactionType?: any } = {},
-  force = false,
-) {
-  const path = '/v3/finance/transaction/list:all';
-  const body = {
-    filter: { date: { from: fromISO, to: toISO }, operation_type: opts.operationTypes || [], posting_number: '', transaction_type: opts.transactionType || 'all' },
-    page_size: opts.pageSize ?? 1000,
-  };
-  const cached = readFinCache<OzonFinList>(path, body);
-  if (!force && cached && Date.now() - cached.fetchedAt < cached.ttlMs) {
-    return { data: cached.data, fromCache: true, fetchedAt: cached.fetchedAt };
-  }
-  // Постранично — Ozon отдаёт максимум 1000 операций за запрос.
-  // Цикл по страницам пока не выберем все row_count.
-  const pageSize = opts.pageSize ?? 1000;
-  const allOps: OzonFinOperation[] = [];
-  let page = 1;
-  let totalRows = 0;
-  let pageCount = 1;
-  while (page <= pageCount) {
-    const r = await ozonFinanceList(fromISO, toISO, { ...opts, page, pageSize });
-    allOps.push(...(r.result.operations || []));
-    totalRows = r.result.row_count;
-    pageCount = r.result.page_count;
-    page++;
-    if (page > 50) break; // safety: max 50 страниц = 50k операций
-  }
-  const data: OzonFinList = { result: { operations: allOps, page_count: pageCount, row_count: totalRows } };
-  const payload: Cached<OzonFinList> = { data, fetchedAt: Date.now(), ttlMs: DEFAULT_TTL };
-  try { localStorage.setItem(cacheKey(path, body), JSON.stringify(payload)); }
-  catch (e) { noteSwallowed('ozon-finance', 'ответ не закэширован', e); }
-  return { data, fromCache: false, fetchedAt: payload.fetchedAt };
+export function ozonFinanceTotalsCached(fromISO: string, toISO: string, force = false) {
+  return cachedPart(TOTALS_PATH, fromISO, toISO, force, r => r.totals);
+}
+
+export function ozonFinanceListCached(fromISO: string, toISO: string, force = false) {
+  return cachedPart(LIST_PATH, fromISO, toISO, force, r => r.list);
 }

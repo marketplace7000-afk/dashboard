@@ -89,8 +89,14 @@ async function fetchMpWarehouses(mp: MpCode): Promise<Map<string, string>> {
     if (!res.ok) throw new Error(`wb ${mp} warehouses → ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
     for (const w of (await res.json()) as any[]) if (w?.name) out.set(String(w.name).trim(), String(w.id));
   } else if (mp === 'ozon') {
-    const j = await ozReq('v1/warehouse/list', {});
-    for (const w of (j?.result ?? [])) if (w?.name) out.set(String(w.name).trim(), String(w.warehouse_id));
+    // v1/warehouse/list Ozon отключил («obsolete method», 18.10.2026) — v2, как refreshOzonWarehouses в Apps Script.
+    let cursor = '';
+    for (let page = 0; page < 20; page++) {
+      const j = await ozReq('v2/warehouse/list', { limit: 100, cursor });
+      for (const w of (j?.warehouses ?? j?.result ?? [])) if (w?.name) out.set(String(w.name).trim(), String(w.warehouse_id));
+      cursor = String(j?.cursor ?? '');
+      if (!cursor || !j?.has_next) break;
+    }
   }
   return out;
 }

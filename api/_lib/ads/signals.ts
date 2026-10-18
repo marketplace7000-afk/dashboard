@@ -175,6 +175,32 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
     }
   } catch (e) { notes.push(`Витрина: ${(e as Error).message}`); }
 
+  // 3а. Рейтинг карточки упал (18.10.2026, просьба владельца): последний замер витрины против
+  //     замера 7 дней назад (или самого раннего в окне). Рейтинг — из РНП (замеры Агента 3).
+  try {
+    const today = mskDate(0);
+    const rnp = await getRnp(mp, mskDate(7), today);
+    const f2 = (v: number) => String(Math.round(v * 100) / 100).replace('.', ',');
+    for (const p of ov.products) {
+      if (p.archived || !(p.stock != null && p.stock > 0)) continue;
+      const arr = rnp.facts[p.key]?.rating ?? [];
+      const idx = arr.map((v, i) => (v != null ? i : -1)).filter(i => i >= 0);
+      if (idx.length < 2) continue;
+      const was = arr[idx[0]]!, now = arr[idx[idx.length - 1]]!;
+      if (now > was - 0.05) continue;
+      const fb = rnp.facts[p.key]?.feedbacks ?? [];
+      const fbWas = fb[idx[0]], fbNow = fb[idx[idx.length - 1]];
+      const fbText = fbWas != null && fbNow != null && fbNow > fbWas ? `, за это время новых отзывов ${nf.format(fbNow - fbWas)}` : '';
+      drafts.push({
+        sku: p.key, code: 'rating_drop', level: now < 4.5 || was - now >= 0.2 ? 'critical' : 'warn', role: 'card',
+        title: 'Упал рейтинг карточки',
+        text: `Рейтинг на витрине ${f2(was)} → ${f2(now)} (с ${rnp.dates[idx[0]].slice(8, 10)}.${rnp.dates[idx[0]].slice(5, 7)})${fbText}`,
+        action: 'Открыть свежие отзывы с низкой оценкой («Отзывы и вопросы»), ответить на них и проверить, нет ли общей причины: брак, описание, комплектация',
+        rub: null, prod: prodOf(p),
+      });
+    }
+  } catch (e) { notes.push(`Рейтинг: ${(e as Error).message}`); }
+
   // 4. Конкурент снизил цену сегодня (подтверждённые привязки; против вчерашней цены).
   try {
     const links = getAllLinks(mp);

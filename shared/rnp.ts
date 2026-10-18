@@ -20,7 +20,7 @@ export type RnpMetric = {
   key: string;
   label: string;
   short?: string;            // короткая подпись для узкой колонки
-  group: 'Продажи' | 'Воронка' | 'Реклама' | 'Остатки';
+  group: 'Продажи' | 'Воронка' | 'Реклама' | 'Карточка' | 'Остатки';
   unit: RnpUnit;
   kind: RnpMetricKind;
   num?: string; den?: string; scale?: number;   // для ratio
@@ -90,6 +90,12 @@ export const RNP_METRICS: RnpMetric[] = [
     hint: 'Расход ÷ заказы из рекламы' },
   { key: 'percent_adv_drr', label: 'ДРР от рекламы, %', group: 'Реклама', unit: 'pct', kind: 'ratio', num: 'adv_expenses', den: 'adv_revenue', scale: 100, better: 'down', mps: BOTH },
   { key: 'adv_share', label: 'Доля заказов из рекламы, %', short: 'Доля рекламы', group: 'Реклама', unit: 'pct', kind: 'ratio', num: 'adv_orders', den: 'ordered_cnt', scale: 100, mps: BOTH },
+
+  // ── Карточка (18.10.2026): рейтинг и отзывы с витрины — замеры Агента 3, на дату — последний за день ──
+  { key: 'rating', label: 'Рейтинг', group: 'Карточка', unit: 'num', kind: 'last', rollup: 'avg', better: 'up', mps: BOTH,
+    hint: 'Рейтинг товара, который видит покупатель на витрине (снимает Агент 3 несколько раз в день). На Ozon у вариантов одной карточки рейтинг общий. По группе товаров — среднее. История с 15.10.2026' },
+  { key: 'feedbacks', label: 'Отзывы, шт', short: 'Отзывы', group: 'Карточка', unit: 'pcs', kind: 'last', better: 'up', mps: BOTH,
+    hint: 'Сколько отзывов показывает витрина. По группе товаров — сумма' },
 
   // ── Остатки (снимок раз в 2 часа, на дату — последний за день) ──
   { key: 'stocks', label: 'Остатки, шт', group: 'Остатки', unit: 'pcs', kind: 'last', better: 'up', mps: BOTH },

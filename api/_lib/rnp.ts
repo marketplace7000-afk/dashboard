@@ -355,6 +355,50 @@ async function collectPrices(mp: RnpMp): Promise<string> {
   return `цены ${mp === 'wb' ? 'WB' : 'Ozon'}: ЛК ${n}, покупателя ${b} → ${rows} значений на ${today}`;
 }
 
+/**
+ * Рейтинг и число отзывов карточки по дням (18.10.2026, просьба владельца — видеть просадку рейтинга).
+ * Берём то, что видит покупатель на витрине: Агент 3 несколько раз в день снимает наши карточки
+ * (ads.sqlite → ad_comp_card, строка на товар в день, последний замер дня). Запросов к площадкам нет.
+ * Таблица хранит 120 дней, поэтому каждый проход переписываем всю её историю — так подтягиваются
+ * и дни до появления этой метрики (с 15.10.2026), и поздние замеры.
+ * WB: id = nmID = ключ РНП. Ozon: id = SKU площадки → артикул (справочник РНП и карта SKU).
+ */
+export async function collectRatings(mp: RnpMp): Promise<string> {
+  const { adsDb } = await import('./ads/store');
+  const a = adsDb();
+  if (!a) return `рейтинг ${mp === 'wb' ? 'WB' : 'Ozon'}: базы витрины нет`;
+  let rows: Array<{ id: string; date: string; rating: number | null; feedbacks: number | null }>;
+  try {
+    rows = a.prepare(`SELECT id, date, rating, feedbacks FROM ad_comp_card WHERE mp = ? AND (hidden IS NULL OR hidden = 0) AND rating > 0`).all(mp) as any[];
+  } catch { return `рейтинг ${mp === 'wb' ? 'WB' : 'Ozon'}: замеров витрины ещё нет`; }
+  const toKey = new Map<string, string>();
+  for (const it of rnpItems(mp)) {
+    if (mp === 'wb') toKey.set(it.sku, it.sku);
+    else if (it.extId) toKey.set(it.extId, it.sku);
+  }
+  if (mp === 'ozon') {
+    const { getSkuMap } = await import('./ozonShowcase');
+    for (const [sku, offer] of Object.entries(await getSkuMap())) if (!toKey.has(sku)) toKey.set(sku, offer);
+  }
+  const facts: DayFacts = new Map();
+  const days = new Set<string>();
+  const seen = new Set<string>();   // у одного артикула Ozon бывает несколько SKU — берём первый замер
+  let n = 0;
+  for (const r of rows) {
+    const key = toKey.get(String(r.id));
+    if (!key || seen.has(`${r.date}|${key}`)) continue;
+    seen.add(`${r.date}|${key}`);
+    days.add(r.date);
+    bump(facts, r.date, key, 'rating', num(r.rating));
+    if (r.feedbacks != null) bump(facts, r.date, key, 'feedbacks', num(r.feedbacks));
+    n++;
+  }
+  if (!days.size) return `рейтинг ${mp === 'wb' ? 'WB' : 'Ozon'}: наших карточек в замерах нет`;
+  const written = writeDays(mp, days, ['rating', 'feedbacks'], facts);
+  markCollected(`${mp}:rating`);
+  return `рейтинг ${mp === 'wb' ? 'WB' : 'Ozon'}: ${days.size} дн, замеров ${n} → ${written} значений`;
+}
+
 async function wbCatalog(items: Map<string, RnpItem>): Promise<void> {
   try {
     const entry = cacheGetNewestByPrefix<{ text?: string }>(makeUpstreamCachePrefix('wb:content', 'POST', 'content/v2/get/cards/list'));
@@ -924,6 +968,7 @@ export function collectRnp(only?: RnpMp): Promise<string[]> {
       await step('воронка WB', () => collectWbFunnel());
       await step('каталог WB', async () => { await wbCatalog(items); await fillSheetCategories(items); upsertItems('wb', [...items.values()]); return `каталог WB: ${items.size} товаров`; });
       await step('цены WB', () => collectPrices('wb'));
+      await step('рейтинг WB', () => collectRatings('wb'));
     }
     if (!only || only === 'ozon') {
       const items = new Map<string, RnpItem>();
@@ -933,6 +978,7 @@ export function collectRnp(only?: RnpMp): Promise<string[]> {
       await step('каталог Ozon', async () => { await ozonCatalog(items); await fillSheetCategories(items); upsertItems('ozon', [...items.values()]); return `каталог Ozon: ${items.size} товаров`; });
       await step('реклама Ozon', () => collectOzonAds());
       await step('цены Ozon', () => collectPrices('ozon'));
+      await step('рейтинг Ozon', () => collectRatings('ozon'));
     }
     console.warn('[rnp]', log.join(' · '));
     return log;
@@ -1048,7 +1094,7 @@ export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise
   }
 
   res.present = [...present];
-  for (const src of ['sales', 'ads', 'stock', 'analytics', 'funnel', 'prices']) {
+  for (const src of ['sales', 'ads', 'stock', 'analytics', 'funnel', 'prices', 'rating']) {
     const v = metaGet(`collected:${mp}:${src}`);
     if (v) res.collectedAt[src] = Number(v);
   }

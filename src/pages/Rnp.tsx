@@ -60,14 +60,21 @@ const PRESETS: Array<Omit<Rule, 'id' | 'on'> & { title: string }> = [
   // Позиция: число больше — товар ниже в выдаче.
   { title: 'Позиция ниже 100-й', metric: 'avg_position', op: 'gt', value: 100, color: 'amber' },
   { title: 'Позиция упала на 30%+', metric: 'avg_position', op: 'rise', value: 30, color: 'red' },
+  // Рейтинг (18.10.2026): 4,8 → 4,7 — это падение на 2 %, поэтому порог «на 1 %» ловит любую просадку на 0,1.
+  { title: 'Рейтинг упал', metric: 'rating', op: 'drop', value: 1, color: 'red' },
+  { title: 'Рейтинг ниже 4,7', metric: 'rating', op: 'lt', value: 4.7, color: 'amber' },
 ];
+
+/** Правило «Рейтинг упал» — добавляется и тем, у кого настройки сохранены до появления рейтинга. */
+const RATING_RULE: Rule = { id: 'r-rating', metric: 'rating', op: 'drop', value: 1, color: 'red', on: true };
 
 const DEFAULTS: Settings = {
   period: '14', from: '', to: '', dateGroup: 'day', rowGroup: 'product', category: '', inStock: true,
-  metrics: ['ordered_cnt', 'ordered_amount', 'avg_bill', 'adv_expenses', 'percent_drr', 'stocks'],
+  metrics: ['ordered_cnt', 'ordered_amount', 'avg_bill', 'adv_expenses', 'percent_drr', 'rating', 'stocks'],
   rules: [
     { id: 'r1', metric: 'percent_drr', op: 'gt', value: 15, color: 'red', on: true },
     { id: 'r2', metric: 'ordered_cnt', op: 'drop', value: 30, color: 'amber', on: true },
+    RATING_RULE,
   ],
   heatmap: true, onlyFlagged: false, sortMetric: 'ordered_amount', sortDir: 'desc',
 };
@@ -77,7 +84,20 @@ const LS_KEY = (mp: RnpMp) => `rnp:${mp}:settings:v1`;
 function loadSettings(mp: RnpMp): Settings {
   try {
     const raw = localStorage.getItem(LS_KEY(mp));
-    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };
+    if (raw) {
+      const s: Settings & { ratingAdded?: boolean } = { ...DEFAULTS, ...JSON.parse(raw) };
+      // 18.10.2026: рейтинг появился позже — один раз показываем его и правило «Рейтинг упал»
+      // тем, у кого список метрик уже сохранён (дальше выбор пользователя не трогаем).
+      if (!s.ratingAdded) {
+        s.ratingAdded = true;
+        if (!s.metrics.includes('rating')) {
+          const at = s.metrics.indexOf('stocks');
+          s.metrics = at >= 0 ? [...s.metrics.slice(0, at), 'rating', ...s.metrics.slice(at)] : [...s.metrics, 'rating'];
+        }
+        if (!s.rules.some(r => r.metric === 'rating')) s.rules = [...s.rules, RATING_RULE];
+      }
+      return s;
+    }
   } catch { /* приватный режим — живём на умолчаниях */ }
   return DEFAULTS;
 }
@@ -123,8 +143,11 @@ function makeBuckets(dates: string[], g: Settings['dateGroup']): Bucket[] {
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
+const nf2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
 function fmt(v: number | null, m: RnpMetric): string {
   if (v === null || !Number.isFinite(v)) return '–';
+  // Рейтинг по группе товаров — среднее; два знака, чтобы было видно и небольшую просадку.
+  if (m.key === 'rating') return nf2.format(v);
   if (m.unit === 'pct') return `${nf1.format(v)}%`;
   if (m.unit === 'rub' || m.unit === 'days') return nf0.format(v);
   return Number.isInteger(v) ? nf0.format(v) : nf1.format(v);
@@ -216,7 +239,8 @@ function Spark({ values, metric }: { values: Array<number | null>; metric: RnpMe
   const W = 88, H = 28;
   const nums = values.filter((v): v is number => v !== null);
   if (nums.length < 2) return <span className="rnp-spark-empty" />;
-  const max = Math.max(...nums), min = Math.min(0, ...nums);
+  // Рейтинг живёт в узком коридоре (4,5–5): от нуля его просадка на графике не видна.
+  const max = Math.max(...nums), min = metric.key === 'rating' ? Math.min(...nums) - 0.05 : Math.min(0, ...nums);
   const span = max - min || 1;
   const n = values.length;
   const color = metric.better === 'down' ? 'var(--rnp-down)' : metric.better === 'up' ? 'var(--rnp-up)' : 'var(--accent)';
@@ -243,7 +267,7 @@ function Spark({ values, metric }: { values: Array<number | null>; metric: RnpMe
 // ─── Панель метрик и правил ─────────────────────────────────────────────────
 
 function MetricPicker({ mp, s, set, present }: { mp: RnpMp; s: Settings; set: (p: Partial<Settings>) => void; present: Set<string> }) {
-  const groups = ['Продажи', 'Воронка', 'Реклама', 'Остатки'] as const;
+  const groups = ['Продажи', 'Воронка', 'Реклама', 'Карточка', 'Остатки'] as const;
   const toggle = (k: string) => set({ metrics: s.metrics.includes(k) ? s.metrics.filter(x => x !== k) : RNP_METRICS.filter(m => m.key === k || s.metrics.includes(m.key)).map(m => m.key) });
   return (
     <div className="rnp-metrics">

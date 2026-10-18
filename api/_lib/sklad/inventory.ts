@@ -10,8 +10,8 @@
  * Ожидается на полке = остаток + несобранные заказы FBS (они уже списаны в
  * момент заказа, но физически ещё лежат). Без этой поправки корректировка
  * задваивала заказы (СПБ AD-CARLINKIT-ULTRA +3 06.10, Краснодар
- * MANIC-STICK-GREY +2 04.10 — см. Sklad/baloo-cc/CLAUDE.md §5–6). Пока заказы
- * FBS не ведутся на сайте (этап 3), несобранных нет и ожидается = остаток.
+ * MANIC-STICK-GREY +2 04.10 — см. Sklad/baloo-cc/CLAUDE.md §5–6). Несобранные
+ * берутся из реестра заказов FBS (orders.ts, состояние open).
  *
  * Частичная инвентаризация трогает только посчитанные позиции; полная
  * (full_count) ещё и списывает в ноль всё, что на складе числится, но не
@@ -20,11 +20,12 @@
 import { getSkladDb } from './db';
 import { audit } from './audit';
 import { insertMovement, canAccessWarehouse, stockOf } from './movements';
+import { pendingOnShelf } from './orders';
 import type { AuthUser } from './users';
 
-/** Несобранные заказы FBS по товару на складе (этап 3 подставит реальные). */
+/** Несобранные заказы FBS по товару на складе — из реестра заказов (orders.ts); в проверках подменяется. */
 export type PendingFn = (whId: number) => Map<number, number>;
-let pendingProvider: PendingFn = () => new Map();
+let pendingProvider: PendingFn = pendingOnShelf;
 export function setPendingProvider(fn: PendingFn): void { pendingProvider = fn; }
 
 export type InventoryView = {

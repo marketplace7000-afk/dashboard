@@ -17,8 +17,9 @@ import {
 } from '../api/sklad';
 import { Modal, Field, fmtDate, fmtNum } from '../components/SkladUi';
 import { StockTab, MovesTab, InventoryTab, HistoryTab } from './SkladStock';
+import { OrdersTab } from './SkladOrders';
 
-type Tab = 'stock' | 'moves' | 'inventory' | 'products' | 'warehouses' | 'users' | 'audit' | 'history';
+type Tab = 'stock' | 'moves' | 'orders' | 'inventory' | 'products' | 'warehouses' | 'users' | 'audit' | 'history';
 
 export function Sklad() {
   const [data, setData] = useState<Bootstrap | null>(null);
@@ -34,7 +35,7 @@ export function Sklad() {
 
   const role = data.me.role;
   const tabs: Array<[Tab, string]> = [
-    ['stock', 'Остатки'], ['moves', 'Движения'], ['inventory', 'Инвентаризация'],
+    ['stock', 'Остатки'], ['moves', 'Движения'], ['orders', 'Заказы FBS'], ['inventory', 'Инвентаризация'],
     ['products', `Товары · ${data.products.filter(p => p.status !== 'archived').length}`], ['warehouses', 'Склады'],
   ];
   if (role === 'owner') tabs.push(['users', 'Пользователи']);
@@ -50,6 +51,7 @@ export function Sklad() {
       </div>
       {tab === 'stock' && <StockTab data={data} onOpenProduct={p => { setProductFilter(p); setTab('moves'); }} />}
       {tab === 'moves' && <MovesTab data={data} productFilter={productFilter} clearProductFilter={() => setProductFilter(null)} />}
+      {tab === 'orders' && <OrdersTab data={data} />}
       {tab === 'inventory' && <InventoryTab data={data} />}
       {tab === 'history' && <HistoryTab data={data} reload={load} />}
       {tab === 'products' && <ProductsTab data={data} reload={load} />}

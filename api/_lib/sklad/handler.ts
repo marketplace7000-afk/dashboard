@@ -16,7 +16,8 @@
  * Права проверяются здесь, по роли из сессии; фронт только прячет кнопки.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { SkladDbUnavailable, getSkladDb, kvGet } from './db';
+import { SkladDbUnavailable, getSkladDb, kvGet, kvSet } from './db';
+import { listOrders } from './orders';
 import { ROLES, ROLE_LABEL, ROLE_SECTIONS, SECTIONS, SECTION_LABEL, canSeeMoney, createUser, listUsers, updateUser, type AuthUser, type Role } from './users';
 import { KIND_INFO, canPostKind, getMovement, listMovements, postMovement, receiveTransfer, reverseMovement, sendTransfer, stockSnapshot, type MovementKind } from './movements';
 import { createInventory, finishInventory, getInventory, listInventories, setCount, updateInventory } from './inventory';
@@ -175,6 +176,31 @@ export async function handleSklad(req: VercelRequest, res: VercelResponse, rest:
       if (b === 'count') return result(res, setCount(id, body(req), user));
       if (b === 'finish') return result(res, finishInventory(id, user));
       return result(res, updateInventory(id, body(req), user));
+    }
+
+    // ─── Этап 3: заказы FBS ──────────────────────────────────────────────────
+    if (what === 'orders') {
+      if (!post && !a) {
+        const q = req.query;
+        return res.status(200).json({ ok: true, ...listOrders({
+          whIds: whScope, mp: q.mp ? String(q.mp) : undefined, state: q.state ? String(q.state) : undefined,
+          q: q.q ? String(q.q).trim() : undefined, problems: q.problems === '1', days: Number(q.days) || undefined, limit: Number(q.limit) || 200,
+        }) });
+      }
+      const poller = await import('./ordersPoller');
+      if (!post && a === 'status') {
+        const last = kvGet('orders_last_compare');
+        return res.status(200).json({ ok: true, ...poller.pollStatus(), compare: last ? JSON.parse(last) : null });
+      }
+      if (!allow(res, user, ['owner', 'manager'])) return;
+      if (post && a === 'poll') return res.status(200).json({ ok: true, status: await poller.pollOrders(body(req)?.full === true) });
+      if (post && a === 'compare') {
+        const { compareWithSheet } = await import('./ordersCompare');
+        const days = Math.min(Math.max(Number(body(req)?.days) || 3, 1), 30);
+        const report = await compareWithSheet(days);
+        kvSet('orders_last_compare', JSON.stringify(report));
+        return res.status(200).json({ ok: true, report });
+      }
     }
 
     if (what === 'history') {

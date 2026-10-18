@@ -140,3 +140,32 @@ export const sklad2 = {
   importHistory: (dryRun: boolean) => apiPost<{ report: HistoryReport }>('/api/sklad/history/import', { dryRun }, { timeoutMs: 300_000 }).then(r => r.data.report),
   reconcile: () => apiPost<{ reconcile: ReconcileReport }>('/api/sklad/history/reconcile', {}, { timeoutMs: 180_000 }).then(r => r.data.reconcile),
 };
+
+// ─── Этап 3: заказы FBS ───────────────────────────────────────────────────
+export type OrderState = 'open' | 'assembled' | 'shipped' | 'cancelled_before' | 'cancelled_after' | 'removed';
+export type OrderRow = {
+  id: number; mp: 'wb1' | 'wb2' | 'ozon'; orderId: string; offer: string; productId: number | null; article: string | null; qty: number;
+  extWhId: string; whId: number | null; orderedAt: number; rawStatus: string; state: OrderState; problem: string;
+  movementId: number | null; stornoId: number | null; updatedAt: number;
+};
+export type PollResult = { added: number; changed: number; created: number; reversed: number; unmapped: number; fetched: number } | { error: string } | { skipped: string };
+export type PollStatus = { at: number; full: boolean; ms: number; results: Record<string, PollResult> };
+export type OrdersCompare = {
+  checkedAt: number; days: number; orders: number; matched: number; unmapped: number;
+  missingInTable: Array<{ mp: string; orderId: string; article: string | null; qty: number; wh: string; state: string }>;
+  cancelledButInTable: Array<{ mp: string; orderId: string; article: string | null; row: number; state: string }>;
+  qtyMismatch: Array<{ orderId: string; article: string | null; site: number; table: number }>;
+  whMismatch: Array<{ orderId: string; article: string | null; site: string; table: string }>;
+  tableOnly: Array<{ row: number; ref: string; sku: string; dest: string; from: string }>;
+};
+export const ORDER_STATE_LABEL: Record<OrderState, string> = {
+  open: 'Не собран', assembled: 'Собран', shipped: 'Передан', cancelled_before: 'Отменён до передачи',
+  cancelled_after: 'Отменён после передачи', removed: 'Ушёл из отправления',
+};
+
+export const sklad3 = {
+  orders: (f: Record<string, unknown>) => apiGet<{ items: OrderRow[]; total: number; counts: Record<string, number> }>(`/api/sklad/orders?${q(f)}`).then(r => r.data),
+  status: () => apiGet<{ quick: PollStatus | null; full: PollStatus | null; liveSince: number | null; enabled: boolean; compare: OrdersCompare | null }>('/api/sklad/orders/status').then(r => r.data),
+  poll: (full: boolean) => apiPost<{ status: PollStatus }>('/api/sklad/orders/poll', { full }, { timeoutMs: 300_000 }).then(r => r.data.status),
+  compare: (days: number) => apiPost<{ report: OrdersCompare }>('/api/sklad/orders/compare', { days }, { timeoutMs: 180_000 }).then(r => r.data.report),
+};

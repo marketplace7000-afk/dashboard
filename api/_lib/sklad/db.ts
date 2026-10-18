@@ -211,6 +211,31 @@ const MIGRATIONS: string[] = [
   `,
   // 4 — служебные отметки (перенос истории, переход с таблицы).
   `CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);`,
+  // 5 — этап 3: реестр заказов FBS с площадок (строка = заказ × товар).
+  `
+  CREATE TABLE mp_orders (
+    id            INTEGER PRIMARY KEY,
+    mp            TEXT NOT NULL CHECK (mp IN ('wb1','wb2','ozon')),
+    order_id      TEXT NOT NULL,            -- WB: id сборочного задания; Ozon: номер отправления
+    offer         TEXT NOT NULL DEFAULT '', -- артикул/offer_id или баркод из заказа
+    product_id    INTEGER REFERENCES products(id),
+    qty           INTEGER NOT NULL,
+    ext_wh_id     TEXT NOT NULL DEFAULT '',
+    wh_id         INTEGER REFERENCES warehouses(id), -- наш склад (по складу площадки)
+    ordered_at    INTEGER NOT NULL,
+    raw_status    TEXT NOT NULL DEFAULT '', -- как у площадки: new/confirm/…, awaiting_packaging/…
+    state         TEXT NOT NULL,            -- open | assembled | shipped | cancelled_before | cancelled_after | removed
+    problem       TEXT NOT NULL DEFAULT '', -- нет склада / нет товара / отменён после сборки…
+    movement_id   INTEGER REFERENCES movements(id), -- списание (боевой режим)
+    storno_id     INTEGER REFERENCES movements(id), -- сторно при отмене до передачи
+    first_seen    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    UNIQUE (mp, order_id, offer)
+  );
+  CREATE INDEX mp_orders_state ON mp_orders(state);
+  CREATE INDEX mp_orders_wh ON mp_orders(wh_id, state);
+  CREATE INDEX mp_orders_ordered ON mp_orders(ordered_at);
+  `,
 ];
 
 export function kvGet(key: string): string | null {

@@ -1909,3 +1909,5 @@ code {
 .sk-uncounted { margin-top: 8px; columns: 2 280px; }
 @media (max-width: 768px) { .sk-qty { width: 70px; } .sk-line { white-space: normal; } }
 .sk-moves .chip { white-space: nowrap; }
+.sk-hints button.chip { border: none; cursor: pointer; font: inherit; font-size: 15px; }
+.sk-poll { margin-top: 10px; font-size: 14.5px; line-height: 1.5; }

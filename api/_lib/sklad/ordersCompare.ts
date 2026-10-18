@@ -16,7 +16,17 @@ export type CompareReport = {
   whMismatch: Array<{ orderId: string; article: string | null; site: string; table: string }>;
   tableOnly: Array<{ row: number; ref: string; sku: string; dest: string; from: string }>;
   unmapped: number;
+  /**
+   * Склады, чьи заказы вносят в «Отгрузку» руками сводно за день (без номера
+   * заказа, в E «fbs» или пусто): «Склад Уфа» → Ozon. Сверяем суммой по артикулу
+   * за полные прошедшие дни окна.
+   */
+  manual: Array<{ wh: string; mp: string; from: string; to: string;
+    items: Array<{ article: string; site: number; table: number }> }>;
 };
+
+/** Склады, где Apps Script заказы не пишет (их вносят вручную сводно). */
+const MANUAL_WH_CODES = ['ufa'];
 
 type SheetRow = { row: number; date: unknown; sku: string; qty: number; dest: string; ref: string; from: string };
 
@@ -42,11 +52,41 @@ export function compareOrders(rows: SheetRow[], days: number): CompareReport {
   for (const r of rows) if (r.ref) (table.get(r.ref) ?? table.set(r.ref, []).get(r.ref)!).push(r);
 
   const rep: CompareReport = { checkedAt: now, days, orders: 0, matched: 0, missingInTable: [], cancelledButInTable: [],
-    qtyMismatch: [], whMismatch: [], tableOnly: [], unmapped: 0 };
+    qtyMismatch: [], whMismatch: [], tableOnly: [], unmapped: 0, manual: [] };
+  const manualWh = new Map((d.prepare(`SELECT id, name FROM warehouses WHERE code IN (${MANUAL_WH_CODES.map(() => '?').join(',')})`)
+    .all(...MANUAL_WH_CODES) as any[]).map(w => [w.id as number, String(w.name)]));
   const known = new Set<string>();
+
+  // Ручные склады: сумма по артикулу за полные прошедшие дни (по МСК), вчера включительно.
+  const MSK = 3 * 3600000;
+  const dayStart = (ts: number) => Math.floor((ts + MSK) / 86400000) * 86400000 - MSK;
+  const mFrom = dayStart(now) - days * 86400000;
+  const mTo = dayStart(now);
+  for (const [whId, name] of manualWh) {
+    const site = new Map<string, number>();
+    for (const o of d.prepare(`SELECT o.qty, p.article FROM mp_orders o JOIN products p ON p.id = o.product_id
+      WHERE o.wh_id = ? AND o.ignored = 0 AND o.ordered_at >= ? AND o.ordered_at < ?
+        AND o.state IN ('open','assembled','shipped','cancelled_after')`).all(whId, mFrom, mTo) as any[]) {
+      const k = String(o.article).toUpperCase();
+      site.set(k, (site.get(k) ?? 0) + o.qty);
+    }
+    const table = new Map<string, number>();
+    for (const r of rows) {
+      const ts = sheetTs(r.date);
+      if (ts === null || ts < mFrom || ts >= mTo || r.from.toLowerCase() !== name.toLowerCase() || r.dest.toLowerCase() !== 'ozon') continue;
+      const k = r.sku.toUpperCase();
+      table.set(k, (table.get(k) ?? 0) + r.qty);
+    }
+    const items = [...new Set([...site.keys(), ...table.keys()])].sort()
+      .map(a => ({ article: a, site: site.get(a) ?? 0, table: table.get(a) ?? 0 }));
+    const day = (ts: number) => new Date(ts + MSK).toISOString().slice(0, 10);
+    rep.manual.push({ wh: name, mp: 'ozon', from: day(mFrom), to: day(mTo - 1), items });
+  }
+
   for (const o of orders) {
     known.add(o.order_id);
     if (!o.wh_id || !o.product_id) { rep.unmapped++; continue; }
+    if (manualWh.has(o.wh_id)) continue; // сверяются сводно выше
     rep.orders++;
     const art = String(o.article ?? '').toUpperCase();
     const trs = (table.get(o.order_id) ?? []).filter(r => r.sku.toUpperCase() === art);

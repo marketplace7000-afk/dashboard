@@ -158,6 +158,7 @@ export type OrdersCompare = {
   qtyMismatch: Array<{ orderId: string; article: string | null; site: number; table: number }>;
   whMismatch: Array<{ orderId: string; article: string | null; site: string; table: string }>;
   tableOnly: Array<{ row: number; ref: string; sku: string; dest: string; from: string }>;
+  manual?: Array<{ wh: string; mp: string; from: string; to: string; items: Array<{ article: string; site: number; table: number }> }>;
 };
 export const ORDER_STATE_LABEL: Record<OrderState, string> = {
   open: 'Не собран', assembled: 'Собран', shipped: 'Передан', cancelled_before: 'Отменён до передачи',

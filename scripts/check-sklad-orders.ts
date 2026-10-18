@@ -114,6 +114,23 @@ async function main() {
   check('нет в таблице', rep.missingInTable.map(x => x.orderId).sort(), ['0100-0001-1', '0100-0002-1', '0999', '1006'].sort());
   check('есть только в таблице', rep.tableOnly.map(x => x.ref), ['777777777']);
 
+  console.log('«Склад Уфа» → Ozon: сводная сверка по артикулам (вносится вручную)');
+  d.prepare(`UPDATE mp_warehouses SET ext_id = '444' WHERE mp = 'ozon' AND ext_name = 'Склад Уфа'`).run();
+  const MSK = 3 * 3600000;
+  const today0 = Math.floor((Date.now() + MSK) / 86400000) * 86400000 - MSK;
+  const yesterdayNoon = today0 - 12 * 3600000;
+  ord.upsertOrders([{ ...ozO('0200-0001-1', 'HDMI-WIRELESS-G146', 2, 'shipped', '444'), orderedAt: yesterdayNoon },
+    { ...ozO('0200-0002-1', 'MANIC-STICK-GREY-HX-2607', 1, 'shipped', '444'), orderedAt: yesterdayNoon },
+    { ...ozO('0200-0003-1', 'MANIC-STICK-GREY-HX-2607', 1, 'cancelled_before', '444'), orderedAt: yesterdayNoon }]);
+  const ySerial = (today0 + MSK) / 86400000 + 25569 - 1;
+  const rep2 = cmp.compareOrders([
+    { row: 30, date: ySerial, sku: 'HDMI-WIRELESS-G146', qty: 2, dest: 'Ozon', ref: 'fbs', from: 'Склад Уфа' },
+    { row: 31, date: ySerial, sku: 'MANIC-STICK-GREY-HX-2607', qty: 2, dest: 'Ozon', ref: '', from: 'Склад Уфа' },
+  ], 3);
+  check('сумма по артикулу: HDMI сошлось, MANIC на 1 больше в таблице', rep2.manual[0].items, [
+    { article: 'HDMI-WIRELESS-G146', site: 2, table: 2 }, { article: 'MANIC-STICK-GREY-HX-2607', site: 1, table: 2 }]);
+  check('заказы ручного склада не попадают в «нет в таблице»', rep2.missingInTable.some(x => x.orderId.startsWith('0200-')), false);
+
   console.log('Склад площадки «не учитывать» (самовыкупы)');
   const before = ord.listOrders({ problems: true }).counts.problems;
   ord.setIgnoredWh('wb1', '999', 'Нижнекамск', 'самовыкупы', true);

@@ -143,6 +143,7 @@ function CompareCard({ r }: { r: OrdersCompare }) {
         <CmpList title="Разный склад" items={r.whMismatch.map(x => `${x.orderId} · ${x.article}: площадка → ${x.site}, таблица → ${x.table}`)} />
         <CmpList title="Есть в таблице, сайт заказ не видел" items={r.tableOnly.map(x => `строка ${x.row}: ${x.ref} · ${x.sku} · ${x.from} → ${x.dest}`)} />
       </ul>
+      {(r.manual ?? []).map(m => <ManualBlock key={m.wh} m={m} />)}
     </div>
   );
 }
@@ -156,5 +157,25 @@ function CmpList({ title, items }: { title: string; items: string[] }) {
       <div className="sk-report-items muted">{shown.map((s, i) => <div key={i}>{s}</div>)}</div>
       {items.length > shown.length && <button className="btn btn-sm" onClick={() => setAll(true)}>показать все</button>}
     </li>
+  );
+}
+
+/** Склад, чьи заказы вносят в таблицу вручную сводно за день: сверка суммой по артикулу. */
+function ManualBlock({ m }: { m: NonNullable<OrdersCompare['manual']>[number] }) {
+  const [all, setAll] = useState(false);
+  const diffs = m.items.filter(i => i.site !== i.table);
+  const shown = all ? m.items : diffs;
+  return (
+    <div className="sk-block">
+      <div><b>{m.wh} → Ozon</b> · {m.from} — {m.to} · вносится в таблицу вручную, без номеров заказов — сверка суммой по артикулу</div>
+      <div className="sk-mt">{diffs.length ? <span className="chip warn">совпало {m.items.length - diffs.length} из {m.items.length} артикулов</span> : <span className="chip good">все {m.items.length} артикулов совпали</span>}
+        {m.items.length > 0 && <button className="btn btn-sm sk-ml" onClick={() => setAll(a => !a)}>{all ? 'Только расхождения' : 'Все артикулы'}</button>}</div>
+      {shown.length > 0 && (
+        <table className="sk-table sk-lines"><thead><tr><th>Артикул</th><th className="num">Заказы Ozon</th><th className="num">В таблице</th><th className="num">Разница</th></tr></thead>
+          <tbody>{shown.map(i => <tr key={i.article}><td>{i.article}</td><td className="num">{i.site}</td><td className="num">{i.table}</td>
+            <td className={i.site !== i.table ? 'num sk-bad' : 'num'}>{i.table - i.site > 0 ? '+' : ''}{i.table - i.site}</td></tr>)}</tbody></table>
+      )}
+      <div className="muted sk-hint">Небольшая разница бывает, когда заказ сделан вечером, а внесён в таблицу на следующий день. После перехода на сайт эти заказы будут списываться автоматически, по номерам.</div>
+    </div>
   );
 }

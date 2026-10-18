@@ -71,10 +71,11 @@ export function suggestWarehouse(extName: string, ours: Array<{ id: number; name
 function findUnbound(mp: MpCode, ids: Map<string, string>): UnboundWarehouse[] {
   const d = getSkladDb();
   const bound = new Set((d.prepare('SELECT ext_name FROM mp_warehouses WHERE mp = ?').all(mp) as any[]).map(r => String(r.ext_name).trim()));
+  const ignored = new Set((d.prepare('SELECT ext_id FROM mp_wh_ignored WHERE mp = ?').all(mp) as any[]).map(r => String(r.ext_id)));
   const ours = d.prepare('SELECT id, name FROM warehouses WHERE active = 1').all() as Array<{ id: number; name: string }>;
   const out: UnboundWarehouse[] = [];
   for (const [extName, extId] of ids) {
-    if (bound.has(extName)) continue;
+    if (bound.has(extName) || ignored.has(extId)) continue;
     const s = suggestWarehouse(extName, ours);
     out.push({ mp, extName, extId, suggestWarehouseId: s.warehouseId, suggestMode: s.mode });
   }

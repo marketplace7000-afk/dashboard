@@ -17,7 +17,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { SkladDbUnavailable, getSkladDb, kvGet, kvSet } from './db';
-import { listOrders } from './orders';
+import { listOrders, listIgnoredWh, setIgnoredWh } from './orders';
 import { ROLES, ROLE_LABEL, ROLE_SECTIONS, SECTIONS, SECTION_LABEL, canSeeMoney, createUser, listUsers, updateUser, type AuthUser, type Role } from './users';
 import { KIND_INFO, canPostKind, getMovement, listMovements, postMovement, receiveTransfer, reverseMovement, sendTransfer, stockSnapshot, type MovementKind } from './movements';
 import { createInventory, finishInventory, getInventory, listInventories, setCount, updateInventory } from './inventory';
@@ -25,7 +25,7 @@ import {
   ensureSeed, listWarehouses, listMpWarehouses, saveWarehouse, saveMpWarehouse, deleteMpWarehouse,
   listProducts, getProduct, saveProduct, findProduct, PRODUCT_STATUSES, MP_CODES, HEAVY_WEIGHT_G,
 } from './catalog';
-import { listAudit } from './audit';
+import { listAudit, audit } from './audit';
 
 function body(req: VercelRequest): any {
   return typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
@@ -69,6 +69,7 @@ export async function handleSklad(req: VercelRequest, res: VercelResponse, rest:
         mpWarehouses: listMpWarehouses(whScope),
         products: listProducts(),
         users: user.role === 'owner' ? listUsers() : [],
+        ignoredWh: listIgnoredWh(),
         dict: {
           roles: ROLES.map(r => ({ value: r, label: ROLE_LABEL[r], sections: ROLE_SECTIONS[r] })),
           sections: SECTIONS.map(s => ({ value: s, label: SECTION_LABEL[s] })),
@@ -186,6 +187,15 @@ export async function handleSklad(req: VercelRequest, res: VercelResponse, rest:
           whIds: whScope, mp: q.mp ? String(q.mp) : undefined, state: q.state ? String(q.state) : undefined,
           q: q.q ? String(q.q).trim() : undefined, problems: q.problems === '1', days: Number(q.days) || undefined, limit: Number(q.limit) || 200,
         }) });
+      }
+      if (!post && a === 'ignored') return res.status(200).json({ ok: true, ignored: listIgnoredWh() });
+      if (post && a === 'ignore') {
+        if (!allow(res, user, ['owner', 'manager'])) return;
+        const b0 = body(req);
+        if (!['wb1', 'wb2', 'ozon'].includes(String(b0?.mp)) || !String(b0?.extId ?? '').trim()) return res.status(400).json({ ok: false, error: 'Укажите площадку и склад' });
+        setIgnoredWh(String(b0.mp), String(b0.extId).trim(), String(b0.extName ?? ''), String(b0.reason ?? ''), b0.ignore !== false);
+        audit(user, 'mp_wh_ignored', `${b0.mp}|${b0.extId}`, b0.ignore !== false ? 'ignore' : 'unignore', { name: [null, b0.extName ?? ''] });
+        return res.status(200).json({ ok: true, ignored: listIgnoredWh() });
       }
       const poller = await import('./ordersPoller');
       if (!post && a === 'status') {

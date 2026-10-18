@@ -37,6 +37,7 @@ export type AuditRow = {
 };
 export type Bootstrap = {
   me: Me; warehouses: Warehouse[]; mpWarehouses: MpWarehouse[]; products: Product[]; users: User[];
+  ignoredWh: Array<{ mp: MpCode; extId: string; extName: string; reason: string }>;
   dict: { kinds: Array<{ value: string; label: string; sign: 1 | -1 | 0; canPost: boolean }>; roles: Array<{ value: Role; label: string; sections: string[] }>; sections: Array<{ value: string; label: string }>; productStatuses: ProductStatus[]; mps: MpCode[]; heavyWeightG: number; sheetConfigured: boolean };
 };
 export type ImportReport = {
@@ -169,3 +170,6 @@ export const sklad3 = {
   poll: (full: boolean) => apiPost<{ status: PollStatus }>('/api/sklad/orders/poll', { full }, { timeoutMs: 300_000 }).then(r => r.data.status),
   compare: (days: number) => apiPost<{ report: OrdersCompare }>('/api/sklad/orders/compare', { days }, { timeoutMs: 180_000 }).then(r => r.data.report),
 };
+
+export const ignoreWh = (mp: string, extId: string, extName: string, ignore: boolean, reason = '') =>
+  apiPost('/api/sklad/orders/ignore', { mp, extId, extName, ignore, reason });

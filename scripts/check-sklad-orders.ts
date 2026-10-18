@@ -114,6 +114,15 @@ async function main() {
   check('нет в таблице', rep.missingInTable.map(x => x.orderId).sort(), ['0100-0001-1', '0100-0002-1', '0999', '1006'].sort());
   check('есть только в таблице', rep.tableOnly.map(x => x.ref), ['777777777']);
 
+  console.log('Склад площадки «не учитывать» (самовыкупы)');
+  const before = ord.listOrders({ problems: true }).counts.problems;
+  ord.setIgnoredWh('wb1', '999', 'Нижнекамск', 'самовыкупы', true);
+  check('заказ со склада «не учитывать» — не проблема и не в списке', [ord.listOrders({ problems: true }).counts.problems, ord.listOrders({ ignored: true }).total], [before - 1, 1]);
+  const r9 = ord.upsertOrders([{ ...wbO('1009', 'open'), extWhId: '999' }]);
+  check('новый заказ оттуда не списывается и не «без привязки»', [r9.unmapped, r9.created], [0, 0]);
+  ord.setIgnoredWh('wb1', '999', 'Нижнекамск', '', false);
+  check('снять пометку', ord.listIgnoredWh().length, 0);
+
   closeSkladDb();
 }
 

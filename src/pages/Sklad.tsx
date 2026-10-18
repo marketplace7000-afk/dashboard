@@ -11,7 +11,7 @@ import {
   MagnifyingGlassIcon, ArrowsClockwiseIcon, PlusIcon, LinkIcon, PackageIcon, WarningIcon,
 } from '@phosphor-icons/react';
 import {
-  sklad, skladErr, ROLE_LABEL, MP_LABEL, MODE_LABEL, STATUS_LABEL, KIND_LABEL,
+  sklad, skladErr, ignoreWh, ROLE_LABEL, MP_LABEL, MODE_LABEL, STATUS_LABEL, KIND_LABEL,
   type Bootstrap, type Product, type Warehouse, type MpWarehouse, type User, type AuditRow,
   type ImportReport, type SyncReport, type UnboundWarehouse, type ProductStatus, type Role, type MpCode, type MpMode, type WarehouseKind,
 } from '../api/sklad';
@@ -342,13 +342,15 @@ function UnboundList({ data, list, onBound }: { data: Bootstrap; list: UnboundWa
           <div key={key} className="sk-unbound">
             <span className="chip">{MP_LABEL[u.mp]}</span>
             <span className="sk-unbound-name">{u.extName}{u.suggestMode === 'heavy_only' && <span className="chip warn sk-ml">СГТ</span>}</span>
-            {done[key] ? <span className={done[key] === 'привязан' ? 'chip good' : 'sk-bad'}>{done[key]}</span> : (
+            {done[key] ? <span className={done[key] === 'привязан' || done[key] === 'не учитывается' ? 'chip good' : 'sk-bad'}>{done[key]}</span> : (
               <>
                 <select className="input sk-select" value={choice[key]} onChange={e => setChoice(c => ({ ...c, [key]: e.target.value }))}>
                   <option value="">— не привязывать —</option>
                   {data.warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                 </select>
                 <button className="btn btn-sm" disabled={!choice[key]} onClick={() => bind(u)}>Привязать</button>
+                <button className="btn btn-sm" title="Заказы с этого склада не списываются и не считаются проблемой (самовыкупы и т.п.)"
+                  onClick={() => ignoreWh(u.mp, u.extId, u.extName, true).then(() => { setDone(d => ({ ...d, [key]: 'не учитывается' })); onBound(); }).catch(e => setDone(d => ({ ...d, [key]: skladErr(e) })))}>Не учитывать</button>
               </>
             )}
           </div>
@@ -430,6 +432,18 @@ function WarehousesTab({ data, reload }: { data: Bootstrap; reload: () => void }
           );
         })}
       </div>
+      {data.ignoredWh.length > 0 && (
+        <div className="card">
+          <div className="field-label">Склады площадок «не учитывать» — заказы с них не списываются (самовыкупы и т.п.)</div>
+          {data.ignoredWh.map(w => (
+            <div key={w.mp + w.extId} className="sk-unbound">
+              <span className="chip">{MP_LABEL[w.mp]}</span>
+              <span className="sk-unbound-name">{w.extName || w.extId} <span className="muted sk-mono">id {w.extId}</span>{w.reason && <span className="muted"> · {w.reason}</span>}</span>
+              {canEdit && <button className="btn btn-sm" onClick={() => ignoreWh(w.mp, w.extId, w.extName, false).then(reload)}>Учитывать снова</button>}
+            </div>
+          ))}
+        </div>
+      )}
       {editWh && <WarehouseModal wh={editWh === 'new' ? null : editWh} onClose={() => setEditWh(null)} onSaved={() => { setEditWh(null); reload(); }} />}
       {editMp && <MpWarehouseModal data={data} mp={editMp.mp} warehouseId={editMp.warehouseId} onClose={() => setEditMp(null)} onSaved={() => { setEditMp(null); reload(); }} />}
     </>

@@ -36,7 +36,7 @@ export function compareOrders(rows: SheetRow[], days: number): CompareReport {
   const settle = now - 20 * 60000; // Apps Script пишет раз в 5 мин — свежие не судим
   const whName = new Map((d.prepare('SELECT id, name FROM warehouses').all() as any[]).map(w => [w.id as number, String(w.name)]));
   const orders = d.prepare(`SELECT o.*, p.article FROM mp_orders o LEFT JOIN products p ON p.id = o.product_id
-    WHERE o.ordered_at >= ? AND o.ordered_at < ?`).all(from, settle) as any[];
+    WHERE o.ordered_at >= ? AND o.ordered_at < ? AND o.ignored = 0`).all(from, settle) as any[];
 
   const table = new Map<string, SheetRow[]>();
   for (const r of rows) if (r.ref) (table.get(r.ref) ?? table.set(r.ref, []).get(r.ref)!).push(r);

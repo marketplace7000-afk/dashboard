@@ -173,26 +173,29 @@ export function upsertOrders(list: NormOrder[], ozonPostings?: Set<string>): Ups
   d.exec('BEGIN IMMEDIATE');
   try {
     const seen = new Map<string, Set<string>>(); // posting → offers
+    const ignoredWh = new Set((d.prepare('SELECT mp, ext_id FROM mp_wh_ignored').all() as any[]).map(r => `${r.mp}|${r.ext_id}`));
     for (const o of list) {
-      const { whId, mode } = resolveWarehouse(o.mp, o.extWhId);
+      // Склад «не учитывать» (самовыкупы) — заказ в реестре для справки, без привязки и без списания.
+      const ignored = ignoredWh.has(`${o.mp}|${o.extWhId}`) ? 1 : 0;
+      const { whId: wh0 } = resolveWarehouse(o.mp, o.extWhId);
+      const whId = ignored ? null : wh0;
       const productId = resolveProduct(o.keys);
-      const problems = [o.problem, !whId ? `склад площадки ${o.extWhId || '—'} не привязан` : '', !productId ? `товар ${o.offer} не найден в справочнике` : '']
+      const problems = ignored ? '' : [o.problem, !whId ? `склад площадки ${o.extWhId || '—'} не привязан` : '', !productId ? `товар ${o.offer} не найден в справочнике` : '']
         .filter(Boolean).join('; ');
-      if (!whId || !productId) res.unmapped++;
+      if (!ignored && (!whId || !productId)) res.unmapped++;
       if (o.mp === 'ozon') (seen.get(o.orderId) ?? seen.set(o.orderId, new Set()).get(o.orderId)!).add(o.offer);
       const cur = sel.get(o.mp, o.orderId, o.offer) as any;
       if (!cur) {
-        d.prepare(`INSERT INTO mp_orders (mp, order_id, offer, product_id, qty, ext_wh_id, wh_id, ordered_at, raw_status, state, problem, first_seen, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(o.mp, o.orderId, o.offer, productId, o.qty, o.extWhId, whId, o.orderedAt,
-          o.rawStatus, o.state, problems, now, now);
+        d.prepare(`INSERT INTO mp_orders (mp, order_id, offer, product_id, qty, ext_wh_id, wh_id, ordered_at, raw_status, state, problem, ignored, first_seen, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(o.mp, o.orderId, o.offer, productId, o.qty, o.extWhId, whId, o.orderedAt,
+          o.rawStatus, o.state, problems, ignored, now, now);
         res.added++;
       } else if (cur.state !== o.state || cur.qty !== o.qty || cur.raw_status !== o.rawStatus || cur.problem !== problems
-        || cur.wh_id !== whId || cur.product_id !== productId) {
-        d.prepare(`UPDATE mp_orders SET product_id = ?, qty = ?, ext_wh_id = ?, wh_id = ?, raw_status = ?, state = ?, problem = ?, updated_at = ? WHERE id = ?`)
-          .run(productId, o.qty, o.extWhId, whId, o.rawStatus, o.state, problems, now, cur.id);
+        || cur.wh_id !== whId || cur.product_id !== productId || cur.ignored !== ignored) {
+        d.prepare(`UPDATE mp_orders SET product_id = ?, qty = ?, ext_wh_id = ?, wh_id = ?, raw_status = ?, state = ?, problem = ?, ignored = ?, updated_at = ? WHERE id = ?`)
+          .run(productId, o.qty, o.extWhId, whId, o.rawStatus, o.state, problems, ignored, now, cur.id);
         res.changed++;
       }
-      void mode;
       const row = sel.get(o.mp, o.orderId, o.offer);
       const a = applyLive(row);
       res.created += a.created ?? 0;
@@ -248,9 +251,24 @@ export type OrderRow = {
   movementId: number | null; stornoId: number | null; updatedAt: number;
 };
 
-export function listOrders(f: { whIds?: number[] | null; mp?: string; state?: string; q?: string; problems?: boolean; days?: number; limit?: number }):
+// ─── Склады «не учитывать» ─────────────────────────────────────────────────
+export function listIgnoredWh(): Array<{ mp: string; extId: string; extName: string; reason: string }> {
+  return (getSkladDb().prepare('SELECT * FROM mp_wh_ignored ORDER BY mp, ext_name').all() as any[])
+    .map(r => ({ mp: r.mp, extId: r.ext_id, extName: r.ext_name, reason: r.reason }));
+}
+
+/** Пометить склад площадки «не учитывать» (или снять пометку) и пересчитать его заказы. */
+export function setIgnoredWh(mp: string, extId: string, extName: string, reason: string, ignore: boolean): void {
+  const d = getSkladDb();
+  if (ignore) d.prepare('INSERT INTO mp_wh_ignored (mp, ext_id, ext_name, reason) VALUES (?, ?, ?, ?) ON CONFLICT(mp, ext_id) DO UPDATE SET ext_name = excluded.ext_name, reason = excluded.reason').run(mp, extId, extName, reason);
+  else d.prepare('DELETE FROM mp_wh_ignored WHERE mp = ? AND ext_id = ?').run(mp, extId);
+  // Уже записанные заказы этого склада: пометка сразу, привязка — при следующем опросе.
+  d.prepare("UPDATE mp_orders SET ignored = ?, problem = CASE WHEN ? = 1 THEN '' ELSE problem END, wh_id = CASE WHEN ? = 1 THEN NULL ELSE wh_id END WHERE mp = ? AND ext_wh_id = ?").run(ignore ? 1 : 0, ignore ? 1 : 0, ignore ? 1 : 0, mp, extId);
+}
+
+export function listOrders(f: { whIds?: number[] | null; mp?: string; state?: string; q?: string; problems?: boolean; days?: number; limit?: number; ignored?: boolean }):
   { items: OrderRow[]; total: number; counts: Record<string, number> } {
-  const where: string[] = [];
+  const where: string[] = [f.ignored ? 'o.ignored = 1' : 'o.ignored = 0'];
   const args: unknown[] = [];
   if (f.whIds) { where.push(`o.wh_id IN (${f.whIds.map(() => '?').join(',') || 'NULL'})`); args.push(...f.whIds); }
   if (f.mp) { where.push('o.mp = ?'); args.push(f.mp); }

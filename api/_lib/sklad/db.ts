@@ -236,6 +236,17 @@ const MIGRATIONS: string[] = [
   CREATE INDEX mp_orders_wh ON mp_orders(wh_id, state);
   CREATE INDEX mp_orders_ordered ON mp_orders(ordered_at);
   `,
+  // 6 — склады площадок «не учитывать» (самовыкупы «Нижнекамск спортивная 9» и т.п.).
+  `
+  ALTER TABLE mp_orders ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE mp_wh_ignored (
+    mp       TEXT NOT NULL,
+    ext_id   TEXT NOT NULL,
+    ext_name TEXT NOT NULL DEFAULT '',
+    reason   TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (mp, ext_id)
+  );
+  `,
 ];
 
 export function kvGet(key: string): string | null {

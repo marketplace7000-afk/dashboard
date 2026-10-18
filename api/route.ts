@@ -18,7 +18,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { handleProxy, wbUpstream, ozonUpstream } from './_proxy';
-import { requireAuth, checkPassword, signSession, setSessionCookie, clearSessionCookie } from './_lib/auth';
+import { requireAuth, authUser, checkPassword, signSession, setSessionCookie, clearSessionCookie } from './_lib/auth';
 import { validateInitData, isAllowedTgId } from './_lib/telegramAuth';
 import { fetchWithRetry } from './_lib/fetchRetry';
 import { cacheGet, makeCacheKey, makeUpstreamCacheKey, cacheGetNewestByPrefix } from './_lib/cache';
@@ -62,8 +62,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'login') {
       if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
       if (!process.env.AUTH_PASSWORD) return res.status(503).json({ error: 'auth_not_configured' });
-      const body = (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body) as { password?: string };
+      const body = (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body) as { login?: string; password?: string };
       const password = String(body?.password ?? '');
+      const login = String(body?.login ?? '').trim();
+      // С логином — личная учётка раздела «Склад» (сотрудники складов, менеджеры).
+      // Без логина — общий пароль владельца, как раньше.
+      if (login) {
+        try {
+          const { loginWithPassword, sessionVersion } = await import('./_lib/sklad/users');
+          const u = loginWithPassword(login, password);
+          if (!u || u.id === null) {
+            await new Promise(r => setTimeout(r, 800));
+            return res.status(401).json({ error: 'wrong_password' });
+          }
+          const secret = process.env.AUTH_SECRET || process.env.AUTH_PASSWORD;
+          setSessionCookie(res, signSession(secret, { uid: u.id, ver: sessionVersion(u.id) }));
+          return res.status(200).json({ ok: true, user: { name: u.name, role: u.role } });
+        } catch (e) {
+          return res.status(503).json({ error: 'users_unavailable', detail: String((e as Error).message).slice(0, 200) });
+        }
+      }
       if (!checkPassword(password)) {
         await new Promise(r => setTimeout(r, 800));
         return res.status(401).json({ error: 'wrong_password' });
@@ -90,6 +108,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await new Promise(r => setTimeout(r, 500));
         return res.status(401).json({ error: 'tg_invalid', reason });
       }
+      // Telegram-ID привязан к личной учётке — входим под ней (со своей ролью).
+      try {
+        const { loginWithTelegram, sessionVersion } = await import('./_lib/sklad/users');
+        const u = loginWithTelegram(v.user.id);
+        if (u && u.id !== null) {
+          setSessionCookie(res, signSession(secret, { uid: u.id, ver: sessionVersion(u.id) }));
+          return res.status(200).json({ ok: true, user: { id: v.user.id, username: v.user.username, name: u.name, role: u.role } });
+        }
+      } catch (e) {
+        console.warn('[tg-auth] личные учётки недоступны:', (e as Error).message);
+      }
       if (!isAllowedTgId(v.user.id)) {
         console.warn(`[tg-auth] доступ запрещён для tg_id=${v.user.id} (@${v.user.username ?? '—'}): нет в TELEGRAM_ALLOWED_IDS`);
         return res.status(403).json({ error: 'tg_not_allowed', tgId: v.user.id });
@@ -104,11 +133,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'check') {
+      // user — чтобы фронт знал роль: сотруднику склада показываем только «Склад».
+      const userView = () => { const u = authUser(req); return { name: u.name, login: u.login, role: u.role, warehouseIds: u.warehouseIds, sections: u.sections }; };
       if (!process.env.AUTH_PASSWORD) {
-        return res.status(200).json({ ok: true, authEnabled: false });
+        return res.status(200).json({ ok: true, authEnabled: false, user: userView() });
       }
       if (!requireAuth(req, res)) return;
-      return res.status(200).json({ ok: true, authEnabled: true });
+      return res.status(200).json({ ok: true, authEnabled: true, user: userView() });
     }
 
     return res.status(404).json({ error: 'auth_action_not_found' });
@@ -227,6 +258,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ─── Все остальные секции требуют auth ───────────────────────────────────
   if (!agentIngestOk && !requireAuth(req, res)) return;
+
+  // ─── Роли: закупщику и сотруднику склада открыт только раздел «Склад» ─────
+  // (цены, реклама, финансы и себестоимость им не положены). Проверка здесь,
+  // одна на все секции, чтобы новая секция не открылась им случайно.
+  if (!agentIngestOk) {
+    const { hasFullCabinet } = await import('./_lib/sklad/users');
+    if (!hasFullCabinet(authUser(req)) && section !== 'sklad') {
+      return res.status(403).json({ error: 'forbidden', reason: 'Этот раздел недоступен для вашей роли' });
+    }
+  }
+
+  // ─── /api/sklad/* — раздел «Склад»: товары, склады, пользователи ──────────
+  if (section === 'sklad') {
+    const { handleSklad } = await import('./_lib/sklad/handler');
+    return handleSklad(req, res, rest, authUser(req));
+  }
 
   // ─── /api/agents/* — панель сети агентов (экран «В работе»). Только после
   // requireAuth: единственный пользователь кабинета = admin. ТЗ, раздел 6.2.

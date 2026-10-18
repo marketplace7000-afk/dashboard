@@ -98,10 +98,15 @@ async function getAccessToken(): Promise<string> {
  * Пустые хвостовые ячейки Google не присылает, поэтому строки бывают короче —
  * читатели обязаны это учитывать (обращение по индексу может дать undefined).
  */
-export async function readSheetRange(spreadsheetId: string, range: string): Promise<any[][]> {
+export async function readSheetRange(
+  spreadsheetId: string,
+  range: string,
+  // FORMULA нужен «Складу»: достать адрес картинки из =IMAGE("…").
+  render: 'UNFORMATTED_VALUE' | 'FORMULA' = 'UNFORMATTED_VALUE',
+): Promise<any[][]> {
   const access = await getAccessToken();
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}`
-    + `/values/${encodeURIComponent(range)}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE`;
+    + `/values/${encodeURIComponent(range)}?majorDimension=ROWS&valueRenderOption=${render}`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${access}` },
     signal: AbortSignal.timeout(30_000),

@@ -27,12 +27,19 @@ function safeEq(a: string, b: string): boolean {
   } catch { return false; }
 }
 
-export type SessionPayload = { iat: number; exp: number };
+/**
+ * uid/ver — личная учётка раздела «Склад» (api/_lib/sklad/users.ts): ver
+ * сверяется с базой на каждом запросе, поэтому смена пароля, роли или
+ * выключение пользователя гасят его сессии сразу. Без uid — вход по общему
+ * паролю AUTH_PASSWORD (владелец), как было до «Склада».
+ */
+export type SessionPayload = { iat: number; exp: number; uid?: number; ver?: number };
 
-export function signSession(secret: string): string {
+export function signSession(secret: string, user?: { uid: number; ver: number }): string {
   const payload: SessionPayload = {
     iat: Date.now(),
     exp: Date.now() + TTL_DAYS * 86_400_000,
+    ...(user ? { uid: user.uid, ver: user.ver } : {}),
   };
   const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = hmac(data, secret);
@@ -102,7 +109,29 @@ export function requireAuth(req: VercelRequest, res: VercelResponse): boolean {
     res.status(401).json({ error: 'unauthorized' });
     return false;
   }
+  if (session.uid !== undefined) {
+    // Личная учётка: пользователь должен существовать, быть включён и иметь ту же версию сессии.
+    let user: import('./sklad/users').AuthUser | null = null;
+    try {
+      user = require('./sklad/users').userForSession(session.uid, session.ver ?? 0);
+    } catch (e) {
+      console.warn('[auth] проверка личной учётки не удалась:', (e as Error).message);
+    }
+    if (!user) {
+      res.status(401).json({ error: 'unauthorized' });
+      return false;
+    }
+    (req as any).__avUser = user;
+  }
   return true;
+}
+
+/**
+ * Кто сделал запрос — вызывать после requireAuth. Вход по общему паролю
+ * (и выключенная авторизация в dev) — владелец.
+ */
+export function authUser(req: VercelRequest): import('./sklad/users').AuthUser {
+  return (req as any).__avUser ?? require('./sklad/users').OWNER_BY_PASSWORD;
 }
 
 export function checkPassword(input: string): boolean {

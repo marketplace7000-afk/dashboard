@@ -4,6 +4,8 @@ import { initTelegramApp } from '../api/telegramApp';
 
 export function Login({ onLogin }: { onLogin: () => void }) {
   const [pwd, setPwd] = useState('');
+  // Логин — личная учётка (сотрудники складов, менеджеры). Пусто = общий пароль владельца.
+  const [login, setLogin] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authEnabled, setAuthEnabled] = useState<boolean | null>(null);
@@ -106,7 +108,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ password: pwd }),
+        body: JSON.stringify(login.trim() ? { login: login.trim(), password: pwd } : { password: pwd }),
       });
       if (r.ok) {
         onLogin();
@@ -114,7 +116,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
       }
       const j = await r.json().catch(() => ({}));
       if (r.status === 503) setError('Авторизация не настроена на сервере (нет AUTH_PASSWORD в env)');
-      else if (r.status === 401) setError('Неверный пароль');
+      else if (r.status === 401) setError(login.trim() ? 'Неверный логин или пароль' : 'Неверный пароль');
       else setError(j?.error || `Ошибка ${r.status}`);
     } catch (e: any) {
       setError(e?.message || 'Сетевая ошибка');
@@ -186,7 +188,20 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           <span>Avto Vibe</span>
         </div>
         <h2>Вход в кабинет</h2>
-        <p>Введи пароль кабинета продавца.</p>
+        <p>Сотрудникам — логин и пароль, которые выдал владелец. Владельцу — только пароль кабинета.</p>
+
+        <div className="field">
+          <label className="field-label">Логин</label>
+          <input
+            className="input"
+            value={login}
+            onChange={(e) => setLogin(e.target.value)}
+            placeholder="пусто — вход владельца"
+            disabled={loading}
+            autoComplete="username"
+            autoCapitalize="none"
+          />
+        </div>
 
         <div className="field">
           <label className="field-label">Пароль</label>

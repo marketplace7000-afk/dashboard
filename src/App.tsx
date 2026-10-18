@@ -3,7 +3,7 @@ import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, PaperPlaneTiltIcon,
   GearIcon, SquaresFourIcon,
   CaretRightIcon, MegaphoneIcon,
-  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, BinocularsIcon
+  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, BinocularsIcon, WarehouseIcon
 } from '@phosphor-icons/react';
 import { AgentHosts } from './pages/AgentHosts';
 import { Login } from './pages/Login';
@@ -16,13 +16,15 @@ import { Modules } from './pages/Modules';
 import { Ads } from './pages/Ads';
 import { Competitors } from './pages/Competitors';
 import { Rnp } from './pages/Rnp';
+import { Sklad } from './pages/Sklad';
 import { NotificationsBell } from './components/NotificationsBell';
 import { AiChatBubble } from './components/AiChat';
 import { prefetchAll } from './api/prefetch';
-import { setUnauthorizedHandler } from './api/http';
+import { apiGet, setUnauthorizedHandler } from './api/http';
+import { ROLE_LABEL, type Role } from './api/sklad';
 import { noteSwallowed } from './utils/log';
 
-type Page = 'dashboard' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | 'ads' | 'competitors' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'sklad' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | 'ads' | 'competitors' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -36,6 +38,8 @@ type Page = 'dashboard' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | '
 
 const NAV_TOP: { key: Page; Icon: any; label: string }[] = [
   { key: 'dashboard',   Icon: GaugeIcon,           label: 'Дашборд' },
+  // 18.10.2026: учёт товара на складах и фулфилментах (замена таблицы «Склад (orig)»).
+  { key: 'sklad',       Icon: WarehouseIcon,       label: 'Склад' },
 ];
 const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   { key: 'prices',      Icon: TagIcon,             label: 'Цены' },
@@ -60,6 +64,7 @@ const NAV_CONFIG: { key: Page; Icon: any; label: string }[] = [
 
 const TITLES: Record<Page, string> = {
   dashboard: 'Дашборд',
+  sklad: 'Склад',
   prices: 'Модуль «Цены»',
   reviews: 'Отзывы и вопросы',
   chats: 'Чаты с покупателями',
@@ -76,10 +81,28 @@ export function App() {
   const [page, setPage] = useState<Page>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // Кто вошёл и какие разделы ему открыты (роль + галочки владельца, см.
+  // api/_lib/sklad/users.ts). Фулфилменту и закупщику — только «Склад»: сервер
+  // закрывает им остальное сам, здесь только меню.
+  const [me, setMe] = useState<{ name: string; role: Role; sections: string[] } | null>(null);
+  const restricted = !!me && me.sections.every(s => s === 'sklad');
+  const allowed = (k: Page) => !me || me.sections.includes(k);
 
-  // Как только вошли — греем ВСЕ данные фоном, чтобы вкладки открывались
-  // мгновенно без ожидания «загрузка…» на каждой (просьба клиента 20.07).
-  useEffect(() => { if (logged) prefetchAll(); }, [logged]);
+  useEffect(() => {
+    if (!logged) { setMe(null); return; }
+    const OWNER = { name: 'Владелец', role: 'owner' as Role, sections: [...NAV_TOP, ...NAV_AFTER_PROCUREMENT, ...NAV_CONFIG, { key: 'modules' }].map(n => n.key) };
+    apiGet<{ user?: { name: string; role: Role; sections?: string[] } }>('/api/auth/check')
+      .then(r => {
+        const u = r.data?.user;
+        const m = u ? { name: u.name, role: u.role, sections: u.sections ?? OWNER.sections } : OWNER;
+        setMe(m);
+        if (!m.sections.includes('dashboard')) setPage((m.sections[0] as Page) ?? 'sklad');
+        // Как только вошли — греем ВСЕ данные фоном, чтобы вкладки открывались
+        // мгновенно без ожидания «загрузка…» на каждой (просьба клиента 20.07).
+        if (!m.sections.every(s => s === 'sklad')) prefetchAll();
+      })
+      .catch(e => { noteSwallowed('auth', 'роль не получена — считаем владельцем', e); setMe(OWNER); prefetchAll(); });
+  }, [logged]);
 
   // Сессия истекла — возвращаем на экран входа. Раньше каждый запрос молча
   // получал 401, а интерфейс рисовал нули, будто бизнес встал (инцидент 11.08).
@@ -88,6 +111,10 @@ export function App() {
   }, []);
 
   if (!logged) return <Login onLogin={() => setLogged(true)} />;
+  if (!me) return null;
+
+  // Страница вне открытых разделов (переход с Дашборда, старое состояние) — показываем первую доступную.
+  const view: Page = allowed(page) ? page : ((me.sections[0] as Page) ?? 'sklad');
 
   // Выбор пункта меню: переключаем страницу и закрываем мобильный drawer.
   const goTo = (k: Page) => { setPage(k); setMobileNavOpen(false); };
@@ -117,12 +144,10 @@ export function App() {
         </div>
 
         <div className="nav-section">Кабинет</div>
-        {NAV_TOP.map(renderNavItem)}
-
-        {NAV_AFTER_PROCUREMENT.map(renderNavItem)}
-
-        <div className="nav-section">Конфигурация</div>
-        {NAV_CONFIG.map(renderNavItem)}
+        {NAV_TOP.filter(n => allowed(n.key)).map(renderNavItem)}
+        {NAV_AFTER_PROCUREMENT.filter(n => allowed(n.key)).map(renderNavItem)}
+        {NAV_CONFIG.some(n => allowed(n.key)) && <div className="nav-section">Конфигурация</div>}
+        {NAV_CONFIG.filter(n => allowed(n.key)).map(renderNavItem)}
 
         <div className="sidebar-footer">
           <div className="seller">ИП Алешко</div>
@@ -151,14 +176,14 @@ export function App() {
           >
             <ListIcon size={20} weight="bold" />
           </button>
-          <h1>{TITLES[page]}</h1>
+          <h1>{TITLES[view]}</h1>
           <div className="topbar-meta">
             <span className="chip">
               {new Date().toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
             </span>
-            <NotificationsBell onNav={(k) => setPage(k as Page)} />
-            <div className="profile-pill" title="ИП Алешко">
-              <div className="profile-avatar">РА</div>
+            {!restricted && <NotificationsBell onNav={(k) => setPage(k as Page)} />}
+            <div className="profile-pill" title={`${me.name} · ${ROLE_LABEL[me.role]}`}>
+              <div className="profile-avatar">{me.name.split(/s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'РА'}</div>
               <button className="btn btn-sm" onClick={async () => {
                 // Из кабинета выходим в любом случае: даже если запрос не дошёл,
                 // держать пользователя внутри хуже, чем оставить живую сессию на сервере.
@@ -169,22 +194,23 @@ export function App() {
             </div>
           </div>
         </div>
-        <div className={`content ${page === 'rnp' ? 'content-wide' : page === 'prices' || page === 'ads' || page === 'competitors' ? 'content-prices' : ''}`}>
-          {page === 'dashboard' && <Dashboard onNav={(k) => setPage(k as Page)} />}
-          {page === 'prices' && <Prices />}
-          {page === 'reviews' && <Reviews />}
-          {page === 'chats' && <Chats />}
-          {page === 'rnp' && <Rnp />}
-          {page === 'ads' && <Ads />}
-          {page === 'competitors' && <Competitors />}
-          {page === 'settings' && <Settings />}
-          {page === 'modules' && <Modules />}
-          {page === 'collectors' && <AgentHosts />}
+        <div className={`content ${view === 'rnp' ? 'content-wide' : page === 'prices' || page === 'ads' || page === 'competitors' || page === 'sklad' ? 'content-prices' : ''}`}>
+          {view === 'dashboard' && <Dashboard onNav={(k) => setPage(k as Page)} />}
+          {view === 'sklad' && <Sklad />}
+          {view === 'prices' && <Prices />}
+          {view === 'reviews' && <Reviews />}
+          {view === 'chats' && <Chats />}
+          {view === 'rnp' && <Rnp />}
+          {view === 'ads' && <Ads />}
+          {view === 'competitors' && <Competitors />}
+          {view === 'settings' && <Settings />}
+          {view === 'modules' && <Modules />}
+          {view === 'collectors' && <AgentHosts />}
         </div>
       </main>
 
       {/* AI-копилот: плавающая кнопка в правом нижнем углу, видна на всех страницах после логина. */}
-      <AiChatBubble currentPage={TITLES[page]} />
+      {!restricted && <AiChatBubble currentPage={TITLES[page]} />}
     </div>
   );
 }

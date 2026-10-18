@@ -91,7 +91,8 @@ export async function handleCron(req: VercelRequest, res: VercelResponse) {
   const funnel = wbFunnelBody;
   const ozAnalytics = ozAnalyticsBody;
 
-  type T = { upstream: any; path: string; method?: 'GET' | 'POST'; body?: any; ns: string; ttl: number; cool: number };
+  // refresh — когда идти за новыми данными, если это надо чаще, чем позволяет TTL.
+  type T = { upstream: any; path: string; method?: 'GET' | 'POST'; body?: any; ns: string; ttl: number; cool: number; refresh?: number };
   const C_WB = 6 * 60 * 60_000;  // cooldown после неудачи для тяжёлых WB-хостов
   const C_LT = 60 * 60_000;      // cooldown для лёгких
   const targets: T[] = [
@@ -120,8 +121,12 @@ export async function handleCron(req: VercelRequest, res: VercelResponse) {
     // Fallback statistics (выкупы/заказы) — основной рабочий источник WB.
     // Окно 30 дней — фронт фильтрует по периоду (день/неделя/месяц) на клиенте,
     // поэтому достаточно одного широкого датасета (не плодим окна, бережём лимит).
-    { upstream: wbUpstream('statistics'), path: `api/v1/supplier/sales?dateFrom=${iso(30)}`,       ns: 'wb:statistics', ttl: TTL_12H, cool: C_LT },
-    { upstream: wbUpstream('statistics'), path: `api/v1/supplier/orders?dateFrom=${iso(30)}`,      ns: 'wb:statistics', ttl: TTL_12H, cool: C_LT },
+    // 18.10.2026: заказы и продажи обновляем каждым проходом, а не раз в 12 ч — из них
+    // строится РНП, и при 12 ч в нём не было заказов за сегодня (у WB 20, в РНП 0).
+    // Лимит метода — 1 запрос в минуту, два запроса за проход его не задевают.
+    // TTL оставлен 12 ч: если WB не ответит, прошлые данные продолжат показываться.
+    { upstream: wbUpstream('statistics'), path: `api/v1/supplier/sales?dateFrom=${iso(30)}`,       ns: 'wb:statistics', ttl: TTL_12H, cool: C_LT, refresh: REFRESH_LIVE_MS },
+    { upstream: wbUpstream('statistics'), path: `api/v1/supplier/orders?dateFrom=${iso(30)}`,      ns: 'wb:statistics', ttl: TTL_12H, cool: C_LT, refresh: REFRESH_LIVE_MS },
     // WB Финансовый отчёт — рубль-в-рубль. Только за месяц (отчёт недельный).
     // Фронт (useFinanceSummary) тоже просит месячное окно → ключи совпадают.
     // 07.2026: мигрировано на finance-api (старый v5 reportDetailByPeriod
@@ -186,7 +191,7 @@ export async function handleCron(req: VercelRequest, res: VercelResponse) {
       // реклама, аналитика) TTL — это лишь окно показа, и обновлять их надо в такт
       // крону, иначе обновление проскакивает через раз и данные стареют вдвое
       // дольше. У тяжёлых (12ч, сутки) TTL — это бюджет квоты WB, его не трогаем.
-      const refreshAfter = t.ttl <= TTL_3H ? Math.min(t.ttl, REFRESH_LIVE_MS) : t.ttl;
+      const refreshAfter = t.refresh ?? (t.ttl <= TTL_3H ? Math.min(t.ttl, REFRESH_LIVE_MS) : t.ttl);
       if (!force) {
         const cached = await cacheGet<{ status: number }>(key);
         if (!needsRefresh(cached, refreshAfter)) { results.push({ ns: t.ns, path: t.path, status: cached!.data.status, ms: 0, ok: true, skipped: 'fresh' }); continue; }

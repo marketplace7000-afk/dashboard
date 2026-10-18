@@ -22,7 +22,7 @@
 
 ## Что передается
 
-- **Код** - GitHub `romanov-d/avtovibe`, ветка `main`. Рабочая копия на сервере в `/opt/autovibe` идентична (выкатка - rsync, не git).
+- **Код** - GitHub `marketplace7000-afk/dashboard`, ветка `feature/reviews-agent` (выкатывается на сервер). Рабочая копия на сервере в `/opt/autovibe` идентична (выкатка - rsync, не git).
 - **Сервер** - VPS Timeweb `200.165.234.229`, домен `e-avtovibe.ru`. Там же: `.env` с секретами, кэш `.av-cache/`, введенные руками данные `av-data/`.
 - **Vercel-проект** `aimarket` - только релеи Anthropic и Telegram.
 - **Доступы** - по чек-листу в разделе 3.5.

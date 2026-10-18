@@ -57,7 +57,8 @@ export function wbState(supplierStatus: string, wbStatus: string): { state: Orde
   if (s === 'new') return { state: 'open' };
   if (s === 'confirm') return { state: 'assembled' };
   // complete = передан; отмена после этого — ждём возврат
-  if (WB_CANCEL_BEFORE.has(wbStatus)) return { state: 'cancelled_after', problem: 'Отменён после передачи — ждём возврат' };
+  // Отмена после передачи — штатно: ждём возврат (не «проблема», иначе список внимания тонет в сотнях таких)
+  if (WB_CANCEL_BEFORE.has(wbStatus)) return { state: 'cancelled_after' };
   return { state: 'shipped' };
 }
 
@@ -72,7 +73,7 @@ export function ozonState(status: string, cancelledAfterShip: boolean | undefine
     if (!after) return { state: 'cancelled_before' };
     // cancelled_after_ship без даты передачи: собран и отменён, посылка может лежать на ФФ (CLAUDE.md §4.3)
     if (!deliveringDate) return { state: 'cancelled_after', problem: 'Отменён после сборки, курьеру не передан — проверьте, не лежит ли посылка на складе' };
-    return { state: 'cancelled_after', problem: 'Отменён после передачи — ждём возврат' };
+    return { state: 'cancelled_after' };
   }
   return { state: 'shipped' };
 }

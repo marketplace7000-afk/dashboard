@@ -479,6 +479,7 @@ export function HistoryTab({ data, reload }: { data: Bootstrap; reload: () => vo
             <li>Строк: «Приемка» {rep.receipts}, «Отгрузка» {rep.shipments} → движений <b>{rep.imported}</b></li>
             <li>По видам: {Object.entries(rep.byKind).map(([k, n]) => `${kindLabel(data, k)} — ${n}`).join('; ')}</li>
             {rep.newArchived.length > 0 && <li>Заведены архивными (нет в справочнике): <b>{rep.newArchived.length}</b><div className="muted sk-report-items">{rep.newArchived.join(', ')}</div></li>}
+            {(rep.warnings ?? []).length > 0 && <li className="sk-bad">Обратите внимание: <b>{rep.warnings!.length}</b><div className="sk-report-items">{rep.warnings!.slice(0, 30).map((w, i) => <div key={i}>{w}</div>)}</div></li>}
             {rep.skipped.length > 0 && <li className="sk-bad">Пропущено строк: <b>{rep.skipped.length}</b><div className="sk-report-items">{rep.skipped.slice(0, 50).map(s => `${s.sheet} ${s.row}: ${s.reason}`).join('; ')}</div></li>}
           </ul>
         </div>

@@ -32,6 +32,7 @@ export type HistoryReport = {
   dryRun: boolean;
   receipts: number; shipments: number; imported: number;
   skipped: Array<{ sheet: string; row: number; reason: string }>;
+  warnings: string[];
   newArchived: string[];
   byKind: Record<string, number>;
   reconcile?: ReconcileReport;
@@ -91,7 +92,7 @@ const num = (v: unknown): number => {
 export function applyHistory(receipts: SheetRow[], shipments: SheetRow[], by: AuthUser, dryRun: boolean): HistoryReport {
   if (kvGet(CUTOVER_KEY)) throw new Error('Переход с таблицы уже завершён — перенос истории отключён');
   const d = getSkladDb();
-  const rep: HistoryReport = { dryRun, receipts: receipts.length, shipments: shipments.length, imported: 0, skipped: [], newArchived: [], byKind: {} };
+  const rep: HistoryReport = { dryRun, receipts: receipts.length, shipments: shipments.length, imported: 0, skipped: [], warnings: [], newArchived: [], byKind: {} };
   const whByName = new Map((d.prepare('SELECT id, name FROM warehouses').all() as any[]).map(w => [String(w.name).toLowerCase(), w.id as number]));
   const whName = new Map((d.prepare('SELECT id, name FROM warehouses').all() as any[]).map(w => [w.id as number, String(w.name)]));
   const productId = new Map<string, number>();
@@ -132,7 +133,19 @@ export function applyHistory(receipts: SheetRow[], shipments: SheetRow[], by: Au
       if (ts === null) { rep.skipped.push({ sheet, row: r.row, reason: `дата «${norm(r.date)}»` }); return; }
       const pid = findProduct(sku, normBarcode(r.f));
       if (sheet === 'Отгрузка') {
-        const k = shipmentKind(norm(r.d), whByName, norm(r.e));
+        let k = shipmentKind(norm(r.d), whByName, norm(r.e));
+        // «Куда» = сам склад-отправитель: ошибка выбора в форме. С пометкой
+        // «инвентаризация» это недостача (формула листа такую строку не видит,
+        // и остаток таблицы остаётся завышенным — ФФ Краснодар 18.10), без
+        // пометки — пустая операция, пропускаем с предупреждением.
+        if (k.kind === 'transfer_out' && k.counterWh === wh) {
+          if (!/инвентар/i.test(norm(r.e))) {
+            rep.skipped.push({ sheet, row: r.row, reason: `отгрузка склада самому себе «${norm(r.g)}» (${sku}, ${qty} шт.)` });
+            return;
+          }
+          k = { kind: 'inventory_minus', counterWh: null };
+          rep.warnings.push(`Отгрузка ${r.row}: инвентаризация «${norm(r.g)} → ${norm(r.d)}» (${sku} −${qty}) — перенесена как недостача; в таблице эта строка в остаток не попадает`);
+        }
         insertMovement({ ts, whId: wh, sign: -1, kind: k.kind, counterWh: k.counterWh,
           counterpart: k.counterWh ? whName.get(k.counterWh)! : norm(r.d), ref: norm(r.e), status: k.kind === 'transfer_out' ? 'received' : 'done',
           note: `Отгрузка, строка ${r.row}`, source: 'sheet', lines: [{ productId: pid, qty }] }, sys);

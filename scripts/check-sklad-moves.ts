@@ -114,22 +114,25 @@ async function main() {
     R(22, 46302, 'POLFAR', 2, 'Ozon', '0123-0001-1', '', 'ФФ Уфа'),
     R(21, 46303, 'CP-Q1M-FLASH', 2, 'ФФ СПБ', 'перемещение', '', 'ФФ Уфа'),
     R(20, 46304, 'POLFAR', 1, 'ФФ Краснодар', '', '', 'Выкуп в ПВЗ'),
+    R(19, 46313, 'POLFAR', 1, 'ФФ Уфа', 'Инвентаризация 18.10', '', 'ФФ Уфа'),
+    R(18, 46313, 'POLFAR', 5, 'ФФ Уфа', '', '', 'ФФ Уфа'),
   ];
   const before = mv.stockOf(FFU, pol);
   const dry = hist.applyHistory(receipts, shipments, owner, true);
-  check('пробный перенос ничего не пишет', [dry.imported, mv.stockOf(FFU, pol)], [6, before]);
+  check('пробный перенос ничего не пишет', [dry.imported, mv.stockOf(FFU, pol)], [7, before]);
   const h1 = hist.applyHistory(receipts, shipments, owner, false);
-  check('перенесено 6, пропущена строка с неизвестным складом', [h1.imported, h1.skipped.map(s => s.row)], [6, [20]]);
+  check('перенесено 7; пропущены неизвестный склад и отгрузка самому себе без пометки', [h1.imported, h1.skipped.map(s => s.row)], [7, [20, 18]]);
+  check('инвентаризация «склад → он же» — недостача с предупреждением', [h1.byKind.inventory_minus, h1.warnings.length], [1, 1]);
   check('выведенный артикул заведён архивным', [h1.newArchived, cat.findProduct('CP-Q1M-FLASH')?.status], [['CP-Q1M-FLASH'], 'archived']);
-  check('остаток ФФ Уфа = 20 + 1 − 3 − 2', mv.stockOf(FFU, pol) - before, 16);
+  check('остаток ФФ Уфа = 20 + 1 − 3 − 2 − 1', mv.stockOf(FFU, pol) - before, 15);
   hist.applyHistory(receipts, shipments, owner, false);
-  check('повторный перенос не задваивает', mv.stockOf(FFU, pol) - before, 16);
+  check('повторный перенос не задваивает', mv.stockOf(FFU, pol) - before, 15);
   check('ручные движения сайта перенос не трогает', mv.stockOf(UFA, pol), 4);
-  const rec = hist.reconcile(new Map([['ФФ Уфа', new Map([['POLFAR', 16], ['CP-Q1M-FLASH', 5]])]]), new Map());
+  const rec = hist.reconcile(new Map([['ФФ Уфа', new Map([['POLFAR', 15], ['CP-Q1M-FLASH', 5]])]]), new Map());
   const ffu = rec.warehouses.find(w => w.name === 'ФФ Уфа')!;
   check('сверка с колонкой M: всё совпало', [ffu.items, ffu.matched, ffu.diffs], [2, 2, []]);
-  const rec2 = hist.reconcile(new Map([['ФФ Уфа', new Map([['POLFAR', 15]])]]), new Map());
-  check('сверка показывает расхождение', rec2.warehouses.find(w => w.name === 'ФФ Уфа')!.diffs, [{ article: 'POLFAR', sheet: 15, site: 16 }]);
+  const rec2 = hist.reconcile(new Map([['ФФ Уфа', new Map([['POLFAR', 16]])]]), new Map());
+  check('сверка показывает расхождение', rec2.warehouses.find(w => w.name === 'ФФ Уфа')!.diffs, [{ article: 'POLFAR', sheet: 16, site: 15 }]);
   kvSet(hist.CUTOVER_KEY, String(Date.now()));
   let blocked = '';
   try { hist.applyHistory(receipts, shipments, owner, true); } catch (e) { blocked = (e as Error).message; }

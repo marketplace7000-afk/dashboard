@@ -111,7 +111,7 @@ export type ReconcileReport = {
 };
 export type HistoryReport = {
   dryRun: boolean; receipts: number; shipments: number; imported: number;
-  skipped: Array<{ sheet: string; row: number; reason: string }>; newArchived: string[]; byKind: Record<string, number>;
+  skipped: Array<{ sheet: string; row: number; reason: string }>; warnings?: string[]; newArchived: string[]; byKind: Record<string, number>;
   reconcile?: ReconcileReport;
 };
 export type LineInput = { productId: number; qty: number; price?: number | string | null };

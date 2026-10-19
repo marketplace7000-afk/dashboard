@@ -1911,3 +1911,12 @@ code {
 .sk-moves .chip { white-space: nowrap; }
 .sk-hints button.chip { border: none; cursor: pointer; font: inherit; font-size: 15px; }
 .sk-poll { margin-top: 10px; font-size: 14.5px; line-height: 1.5; }
+
+/* ─── «Доступы» (src/pages/Access.tsx) ─────────────────────────────────── */
+.acc { display: flex; flex-direction: column; gap: 14px; }
+.acc-head { gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+.acc-head p { margin: 4px 0 0; max-width: 640px; }
+.acc-issued { border-left: 4px solid var(--good); }
+.acc-pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 8px 0; font-size: 15px; white-space: pre-wrap; }
+.acc-x { background: transparent; border: none; cursor: pointer; color: var(--muted); }
+.acc-journal { margin-top: 10px; }

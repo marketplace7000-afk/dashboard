@@ -269,6 +269,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ─── /api/access/* — «Доступы»: учётки сотрудников (только владелец) ──────
+  if (section === 'access') {
+    const { handleAccess } = await import('./_lib/access');
+    return handleAccess(req, res, rest, authUser(req));
+  }
+
   // ─── /api/sklad/* — раздел «Склад»: товары, склады, пользователи ──────────
   if (section === 'sklad') {
     // Раздел в архиве (api/_lib/sklad/archive.ts) — как будто его нет.

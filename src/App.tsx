@@ -3,7 +3,7 @@ import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, PaperPlaneTiltIcon,
   GearIcon, SquaresFourIcon,
   CaretRightIcon, MegaphoneIcon,
-  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, BinocularsIcon, WarehouseIcon
+  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, BinocularsIcon, WarehouseIcon, UsersThreeIcon
 } from '@phosphor-icons/react';
 import { AgentHosts } from './pages/AgentHosts';
 import { Login } from './pages/Login';
@@ -17,6 +17,7 @@ import { Ads } from './pages/Ads';
 import { Competitors } from './pages/Competitors';
 import { Rnp } from './pages/Rnp';
 import { Sklad } from './pages/Sklad';
+import { Access } from './pages/Access';
 import { NotificationsBell } from './components/NotificationsBell';
 import { AiChatBubble } from './components/AiChat';
 import { prefetchAll } from './api/prefetch';
@@ -28,7 +29,7 @@ import { noteSwallowed } from './utils/log';
 // закрыт (api/_lib/sklad/archive.ts). Вернуть — false здесь и SKLAD_ENABLED=1 на сервере.
 const SKLAD_ARCHIVED = true;
 
-type Page = 'dashboard' | 'sklad' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | 'ads' | 'competitors' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'access' | 'sklad' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | 'ads' | 'competitors' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -65,10 +66,13 @@ const NAV_CONFIG: { key: Page; Icon: any; label: string }[] = [
   // клиента — статус ключа Claude и расход на нейросеть теперь внизу «Сборщиков».
   { key: 'collectors',  Icon: RobotIcon,           label: 'Сборщики' },
   { key: 'settings',    Icon: GearIcon,            label: 'Настройки' },
+  // 19.10.2026: учётки сотрудников и их разделы — только владельцу (api/_lib/access.ts).
+  { key: 'access',      Icon: UsersThreeIcon,      label: 'Доступы' },
 ];
 
 const TITLES: Record<Page, string> = {
   dashboard: 'Дашборд',
+  access: 'Доступы сотрудников',
   sklad: 'Склад',
   prices: 'Модуль «Цены»',
   reviews: 'Отзывы и вопросы',
@@ -91,7 +95,8 @@ export function App() {
   // закрывает им остальное сам, здесь только меню.
   const [me, setMe] = useState<{ name: string; role: Role; sections: string[] } | null>(null);
   const restricted = !!me && me.sections.every(s => s === 'sklad');
-  const allowed = (k: Page) => !(SKLAD_ARCHIVED && k === 'sklad') && (!me || me.sections.includes(k));
+  const allowed = (k: Page) => k === 'access' ? me?.role === 'owner'
+    : !(SKLAD_ARCHIVED && k === 'sklad') && (!me || me.sections.includes(k));
 
   useEffect(() => {
     if (!logged) { setMe(null); return; }
@@ -212,6 +217,7 @@ export function App() {
           {view === 'settings' && <Settings />}
           {view === 'modules' && <Modules />}
           {view === 'collectors' && <AgentHosts />}
+          {view === 'access' && <Access />}
           {view === null && <div className="card muted">Для вашей учётной записи сейчас нет доступных разделов.</div>}
         </div>
       </main>

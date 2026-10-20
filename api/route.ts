@@ -18,7 +18,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { handleProxy, wbUpstream, ozonUpstream } from './_proxy';
-import { requireAuth, authUser, checkPassword, signSession, setSessionCookie, clearSessionCookie } from './_lib/auth';
+import { requireAuth, authUser, checkPassword, signSession, setSessionCookie, clearSessionCookie, authRequiredButMissing, secretEquals } from './_lib/auth';
 import { fetchWithRetry } from './_lib/fetchRetry';
 import { cacheGet, makeCacheKey, makeUpstreamCacheKey, cacheGetNewestByPrefix } from './_lib/cache';
 import { getOzonTransit } from './_lib/ozonTransit';
@@ -64,6 +64,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const body = (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body) as { login?: string; password?: string };
       const password = String(body?.password ?? '');
       const login = String(body?.login ?? '').trim();
+      // Подбор пароля: 5 неудач с адреса — пауза 15 минут (api/_lib/loginGuard.ts).
+      const { clientIp, loginLockedFor, noteLoginFailure, noteLoginSuccess } = await import('./_lib/loginGuard');
+      const ip = clientIp(req);
+      const wait = loginLockedFor(ip, login);
+      if (wait > 0) {
+        res.setHeader('Retry-After', String(wait));
+        return res.status(429).json({ error: 'too_many_attempts', retryAfter: wait });
+      }
       // С логином — личная учётка раздела «Склад» (сотрудники складов, менеджеры).
       // Без логина — общий пароль владельца, как раньше.
       if (login) {
@@ -71,9 +79,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const { loginWithPassword, sessionVersion } = await import('./_lib/sklad/users');
           const u = loginWithPassword(login, password);
           if (!u || u.id === null) {
+            noteLoginFailure(ip, login);
             await new Promise(r => setTimeout(r, 800));
             return res.status(401).json({ error: 'wrong_password' });
           }
+          noteLoginSuccess(ip, login);
           const secret = process.env.AUTH_SECRET || process.env.AUTH_PASSWORD;
           setSessionCookie(res, signSession(secret, { uid: u.id, ver: sessionVersion(u.id) }));
           return res.status(200).json({ ok: true, user: { name: u.name, role: u.role } });
@@ -82,9 +92,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
       if (!checkPassword(password)) {
+        noteLoginFailure(ip, login);
         await new Promise(r => setTimeout(r, 800));
         return res.status(401).json({ error: 'wrong_password' });
       }
+      noteLoginSuccess(ip, login);
       const secret = process.env.AUTH_SECRET || process.env.AUTH_PASSWORD;
       setSessionCookie(res, signSession(secret));
       return res.status(200).json({ ok: true });
@@ -99,6 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // user — чтобы фронт знал роль: сотруднику склада показываем только «Склад».
       const userView = () => { const u = authUser(req); return { name: u.name, login: u.login, role: u.role, warehouseIds: u.warehouseIds, sections: u.sections }; };
       if (!process.env.AUTH_PASSWORD) {
+        if (authRequiredButMissing()) return res.status(503).json({ error: 'auth_not_configured' });
         return res.status(200).json({ ok: true, authEnabled: false, user: userView() });
       }
       if (!requireAuth(req, res)) return;
@@ -123,7 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
     const expected = (process.env.RELAY_SECRET || '').trim();
     const got = String(req.headers['x-relay-secret'] || '').trim();
-    if (!expected || got !== expected) return res.status(401).json({ error: 'relay_unauthorized' });
+    if (!expected || !secretEquals(got, expected)) return res.status(401).json({ error: 'relay_unauthorized' });
     const apiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
     if (!apiKey) return res.status(503).json({ error: 'anthropic_key_missing' });
 
@@ -171,6 +184,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!hasFullCabinet(authUser(req)) && section !== 'sklad') {
       return res.status(403).json({ error: 'forbidden', reason: 'Этот раздел недоступен для вашей роли' });
     }
+    // Галочки разделов из «Доступов» — на сервере, а не только в меню.
+    const { checkSectionAccess } = await import('./_lib/permissions');
+    const denied = checkSectionAccess(authUser(req), section, rest, req.method ?? 'GET');
+    if (denied) return res.status(403).json({ error: 'forbidden', reason: denied.reason });
   }
 
   // ─── /api/access/* — «Доступы»: учётки сотрудников (только владелец) ──────

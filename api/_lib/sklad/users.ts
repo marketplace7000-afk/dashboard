@@ -103,6 +103,9 @@ export function verifyPassword(pw: string, stored: string | null): boolean {
   return test.length === key.length && timingSafeEqual(test, key);
 }
 
+/** Хеш-заглушка для несуществующих логинов (см. loginWithPassword). */
+const DUMMY_HASH = hashPassword(randomBytes(12).toString('base64'));
+
 export function validatePassword(pw: string): string | null {
   if (pw.length < 8) return 'Пароль — не короче 8 символов';
   return null;
@@ -167,7 +170,10 @@ export function sessionVersion(uid: number): number {
 /** Вход по логину и паролю. null — неверно или учётка выключена. */
 export function loginWithPassword(login: string, pw: string): AuthUser | null {
   const r = getSkladDb().prepare('SELECT * FROM users WHERE login = ?').get(login.trim()) as UserRow | undefined;
-  if (!r || !r.active || !verifyPassword(pw, r.pass_hash)) return null;
+  // Хеш считаем всегда, даже для несуществующего логина: иначе по времени
+  // ответа видно, есть такой логин или нет.
+  const passOk = verifyPassword(pw, r?.pass_hash ?? DUMMY_HASH);
+  if (!r || !r.active || !passOk) return null;
   getSkladDb().prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(Date.now(), r.id);
   return toAuthUser(r);
 }

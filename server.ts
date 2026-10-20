@@ -143,9 +143,8 @@ function watchEventLoopLag() {
 
 function scheduleCacheWarm() {
   const secret = process.env.CRON_SECRET;
-  const url =
-    `http://127.0.0.1:${PORT}/api/cron/refresh` +
-    (secret ? `?secret=${encodeURIComponent(secret)}` : '');
+  // Секрет — в заголовке authorization (ниже), не в адресе.
+  const url = `http://127.0.0.1:${PORT}/api/cron/refresh`;
 
   const run = async () => {
     try {

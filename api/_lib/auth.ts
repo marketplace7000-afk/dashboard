@@ -10,7 +10,7 @@
  *     • иначе 401
  *   - Cookie подписана HMAC-SHA256 секретом — её нельзя подделать на стороне клиента
  */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const COOKIE_NAME = 'av_session';
@@ -99,8 +99,15 @@ export function clearSessionCookie(res: VercelResponse) {
  * Это даёт удобный локальный dev и одновременно требует явного включения на проде.
  */
 export function requireAuth(req: VercelRequest, res: VercelResponse): boolean {
-  // Если password не сконфигурен — auth выключен (dev mode)
-  if (!process.env.AUTH_PASSWORD) return true;
+  // Если password не сконфигурен — auth выключен (dev mode). На проде — наоборот,
+  // закрываемся: потерянный при выкладке .env не должен открывать кабинет всем.
+  if (!process.env.AUTH_PASSWORD) {
+    if (authRequiredButMissing()) {
+      res.status(503).json({ error: 'auth_not_configured' });
+      return false;
+    }
+    return true;
+  }
 
   const secret = process.env.AUTH_SECRET || process.env.AUTH_PASSWORD; // fallback на сам пароль если AUTH_SECRET не задан
   const cookie = readCookie(req, COOKIE_NAME);
@@ -132,6 +139,23 @@ export function requireAuth(req: VercelRequest, res: VercelResponse): boolean {
  */
 export function authUser(req: VercelRequest): import('./sklad/users').AuthUser {
   return (req as any).__avUser ?? require('./sklad/users').OWNER_BY_PASSWORD;
+}
+
+/**
+ * Прод без пароля входа — ошибка настройки, а не «режим разработки» (прожарка
+ * 20.10.2026: стоило .env потеряться при выкладке, и кабинет с ключами WB/Ozon
+ * на запись открывался всем). Признак прода — NODE_ENV=production.
+ */
+export function authRequiredButMissing(): boolean {
+  return process.env.NODE_ENV === 'production' && !process.env.AUTH_PASSWORD;
+}
+
+/** Сравнение секретов без утечки по времени ответа (длина тоже не утекает). */
+export function secretEquals(got: string, expected: string): boolean {
+  if (!got || !expected) return false;
+  const a = createHash('sha256').update(got).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
 }
 
 export function checkPassword(input: string): boolean {

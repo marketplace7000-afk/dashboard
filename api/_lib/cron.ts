@@ -16,6 +16,7 @@
  * дополнительных прогревов идёт ОДНА и после основной отдачи.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { secretEquals } from './auth';
 import { wbUpstream, ozonUpstream } from '../_proxy';
 import { fetchWithRetry } from './fetchRetry';
 import { cacheGet, cacheSet, makeCacheKey, makeUpstreamCacheKey, needsRefresh } from './cache';
@@ -58,11 +59,15 @@ export async function handleCron(req: VercelRequest, res: VercelResponse) {
   const action = pStr.split('/').filter(Boolean)[1];
   if (action !== 'refresh') return res.status(404).json({ error: 'cron_action_not_found' });
 
+  // Секрет — только в заголовке: в адресе (?secret=) он оседал в журналах nginx.
+  // Без CRON_SECRET на проде прогрев закрыт: иначе любой мог дёргать
+  // ?force=1 и жечь лимиты WB (прожарка 20.10.2026).
   const secret = process.env.CRON_SECRET;
   if (secret) {
-    const auth = req.headers.authorization;
-    const ok = auth === `Bearer ${secret}` || req.query.secret === secret;
-    if (!ok) return res.status(401).json({ error: 'unauthorized' });
+    const auth = String(req.headers.authorization ?? '');
+    if (!secretEquals(auth.replace(/^Bearer\s+/i, ''), secret)) return res.status(401).json({ error: 'unauthorized' });
+  } else if (process.env.NODE_ENV === 'production') {
+    return res.status(503).json({ error: 'cron_secret_missing' });
   }
 
   // Даты окон — ПО МОСКВЕ (mskDate). Раньше здесь был UTC: с 00:00 до 03:00 МСК

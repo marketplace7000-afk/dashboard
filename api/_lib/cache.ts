@@ -14,6 +14,7 @@ import { noteSwallowed } from './log';
 // event loop и весь сайт «долго грузил». В памяти они остаются (быстрые чтения),
 // а после рестарта их за секунды до-греет cron.
 const MAX_DISK_ENTRY_BYTES = 4 * 1024 * 1024; // 4 МБ
+const CACHE_EVICT_MIN_MS = 14 * 86_400_000;    // моложе 14 суток не вытесняем никогда
 
 type CachedEntry<T = any> = { data: T; fetchedAt: number; ttlMs: number };
 
@@ -75,7 +76,13 @@ async function persistToDisk(): Promise<void> {
   try {
     mkdirSync(CACHE_DIR, { recursive: true });
     const obj: Record<string, CachedEntry> = {};
+    const now = Date.now();
     for (const [k, v] of memCache.entries()) {
+      // Вытеснение: без него память и дамп только росли (ключи ИИ-расхода на
+      // каждый вызов, запросы с произвольной строкой из прокси). Старые данные
+      // нужны как запас «лучше старое, чем пусто», поэтому выбрасываем только
+      // совсем древнее — старше четырёх сроков жизни и не моложе 14 суток.
+      if (now - v.fetchedAt > Math.max(v.ttlMs * 4, CACHE_EVICT_MIN_MS)) { memCache.delete(k); continue; }
       // Пропускаем гигантские записи (финотчёты) — иначе дамп раздувается до 100+ МБ
       // и блокирует сервер. Прикидываем размер по длине data-поля дёшево.
       const approx = typeof v.data === 'string' ? v.data.length

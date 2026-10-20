@@ -41,13 +41,42 @@ function db(): any {
       CREATE TABLE IF NOT EXISTS ad_pos_daily (
         mp TEXT NOT NULL, date TEXT NOT NULL, id TEXT NOT NULL,
         pos REAL, views INTEGER, open_card INTEGER, carts INTEGER, orders INTEGER,
-        PRIMARY KEY (mp, date, id));`);
+        PRIMARY KEY (mp, date, id));
+      -- 20.10: последние данные «Сравнения карточек» WB по каждой карточке. Набор открывается бесплатно
+      -- лишь 3–4 дня после создания, а данные в нём за 30 дней — держим их до следующего сравнения.
+      CREATE TABLE IF NOT EXISTS ad_wb_comp_last (
+        nm TEXT PRIMARY KEY, set_date TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL);`);
     // price_at появился позже самой таблицы — у баз, созданных до него, добавить колонку.
     const have = new Set((d.prepare('PRAGMA table_info(ad_comp_card)').all() as any[]).map(c => c.name));
     for (const c of ['price_at', 'hidden', 'hidden_since']) if (!have.has(c)) d.exec(`ALTER TABLE ad_comp_card ADD COLUMN ${c} INTEGER`);
     tablesReady = true;
+    // Первый запуск: засеять из уже сохранённых снимков (от старых к новым — новее перезаписывает).
+    if (!(d.prepare('SELECT COUNT(*) n FROM ad_wb_comp_last').get() as any).n) {
+      for (const r of d.prepare("SELECT at, json FROM ad_cabinet_snapshot WHERE mp = 'wb' ORDER BY at").all() as any[]) {
+        try { saveCompLast(JSON.parse(r.json)?.compDetails, Number(r.at)); } catch { /* битый снимок — пропускаем */ }
+      }
+    }
   }
   return d;
+}
+
+/** Карточки из открытых отчётов сравнения WB → последние известные данные по каждой (новый набор вытесняет старый). */
+function saveCompLast(sets: any, at: number): void {
+  if (!Array.isArray(sets) || !sets.length) return;
+  const st = adsDb().prepare(`INSERT INTO ad_wb_comp_last (nm, set_date, at, json) VALUES (?, ?, ?, ?)
+    ON CONFLICT(nm) DO UPDATE SET set_date = excluded.set_date, at = excluded.at, json = excluded.json
+    WHERE excluded.set_date >= ad_wb_comp_last.set_date`);
+  for (const set of sets) for (const x of set?.nms ?? []) {
+    if (x?.nmId) st.run(String(x.nmId), String(set.date ?? ''), at, JSON.stringify(x));
+  }
+}
+
+function compLast(): Map<string, { date: string; x: any }> {
+  const m = new Map<string, { date: string; x: any }>();
+  for (const r of db().prepare('SELECT nm, set_date, json FROM ad_wb_comp_last').all() as any[]) {
+    try { m.set(String(r.nm), { date: String(r.set_date), x: JSON.parse(r.json) }); } catch { /* пропуск */ }
+  }
+  return m;
 }
 
 const mskDay = (ms: number) => new Date(ms + 3 * 3600_000).toISOString().slice(0, 10);
@@ -201,6 +230,7 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
   // Быстрый проход днём (только карточки витрины) — в историю карточек, полный снимок кабинета не трогаем.
   if (data.light) return `${mp === 'wb' ? 'WB' : 'Ozon'}: быстрое обновление — карточек на витрине ${cardsN}, с ценой ${saved.priced}${hiddenN ? `, не видны на витрине ${hiddenN}` : ''}${errN ? `, ошибок ${errN}` : ''}`;
   const posN = savePosDaily(mp, data.daily);
+  if (mp === 'wb') saveCompLast(data.compDetails, at);
   d.prepare('INSERT INTO ad_cabinet_snapshot (mp, at, json) VALUES (?, ?, ?)').run(mp, at, JSON.stringify(data));
   d.prepare(`DELETE FROM ad_cabinet_snapshot WHERE mp = ? AND id NOT IN (SELECT id FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT ?)`).run(mp, mp, KEEP);
   let suggested = 0;
@@ -444,7 +474,7 @@ const blankLink = (id: string, mp: AdMp): Ads2WatchLink => ({
   id, url: mp === 'wb' ? `https://www.wildberries.ru/catalog/${id}/detail.aspx` : `https://www.ozon.ru/product/${id}/`,
   source: 'manual', status: 'active', title: '', brand: '', seller: '', note: '', photo: '',
   price: null, rating: null, feedbacks: null, stock: null, orders: null, ordersDyn: null, avgPos: null, ctr: null, openCard: null,
-  inAds: null, inPromo: null, gmv: null, drr: null, ordersDays: null, convPdp: null, priceAt: null, price1d: null, price7d: null, hidden: false, hiddenSince: null,
+  inAds: null, inPromo: null, gmv: null, drr: null, ordersDays: null, convPdp: null, priceAt: null, price1d: null, price7d: null, hidden: false, hiddenSince: null, compDate: null,
 });
 
 /** Фото карточки WB по номеру (basket-CDN, как на витрине). */
@@ -471,18 +501,20 @@ function metricsIndex(mp: AdMp, data: any): Map<string, Partial<Ads2WatchLink>> 
     });
   }
   if (mp === 'wb') {
-    for (const set of data?.compDetails ?? []) for (const x of set.nms ?? []) {
-      put(String(x.nmId), {
+    const fromComp = (x: any, date: string): Partial<Ads2WatchLink> => ({
         title: x.name || undefined, brand: x.brand || undefined, photo: x.photo || undefined,
         price: num(x.medianPrice) || num(x.minPrice), rating: num(x.rating), feedbacks: num(x.feedbacks),
         orders: num(x.orders), ordersDyn: num(x.ordersDyn), ordersDays: num(x.orders) != null ? 30 : undefined, avgPos: num(x.avgPos), ctr: num(x.ctr), openCard: num(x.openCard),
         inAds: typeof x.inAds === 'boolean' ? x.inAds : null, inPromo: typeof x.inPromo === 'boolean' ? x.inPromo : null,
+        compDate: date || undefined,
       });
-    }
+    for (const set of data?.compDetails ?? []) for (const x of set.nms ?? []) put(String(x.nmId), fromComp(x, String(set.date ?? '')));
     for (const g of data?.report?.groups ?? []) for (const it of g.items ?? []) {
       put(String(it.nmId), { title: it.name || undefined, photo: it.mainPhoto || undefined, price: num(it.price?.minPrice), rating: num(it.feedbackRating),
         orders: cur(it.orders), ordersDyn: dyn(it.orders), ordersDays: cur(it.orders) != null ? 7 : undefined, avgPos: cur(it.avgPosition), ctr: cur(it.ctr), openCard: cur(it.openCard), inAds: !!it.isAdvertised });
     }
+    // Наборы, которые уже закрылись, — последние известные данные сравнения (после свежих: свежие главнее).
+    try { for (const [nm, c] of compLast()) put(nm, fromComp(c.x, c.date)); } catch (e) { console.warn('[competitors] данные сравнений не прочитаны:', (e as Error).message); }
   } else {
     for (const mk of data?.markets ?? []) for (const x of [...(mk.items ?? []), ...(mk.extra ?? [])]) {
       put(String(x.sku), { title: x.name || undefined, brand: x.brand || undefined, seller: x.sellerName || undefined, photo: x.photo || undefined,

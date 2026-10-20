@@ -105,7 +105,11 @@ function RefreshBar({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
 function CmpCells({ l, mp, our, passAt }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2WatchLink | null; passAt: number | null }) {
   const diff = l !== our && l.price != null && our?.price ? Math.round((l.price / our.price - 1) * 100) : null;
   const day = l.price != null && l.price1d ? Math.round((l.price / l.price1d - 1) * 100) : null;
-  const ordSuffix = mp === 'wb' && l.orders != null && l.ordersDays === 7 ? <span className="muted cmp-unit"> за 7 дн</span> : null;
+  const ordSuffix = mp === 'wb' && l.orders != null && l.ordersDays === 7 ? <span className="muted cmp-unit"> за 7 дн</span>
+    : mp === 'wb' && l.orders != null && l.ordersDays === 30 ? <span className="muted cmp-unit"> за 30 дн</span> : null;
+  // Данные из «Сравнения карточек» WB — от даты набора (держатся до следующего сравнения).
+  const compNote = mp === 'wb' && l.compDate && l.ordersDays === 30
+    ? <div className="cmp-sub muted" title="Заказы за 30 дней, реклама и акции — из «Сравнения карточек» WB; обновятся при следующем сравнении">сравнение от {l.compDate.slice(8, 10)}.{l.compDate.slice(5, 7)}</div> : null;
   // Цена не из последнего прохода (карточку в этот раз не отдали) — честно пишем, от когда она.
   const stale = l.price != null && passAt != null && (l.priceAt == null || l.priceAt < passAt - 30 * 60_000);
   return (
@@ -119,7 +123,7 @@ function CmpCells({ l, mp, our, passAt }: { l: Ads2WatchLink; mp: Ads2Mp; our: A
       <td className="ad2-num">{l.rating ? nf1.format(l.rating) : <span className="muted">{l.rating === 0 ? 'нет' : '–'}</span>}</td>
       <td className="ad2-num">{num(l.feedbacks)}</td>
       {mp === 'wb' ? <>
-        <td className="ad2-num">{num(l.orders)}{ordSuffix} <PctDyn v={l.ordersDyn} /></td>
+        <td className="ad2-num">{num(l.orders)}{ordSuffix} <PctDyn v={l.ordersDyn} />{compNote}</td>
         <td className="ad2-num">{num(l.avgPos)}</td>
         <td className="ad2-num">{pct(l.ctr)}</td>
       </> : <>

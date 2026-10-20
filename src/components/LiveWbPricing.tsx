@@ -9,9 +9,8 @@
  *   - Рекомендация         — вердикт по ROI-таблице (норма/внимание/стоп-докуп/выход)
  *   - Архив                — раздельный scope 'prices-wb'
  */
-import { useState, useMemo, useEffect, Fragment, useRef } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import { safeSetItem } from '../utils/safeStorage';
-import { onUiStateChange } from '../utils/uiState';
 import {
   CaretDownIcon,
   CaretUpIcon,
@@ -25,7 +24,7 @@ import type { WbPriceRow, WbCard } from '../api/marketplaces';
 import { useProcurement } from '../api/useProcurement';
 import { lastSweep, decideInSale, type SweepRow } from '../utils/inSale';
 import { calcROI, roiStatus, ROI_STATUS_COLOR } from '../utils/roiLogic';
-import { archiveSKU, unarchiveSKU, getArchivedSKUs } from '../utils/procurementLogic';
+import { usePricingPrefs, fmt, buyoutPct } from './usePricingPrefs';
 import { calcWbProfit, WB_DEFAULTS, type WbCalcInput } from '../utils/wbProfit';
 import { AiAdvice } from './AiAdvice';
 import { PricingGlobalParams, type GParamField } from './PricingGlobalParams';
@@ -34,8 +33,7 @@ import { wbBuyerPricesRes, wbCardEconRes, wbBoxTariffsRes, adsBySkuRes, productE
 import { fmtClock, fmtDateClock } from '../api/sideResource';
 import { wbImageUrl } from '../utils/wbBasket';
 import { mskDate } from '../utils/mskDate';
-import { activeKnobs, pruneKnobs, type KnobBase, type AutoValues } from '../utils/knobs';
-import { noteSwallowed } from '../utils/log';
+import { activeKnobs, pruneKnobs, type AutoValues } from '../utils/knobs';
 import { useEffect as useEffectM } from 'react';
 import type { RnpPriceView as PriceView } from '../../shared/rnp';
 let marginsPushedAt = 0;
@@ -59,13 +57,6 @@ const WB_GPARAMS: GParamField[] = [
 // Живые «крутилки» калькулятора в раскрытой строке. Ключ — nmId. Пусто = дефолт
 // (цена ЛК, себест из таблицы, СПП из продаж, остальное — WB_DEFAULTS).
 type CalcKnobs = Partial<Pick<WbCalcInput, 'retail' | 'cost' | 'spp' | 'drr' | 'buyout' | 'commission'>>;
-
-const fmt = (n: number) => n.toLocaleString('ru-RU') + ' ₽';
-
-// % выкупа из таблицы: значение хранится долей (0.92) — переводим в проценты; если
-// вдруг уже в процентах (>1.5) — берём как есть; пусто/0 → фолбэк 88% (просьба клиента).
-const buyoutPct = (v?: number | null): number =>
-  (v && v > 0) ? (v > 1.5 ? Math.round(v) : Math.round(v * 100)) : 88;
 
 type Row = WbPriceRow & { card?: WbCard };
 
@@ -123,73 +114,12 @@ export function LiveWbPricing() {
   const tariffRes = wbBoxTariffsRes.use();
   const boxTariff = tariffRes.data?.deliveryBase ? tariffRes.data : null;
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
-  // Крутилки калькулятора: храним СЫРУЮ строку из инпута (в т.ч. пустую), чтобы
-  // поле можно было свободно стереть и вписать своё. В расчёт идёт распарсенное
-  // число, пустое/битое → откат к значению по умолчанию.
-  const KNOBS_LS = 'prices-wb:knobs';
-  const loadKnobs = (): Record<number, Record<string, string>> => { try { return JSON.parse(localStorage.getItem(KNOBS_LS) || '{}'); } catch { return {}; } };
-  const saveKnobs = (n: Record<number, Record<string, string>>) => { try { safeSetItem(KNOBS_LS, JSON.stringify(n)); } catch (e) { noteSwallowed('ui-prefs', 'сценарий не сохранён', e, 60 * 60_000); } };
-  const [knobs, setKnobs] = useState<Record<number, Record<string, string>>>(loadKnobs);
-  // База ручных значений (05.10.2026, см. src/utils/knobs.ts): что было «по данным»
-  // в момент ввода. Данные обновились — ручное значение по этому полю снимается.
-  const KNOBS_BASE_LS = 'prices-wb:knobs-base';
-  const loadBase = (): KnobBase => { try { return JSON.parse(localStorage.getItem(KNOBS_BASE_LS) || '{}'); } catch { return {}; } };
-  const saveBase = (n: KnobBase) => { try { safeSetItem(KNOBS_BASE_LS, JSON.stringify(n)); } catch (e) { noteSwallowed('ui-prefs', 'сценарий не сохранён', e, 60 * 60_000); } };
-  const [knobsBase, setKnobsBase] = useState<KnobBase>(loadBase);
-  const setKnob = (nmId: number, k: keyof CalcKnobs, v: string, auto?: number) => {
-    setKnobs(prev => { const n = { ...prev, [nmId]: { ...prev[nmId], [k]: v } }; saveKnobs(n); return n; });
-    if (auto !== undefined && Number.isFinite(auto)) {
-      setKnobsBase(prev => { const n = { ...prev, [nmId]: { ...prev[nmId], [k]: auto } }; saveBase(n); return n; });
-    }
-  };
-  const resetKnobs = (nmId: number) => {
-    setKnobs(prev => { const n = { ...prev }; delete n[nmId]; saveKnobs(n); return n; });
-    setKnobsBase(prev => { if (!prev[nmId]) return prev; const n = { ...prev }; delete n[nmId]; saveBase(n); return n; });
-  };
-  const [archiveTick, setArchiveTick] = useState(0);
+  // Ручные значения, глобальные параметры, архив и режим списка — общий хук с Ozon.
+  const { knobs, knobsBase, setKnob, resetKnobs, replaceKnobs, showArchive, inStockOnly, listMode, setListMode,
+    gpDraft, gpChange, gpApply, gpReset, gp, archivedSet, onArchive, onUnarchive } = usePricingPrefs('prices-wb');
   const [search, setSearch] = useState('');
   const searchQ = search.trim().toLowerCase();
-  const [showArchive, setShowArchive] = useState(false);
   const [sortBy, setSortBy] = useState<'price' | 'margin' | 'roi' | 'name'>('price');
-  // Фильтр «только в продаже»: остаток WB > 0 или были продажи за 7 дней.
-  // Включён по умолчанию — мёртвые SKU не мешаются (просьба клиента 09.07).
-  const [inStockOnly, setInStockOnly] = useState<boolean>(() => {
-    try { return localStorage.getItem('prices-wb:inStockOnly') !== '0'; } catch { return true; }
-  });
-  // Переключатель «В продаже / Все / Архив» (13.10.2026); выбор «в продаже» запоминается, как раньше.
-  const setListMode = (m: ListMode) => {
-    setShowArchive(m === 'archive');
-    if (m === 'archive') return;
-    setInStockOnly(m === 'sale');
-    try { localStorage.setItem('prices-wb:inStockOnly', m === 'sale' ? '1' : '0'); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); }
-  };
-
-  // Глобальные параметры расчёта (панель сверху): draft — что в полях, applied — что
-  // реально применено. Пусто → берётся факт по товару. Крутилка строки главнее.
-  const GP_LS = 'prices-wb:globalParams';
-  const loadGP = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(GP_LS) || '{}'); } catch { return {}; } };
-  const [gpDraft, setGpDraft] = useState<Record<string, string>>(loadGP);
-  const [gpApplied, setGpApplied] = useState<Record<string, string>>(loadGP);
-  const gpAppliedRef = useRef(gpApplied);
-  gpAppliedRef.current = gpApplied;
-  const gpChange = (k: string, v: string) => setGpDraft(p => ({ ...p, [k]: v }));
-  const gpApply = () => { setGpApplied(gpDraft); try { safeSetItem(GP_LS, JSON.stringify(gpDraft)); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); } };
-  const gpReset = () => { setGpDraft({}); setGpApplied({}); try { safeSetItem(GP_LS, '{}'); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); } };
-  // Значение глоб. параметра (или fallback, если поле пустое/битое).
-  const gp = (k: string, fb: number): number => {
-    const s = gpApplied[k];
-    if (s == null || s.trim() === '') return fb;
-    const n = parseFloat(s.replace(',', '.'));
-    return isNaN(n) ? fb : n;
-  };
-
-  // Кнопка «Проверить цены на витрине»: когда Routine снял витрину — подтянуть свежие цены покупателя.
-  const archivedSet = useMemo(() => new Set(getArchivedSKUs('prices-wb')), [archiveTick]);
-  // Общая память: пришли изменения с сервера (другой пользователь/вкладка) — перечитать архив, параметры, сценарии.
-  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP();
-    // Черновик (введено, но не применено) не трогаем: синхронизация раз в 30 с стирала ввод.
-    setGpDraft(d => JSON.stringify(d) === JSON.stringify(gpAppliedRef.current) ? gp : d);
-    setGpApplied(gp); setKnobs(loadKnobs()); setKnobsBase(loadBase()); }), []);
 
   const procurementBySku = useMemo(() => {
     const m = new Map<string, typeof procurement.items[number]>();
@@ -452,8 +382,7 @@ export function LiveWbPricing() {
     for (const r of allRows) if (knobs[r.nmId]) autoById[String(r.nmId)] = wbAuto(r);
     const res = pruneKnobs(knobs as any, knobsBase, autoById);
     if (!res.dropped.length) return;
-    setKnobs(res.knobs as any); saveKnobs(res.knobs as any);
-    setKnobsBase(res.base); saveBase(res.base);
+    replaceKnobs(res.knobs as any, res.base);
   });
 
   if (bundle.loading) {
@@ -485,16 +414,6 @@ export function LiveWbPricing() {
 
   // Аккордеон: раскрыта максимум одна карточка (просьба клиента 20.07).
   const toggle = (nmId: number) => setExpanded((prev) => (prev[nmId] ? {} : { [nmId]: true }));
-  const onArchive = (vendorCode: string) => {
-    // См. LiveOzonPricing: при переполнении хранилища запись падала молча.
-    if (!archiveSKU(vendorCode.toUpperCase(), 'prices-wb')) {
-      alert('Не удалось сохранить: в браузере кончилось место. Обновите страницу и попробуйте снова.');
-      return;
-    }
-    setArchiveTick(t => t + 1);
-  };
-  const onUnarchive = (vendorCode: string) => { unarchiveSKU(vendorCode.toUpperCase(), 'prices-wb'); setArchiveTick(t => t + 1); };
-
   // Средний СПП по видимым товарам (реальная скидка: цена покупателя ниже серой) и ДРР магазина за 7 дн из product-econ.
   const sppVals = rows.map(r => computeWbRow(r, {}).sppPct).filter(v => v > 0);
   const avgSpp = sppVals.length ? Math.round(sppVals.reduce((a, b) => a + b, 0) / sppVals.length) : 0;
@@ -523,7 +442,7 @@ export function LiveWbPricing() {
       <PricingGlobalParams fields={WB_GPARAMS} draft={gpDraft} onChange={gpChange} onApply={gpApply} onReset={gpReset} color="#cb11ab" />
       {/* ─── Фильтры и сводка (как на «РНП», 13.10.2026) ─── */}
       <PriceToolbar
-        mode={showArchive ? 'archive' : inStockOnly ? 'sale' : 'all'}
+        mode={listMode}
         onMode={setListMode}
         counts={{ sale: inStockCount, all: allRows.length - archivedCount, archive: archivedCount }}
         saleHint="Только товары с остатком (склады WB + склады продавца FBS) или продажами за 7 дней"

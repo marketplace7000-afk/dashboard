@@ -1,6 +1,5 @@
-import { Fragment, useMemo, useState, useEffect, useRef } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { safeSetItem } from '../utils/safeStorage';
-import { onUiStateChange } from '../utils/uiState';
 import {
   SpinnerIcon, WarningIcon, CalculatorIcon,
   CaretUpIcon, CaretDownIcon, ArchiveIcon, ArrowCounterClockwiseIcon,
@@ -9,18 +8,17 @@ import { OzonPriceRow, OzonProductInfo } from '../api/marketplaces';
 import { useLiveOzonBundle, productInfoIndex } from '../api/useLiveOzonCache';
 import { useProcurement } from '../api/useProcurement';
 import { calcROI, roiStatus, ROI_STATUS_COLOR } from '../utils/roiLogic';
-import { archiveSKU, unarchiveSKU, getArchivedSKUs } from '../utils/procurementLogic';
+import { usePricingPrefs, fmt, buyoutPct } from './usePricingPrefs';
 import { AiAdvice } from './AiAdvice';
 import { calcOzonProfit, OZON_DEFAULTS, type OzonCalcInput } from '../utils/ozonProfit';
 import { PricingGlobalParams, type GParamField } from './PricingGlobalParams';
 import { PriceToolbar, PriceKpis, type ListMode } from './PriceToolbar';
 import { ozonBuyerPricesRes, ozonSkuAdsRes, ozonShowcaseRes } from '../api/pricingResources';
 import { fmtClock, fmtDateClock } from '../api/sideResource';
-import { noteSwallowed } from '../utils/log';
 import { productEconRes, ozonStockRes, LIVE_POLL_MS } from '../api/pricingResources';
 import { lastSweep, decideInSale, type SweepRow } from '../utils/inSale';
 import { mskDate } from '../utils/mskDate';
-import { activeKnobs, pruneKnobs, type KnobBase, type AutoValues } from '../utils/knobs';
+import { activeKnobs, pruneKnobs, type AutoValues } from '../utils/knobs';
 import { useEffect as useEffectM } from 'react';
 import type { RnpPriceView as PriceView } from '../../shared/rnp';
 let marginsPushedAt = 0;
@@ -68,11 +66,6 @@ const SOURCE_LABEL: Record<'ozon' | 'external' | 'self', string> = {
 };
 
 const num = (v: any) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
-const fmt = (v: any) => num(v).toLocaleString('ru-RU') + ' ₽';
-
-// % выкупа из таблицы (доля 0..1 → %); пусто/0 → фолбэк 88% (просьба клиента 21.07).
-const buyoutPct = (v?: number | null): number =>
-  (v && v > 0) ? (v > 1.5 ? Math.round(v) : Math.round(v * 100)) : 88;
 
 export function LiveOzonPricing() {
   const bundle = useLiveOzonBundle();
@@ -109,69 +102,12 @@ export function LiveOzonPricing() {
   const skuAdsRes = ozonSkuAdsRes.use();
   const skuAds = skuAdsRes.data?.items ?? {};
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
-  // Крутилки: храним СЫРУЮ строку (в т.ч. пустую), чтобы поле можно было стереть
-  // и вписать своё. В расчёт идёт распарсенное число; пустое → дефолт.
-  const KNOBS_LS = 'prices-ozon:knobs';
-  const loadKnobs = (): Record<number, Record<string, string>> => { try { return JSON.parse(localStorage.getItem(KNOBS_LS) || '{}'); } catch { return {}; } };
-  const saveKnobs = (n: Record<number, Record<string, string>>) => { try { safeSetItem(KNOBS_LS, JSON.stringify(n)); } catch (e) { noteSwallowed('ui-prefs', 'сценарий не сохранён', e, 60 * 60_000); } };
-  const [ozKnobs, setOzKnobs] = useState<Record<number, Record<string, string>>>(loadKnobs);
-  // База ручных значений (05.10.2026, см. src/utils/knobs.ts): что было «по данным»
-  // в момент ввода. Данные обновились — ручное значение по этому полю снимается.
-  const KNOBS_BASE_LS = 'prices-ozon:knobs-base';
-  const loadBase = (): KnobBase => { try { return JSON.parse(localStorage.getItem(KNOBS_BASE_LS) || '{}'); } catch { return {}; } };
-  const saveBase = (n: KnobBase) => { try { safeSetItem(KNOBS_BASE_LS, JSON.stringify(n)); } catch (e) { noteSwallowed('ui-prefs', 'сценарий не сохранён', e, 60 * 60_000); } };
-  const [ozBase, setOzBase] = useState<KnobBase>(loadBase);
-  const setOzKnob = (pid: number, k: keyof OzKnobs, v: string, auto?: number) => {
-    setOzKnobs(prev => { const n = { ...prev, [pid]: { ...prev[pid], [k]: v } }; saveKnobs(n); return n; });
-    if (auto !== undefined && Number.isFinite(auto)) {
-      setOzBase(prev => { const n = { ...prev, [pid]: { ...prev[pid], [k]: auto } }; saveBase(n); return n; });
-    }
-  };
-  const resetOzKnobs = (pid: number) => {
-    setOzKnobs(prev => { const n = { ...prev }; delete n[pid]; saveKnobs(n); return n; });
-    setOzBase(prev => { if (!prev[pid]) return prev; const n = { ...prev }; delete n[pid]; saveBase(n); return n; });
-  };
-  const [archiveTick, setArchiveTick] = useState(0);
+  // Ручные значения, глобальные параметры, архив и режим списка — общий хук с WB.
+  const { knobs: ozKnobs, knobsBase: ozBase, setKnob: setOzKnob, resetKnobs: resetOzKnobs, replaceKnobs, showArchive, inStockOnly,
+    listMode, setListMode, gpDraft, gpChange, gpApply, gpReset, gp, archivedSet, onArchive, onUnarchive } = usePricingPrefs('prices-ozon');
   const [search, setSearch] = useState('');
   const searchQ = search.trim().toLowerCase();
-  const [showArchive, setShowArchive] = useState(false);
   const [sortBy, setSortBy] = useState<'price' | 'margin' | 'roi' | 'name'>('price');
-  // Фильтр «только в продаже» — теперь переключаемый (просьба клиента 09.07).
-  const [inStockOnly, setInStockOnly] = useState<boolean>(() => {
-    try { return localStorage.getItem('prices-ozon:inStockOnly') !== '0'; } catch { return true; }
-  });
-  // Переключатель «В продаже / Все / Архив» (13.10.2026); выбор «в продаже» запоминается, как раньше.
-  const setListMode = (m: ListMode) => {
-    setShowArchive(m === 'archive');
-    if (m === 'archive') return;
-    setInStockOnly(m === 'sale');
-    try { localStorage.setItem('prices-ozon:inStockOnly', m === 'sale' ? '1' : '0'); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); }
-  };
-
-  // Глобальные параметры расчёта (панель сверху) — как на WB.
-  const GP_LS = 'prices-ozon:globalParams';
-  const loadGP = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(GP_LS) || '{}'); } catch { return {}; } };
-  const [gpDraft, setGpDraft] = useState<Record<string, string>>(loadGP);
-  const [gpApplied, setGpApplied] = useState<Record<string, string>>(loadGP);
-  const gpAppliedRef = useRef(gpApplied);
-  gpAppliedRef.current = gpApplied;
-  const gpChange = (k: string, v: string) => setGpDraft(p => ({ ...p, [k]: v }));
-  const gpApply = () => { setGpApplied(gpDraft); try { safeSetItem(GP_LS, JSON.stringify(gpDraft)); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); } };
-  const gpReset = () => { setGpDraft({}); setGpApplied({}); try { safeSetItem(GP_LS, '{}'); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); } };
-  const gp = (k: string, fb: number): number => {
-    const s = gpApplied[k];
-    if (s == null || s.trim() === '') return fb;
-    const n = parseFloat(s.replace(',', '.'));
-    return isNaN(n) ? fb : n;
-  };
-
-  // Кнопка «Проверить цены на витрине»: когда Routine снял витрину — подтянуть свежие цены покупателя.
-  const archivedSet = useMemo(() => new Set(getArchivedSKUs('prices-ozon')), [archiveTick]);
-  // Общая память: пришли изменения с сервера (другой пользователь/вкладка) — перечитать архив, параметры, сценарии.
-  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP();
-    // Черновик (введено, но не применено) не трогаем: синхронизация раз в 30 с стирала ввод.
-    setGpDraft(d => JSON.stringify(d) === JSON.stringify(gpAppliedRef.current) ? gp : d);
-    setGpApplied(gp); setOzKnobs(loadKnobs()); setOzBase(loadBase()); }), []);
 
   // Индекс sku → ProcurementItem (для маржи/ROI)
   const procurementBySku = useMemo(() => {
@@ -213,17 +149,6 @@ export function LiveOzonPricing() {
     }
     return { price: cur, reason: 'нет данных по конкурентам', src: '—' };
   };
-
-  const onArchive = (offerId: string) => {
-    // Хранилище браузера могло переполниться — тогда молча ничего не происходило
-    // и кнопка выглядела нерабочей (жалоба 01.08). Теперь говорим прямо.
-    if (!archiveSKU(offerId.toUpperCase(), 'prices-ozon')) {
-      alert('Не удалось сохранить: в браузере кончилось место. Обновите страницу и попробуйте снова.');
-      return;
-    }
-    setArchiveTick(t => t + 1);
-  };
-  const onUnarchive = (offerId: string) => { unarchiveSKU(offerId.toUpperCase(), 'prices-ozon'); setArchiveTick(t => t + 1); };
 
   // Клиент (06:38): «смотрим только товары, которые в наличии». Фильтруем по
   // остатку Ozon из закупок; если данных об остатках нет — показываем всё.
@@ -423,8 +348,7 @@ export function LiveOzonPricing() {
     for (const r of rows) if (ozKnobs[r.product_id]) autoById[String(r.product_id)] = ozAuto(r);
     const res = pruneKnobs(ozKnobs as any, ozBase, autoById);
     if (!res.dropped.length) return;
-    setOzKnobs(res.knobs as any); saveKnobs(res.knobs as any);
-    setOzBase(res.base); saveBase(res.base);
+    replaceKnobs(res.knobs as any, res.base);
   });
 
   // Ø СПП по видимым SKU — РЕАЛЬНАЯ скидка (цена покупателя ниже ЛК), а не мусор
@@ -485,7 +409,7 @@ export function LiveOzonPricing() {
       <PricingGlobalParams fields={OZON_GPARAMS} draft={gpDraft} onChange={gpChange} onApply={gpApply} onReset={gpReset} color="#005bff" />
       {/* ─── Фильтры и сводка (как на «РНП», 13.10.2026) ─── */}
       <PriceToolbar
-        mode={showArchive ? 'archive' : inStockOnly ? 'sale' : 'all'}
+        mode={listMode}
         onMode={setListMode}
         counts={{ sale: inStockCount, all: rows.length - archivedCount, archive: archivedCount }}
         saleHint="Только товары с остатком на Ozon"

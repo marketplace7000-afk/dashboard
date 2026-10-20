@@ -227,6 +227,18 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
   const errN = Array.isArray(data.errors) ? data.errors.length : 0;
   if (cardsN || hiddenN) d.prepare('INSERT INTO ad_comp_pass (mp, at, light, cards, priced, errors) VALUES (?, ?, ?, ?, ?, ?)').run(mp, at, data.light ? 1 : 0, cardsN, saved.priced, errN);
   d.prepare('DELETE FROM ad_comp_pass WHERE mp = ? AND at < ?').run(mp, at - 60 * 86_400_000);
+  // Быстрый проход Ozon присылает и продажи по артикулам — подкладываем их в последний полный снимок,
+  // остальная аналитика кабинета в нём остаётся ночной.
+  if (data.light && data.bySku && (data.bySku.weekly?.length || data.bySku.monthly?.length)) {
+    const last = d.prepare("SELECT id, json FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT 1").get(mp) as any;
+    if (last) {
+      const snap = JSON.parse(last.json);
+      snap.bySku = data.bySku;
+      snap.bySkuAt = at;
+      d.prepare('UPDATE ad_cabinet_snapshot SET json = ? WHERE id = ?').run(JSON.stringify(snap), last.id);
+    }
+    if (!cardsN && !hiddenN) return `Ozon: продажи по артикулам — за 28 дней ${data.bySku.monthly?.length ?? 0}, за 7 дней ${data.bySku.weekly?.length ?? 0}`;
+  }
   // Быстрый проход днём (только карточки витрины) — в историю карточек, полный снимок кабинета не трогаем.
   if (data.light) return `${mp === 'wb' ? 'WB' : 'Ozon'}: быстрое обновление — карточек на витрине ${cardsN}, с ценой ${saved.priced}${hiddenN ? `, не видны на витрине ${hiddenN}` : ''}${errN ? `, ошибок ${errN}` : ''}`;
   const posN = savePosDaily(mp, data.daily);
@@ -536,6 +548,12 @@ function metricsIndex(mp: AdMp, data: any): Map<string, Partial<Ads2WatchLink>> 
       ordersDays: num(x.soldCount) != null ? 7 : undefined, drr: num(x.drr), convPdp: num(x.pdpToCartConversion ?? x.convToCartPdp), ctr: ozCtr(x),
       inPromo: num(x.daysInPromo) != null ? Number(x.daysInPromo) > 0 : null, inAds: num(x.daysWithTrafarets) != null ? Number(x.daysWithTrafarets) > 0 : null });
     for (const x of data?.bySku?.weekly ?? []) put(String(x.sku), ozM(x));
+    // «Товары на Ozon» за 7 дней не включает товар без продаж за неделю (проверено 20.10 по SKU):
+    // если за 28 дней он есть, а за 7 нет — за неделю продано 0, выручка 0; CTR и корзину не выдумываем.
+    if (data?.bySku?.weekly) {
+      const wk = new Set((data.bySku.weekly as any[]).map(x => String(x.sku)));
+      for (const x of data.bySku.monthly ?? []) if (!wk.has(String(x.sku))) put(String(x.sku), { orders: 0, gmv: 0, ordersDays: 7, noSales7: true });
+    }
     for (const x of data?.bySku?.monthly ?? []) {
       const v = ozM(x);
       put(String(x.sku), { oz28: { orders: v.orders ?? null, gmv: v.gmv ?? null, convPdp: v.convPdp ?? null, drr: v.drr ?? null, ctr: v.ctr ?? null, inAds: v.inAds ?? null, inPromo: v.inPromo ?? null } });
@@ -655,9 +673,17 @@ export function refreshState(mp: AdMp, now = Date.now()): Ads2CompRefresh {
     fullAt: full?.at ? Number(full.at) : null, cardsAt,
     pass: pass ? { at: Number(pass.at), light: !!pass.light, cards: Number(pass.cards), priced: Number(pass.priced), errors: Number(pass.errors) } : null,
     task: t ? { id: t.id, status: t.status, light: !!t.params?.light, createdAt: t.created_at, finishedAt: t.finished_at ?? null,
-      message: t.summary ?? t.error ?? null } : null,
+      message: t.summary ?? t.error ?? null, progress: taskProgress(t) } : null,
     nextRuns, slots, missedAt,
   };
+}
+
+/** Что агент делает прямо сейчас — для «Обновить сейчас» (иначе кнопка крутится молча по 10 минут). */
+function taskProgress(t: any): string | null {
+  if (!['claimed', 'running'].includes(t.status)) return null;
+  let p: any = t.progress;
+  if (typeof p === 'string') { try { p = JSON.parse(p); } catch { p = null; } }
+  return p?.message ? String(p.message).slice(0, 120) : null;
 }
 
 /**

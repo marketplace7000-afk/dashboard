@@ -70,7 +70,8 @@ function RefreshBar({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
     try {
       const x = await apiPost<Ads2Competitors & { queued?: { already: boolean } }>('/api/ads2/competitors', { mp, action: 'refresh' });
       onData(x.data);
-      setToast({ ok: true, text: x.data.queued?.already ? 'Обновление уже идёт — дождитесь его, данные появятся сами' : 'Агент обновит цены, рейтинг и отзывы за 2–5 минут, данные появятся сами' });
+      setToast({ ok: true, text: x.data.queued?.already ? 'Обновление уже идёт — дождитесь его, данные появятся сами'
+        : mp === 'ozon' ? 'Агент снимет продажи по артикулам (≈2 мин, появятся первыми), затем цены, рейтинг и отзывы на витрине (≈5–8 мин)' : 'Агент обновит цены, рейтинг и отзывы за 2–5 минут, данные появятся сами' });
     } catch (e) { setToast({ ok: false, text: `Не запустилось: ${errText(e)}` }); }
     finally { setBusy(false); }
   };
@@ -90,7 +91,7 @@ function RefreshBar({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
           {sched && <span>По расписанию (МСК): {sched}</span>}
           {next && <span>следующее — {whenRel(next)}</span>}
           <span>аналитика кабинета: {whenRel(r.fullAt)}</span>
-          {r.task && open && <span className="chip info">{r.task.light ? 'быстрое' : 'полное'} обновление: {TASK_STATUS[r.task.status] ?? r.task.status}…</span>}
+          {r.task && open && <span className="chip info">{r.task.light ? 'быстрое' : 'полное'} обновление: {r.task.progress || `${TASK_STATUS[r.task.status] ?? r.task.status}…`}</span>}
           {r.task && !open && r.task.status === 'failed' && <span className="chip bad" title={r.task.message ?? ''}>последнее обновление: ошибка</span>}
         </div>
       </div>
@@ -135,7 +136,7 @@ function CmpCells({ l, mp, our, passAt, per = 7 }: { l: Ads2WatchLink; mp: Ads2M
         <td className="ad2-num">{num(l.avgPos)}</td>
       </> : <>
         <td className="ad2-num">{pct(oz.ctr ?? null)}</td>
-        <td className="ad2-num">{num(oz.orders)}</td>
+        <td className="ad2-num" title={per === 7 && l.noSales7 ? 'За 7 дней продаж нет — Ozon не включает такие товары в недельный отчёт; за 28 дней данные есть' : undefined}>{num(oz.orders)}</td>
         <td className="ad2-num">{oz.gmv != null ? kRub(oz.gmv) : '–'}</td>
         <td className="ad2-num">{pct(oz.convPdp)}</td>
         <td className="ad2-num">{pct(oz.drr)}</td>

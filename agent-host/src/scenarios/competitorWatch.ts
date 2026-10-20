@@ -173,8 +173,14 @@ async function wbShowcaseCards(page: Page, ids: number[]): Promise<{ cards: any[
 }
 
 /** Ozon: карточки по SKU через страничный API витрины (как у покупателя). Цены — строки «1 528 ₽». */
-async function ozonShowcaseCards(page: Page, ids: number[], settings: AgentSettings): Promise<{ cards: any[]; errors: string[]; notShown: number[] }> {
+// Пауза между карточками витрины Ozon: это запрос JSON страницы, а не открытие страницы, — 1,5–3,5 с
+// вместо общих 3–8 с (20.10: 137 карточек шли ~12 мин, кнопка «Обновить сейчас» крутилась слишком долго).
+const OZ_CARD_PAUSE: [number, number] = [1500, 3500];
+
+async function ozonShowcaseCards(page: Page, ids: number[], settings: AgentSettings, onStep?: (done: number) => Promise<unknown>): Promise<{ cards: any[]; errors: string[]; notShown: number[] }> {
   const cards: any[] = [], errors: string[] = [], notShown: number[] = [];
+  const pause: [number, number] = [Math.min(settings.page_pause_ms[0], OZ_CARD_PAUSE[0]), Math.min(settings.page_pause_ms[1], OZ_CARD_PAUSE[1])];
+  let n = 0;
   const rub = (s: unknown) => { const n = Number(String(s ?? '').replace(/[^\d,.]/g, '').replace(',', '.')); return Number.isFinite(n) && n > 0 ? Math.round(n) : null; };
   const pick = (ws: Record<string, string>, re: RegExp): any => {
     const k = Object.keys(ws).find(x => re.test(x));
@@ -199,7 +205,8 @@ async function ozonShowcaseCards(page: Page, ids: number[], settings: AgentSetti
         rating: score?.totalScore ?? null, reviews: score?.reviewsCount ?? null, available: price?.isAvailable ?? sale?.offer?.isAvailable ?? null,
       });
     } catch (e) { errors.push(`витрина Ozon ${sku}: ${(e as Error).message.slice(0, 80)}`); }
-    await sleep(randBetween(settings.page_pause_ms));
+    if (onStep && ++n % 20 === 0) await onStep(n).catch(() => {});
+    await sleep(randBetween(pause));
   }
   return { cards, errors, notShown };
 }
@@ -284,6 +291,17 @@ const OZ_BY_SKU = (companyId: string, skus: number[]) => `(async (CID, SKUS) => 
   return { bySku: out, errors: errors };
 })(${JSON.stringify(companyId)}, ${JSON.stringify(skus)})`;
 
+/** Продажи, выручка, CTR, корзина, ДРР, акции по каждому привязанному конкуренту и нашему товару («Товары на Ozon»). */
+async function ozonSales(task: AgentTask, page: Page, cid: string, data: any): Promise<void> {
+  const skus = [...new Set([...(task.params.watch as number[] ?? []), ...(task.params.ours as number[] ?? [])].map(Number).filter(n => n > 0))].slice(0, 700);
+  if (!skus.length) return;
+  await api.progress(task.id, stage(1, `Продажи по артикулам: ${skus.length} шт., за 7 и 28 дней`), true);
+  const r: any = await page.evaluate(OZ_BY_SKU(cid, skus));
+  data.bySku = r?.bySku ?? null;
+  data.errors = [...(data.errors ?? []), ...((r?.errors ?? []) as string[]).slice(0, 5)];
+  await api.progress(task.id, stage(1, `Продажи по артикулам: найдено ${data.bySku?.monthly?.length ?? 0} из ${skus.length}`, { items_done: data.bySku?.monthly?.length ?? 0, items_total: skus.length }), true);
+}
+
 export async function runCompetitorWatch(task: AgentTask, settings: AgentSettings): Promise<void> {
   const mp = task.params.marketplace === 'ozon' ? 'ozon' : 'wb';
   const page = await newPage();
@@ -291,9 +309,24 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
     const light = !!task.params.light;
     let data: any;
     if (light) {
-      // Быстрый проход днём / по кнопке: аналитику кабинета не открываем, только витрина.
-      await api.progress(task.id, stage(0, 'Быстрое обновление: только карточки на витрине'), true);
+      // Быстрый проход днём / по кнопке: витрина, а у Ozon ещё и продажи по артикулам (≈1,5 мин) —
+      // их отправляем сразу, до витрины, чтобы цифры появились в «Конкурентах» быстрее (20.10.2026).
+      await api.progress(task.id, stage(0, mp === 'ozon' ? 'Быстрое обновление: продажи по артикулам и витрина' : 'Быстрое обновление: только карточки на витрине'), true);
       data = { light: true, errors: [] };
+      const cid = String(task.params.company_id || '');
+      if (mp === 'ozon' && cid) {
+        await page.goto(OZ_PAGE, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
+        await sleep(6000);
+        const body = await page.evaluate('document.body ? document.body.innerText.slice(0, 4000) : ""').catch(() => '') as string;
+        if (page.url().startsWith('https://seller.ozon.ru/app/') && !looksLikeChallenge(page.url(), body)) {
+          const part: any = { light: true, errors: [] };
+          await ozonSales(task, page, cid, part);
+          if (part.bySku && await api.competitorsIngest(mp, part)) data.salesSent = part.bySku.monthly?.length ?? 0;
+          data.errors.push(...part.errors);
+        } else {
+          await api.log(task.id, 'warn', `кабинет Ozon не открылся (${page.url().slice(0, 80)}) — продажи по артикулам пропускаю, снимаю только витрину`);
+        }
+      }
     } else if (mp === 'wb') {
       await api.progress(task.id, stage(0, 'Открываю аналитику кабинета WB'), true);
       // Заголовки сессии аналитики — из собственного запроса страницы.
@@ -321,15 +354,7 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
       data = await page.evaluate(OZ_COLLECT(cid, cats));
       const items = (data?.markets ?? []).reduce((s: number, m: any) => s + (m.items?.length ?? 0), 0);
       await api.progress(task.id, stage(1, `Категорий ${data?.markets?.length ?? 0}, товаров рынка ${items}`, { items_done: items, items_total: items }), true);
-      // Продажи, выручка, корзина, ДРР, акции по каждому привязанному конкуренту и нашему товару.
-      const skus = [...new Set([...(task.params.watch as number[] ?? []), ...(task.params.ours as number[] ?? [])].map(Number).filter(n => n > 0))].slice(0, 700);
-      if (skus.length) {
-        await api.progress(task.id, stage(1, `Продажи по артикулам: ${skus.length} шт., за 7 и 28 дней`), true);
-        const r: any = await page.evaluate(OZ_BY_SKU(cid, skus));
-        data.bySku = r?.bySku ?? null;
-        data.errors = [...(data.errors ?? []), ...((r?.errors ?? []) as string[]).slice(0, 5)];
-        await api.progress(task.id, stage(1, `Продажи по артикулам: найдено ${data.bySku?.weekly?.length ?? 0} из ${skus.length}`, { items_done: data.bySku?.weekly?.length ?? 0, items_total: skus.length }), true);
-      }
+      await ozonSales(task, page, cid, data);
     }
     // Карточки привязанных конкурентов и наших товаров на витрине (цена, рейтинг, отзывы, остаток).
     const ids = [...new Set([...(task.params.ours as number[] ?? []), ...(task.params.watch as number[] ?? [])].map(Number).filter(n => n > 0))]
@@ -337,7 +362,8 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
     if (light && !ids.length) { await api.complete(task.id, 'Быстрое обновление: привязанных конкурентов нет'); return; }
     if (data && ids.length) {
       await api.progress(task.id, stage(1, `Карточки конкурентов на витрине: ${ids.length}`), true);
-      const sc = mp === 'wb' ? await wbShowcaseCards(page, ids) : await ozonShowcaseCards(page, ids, settings);
+      const sc = mp === 'wb' ? await wbShowcaseCards(page, ids)
+        : await ozonShowcaseCards(page, ids, settings, done => api.progress(task.id, stage(1, `Карточки на витрине: ${done} из ${ids.length}`, { items_done: done, items_total: ids.length }), true));
       data.cards = sc.cards;
       data.notShown = sc.notShown ?? [];
       data.errors = [...(data.errors ?? []), ...sc.errors.slice(0, 5)];
@@ -349,7 +375,8 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
     const r = await api.competitorsIngest(mp, data);
     if (!r) { await api.fail(task.id, { error: 'дашборд не принял данные конкурентов', retryable: true }); return; }
     const errs = data?.errors?.length ?? 0;
-    await api.complete(task.id, `${r}${errs ? ` · ошибок кабинета: ${errs}` : ''}`);
+    const sales = data?.salesSent ? ` · продажи по артикулам: ${data.salesSent}` : '';
+    await api.complete(task.id, `${r}${sales}${errs ? ` · ошибок кабинета: ${errs}` : ''}`);
   } finally {
     await page.close().catch(() => {});
   }

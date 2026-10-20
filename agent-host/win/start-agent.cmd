@@ -7,7 +7,9 @@ set "HOST_DIR=%AGENT_ROOT%\dashboard\agent-host"
 
 rem 1. Chrome агента (отдельный профиль). Если он уже работает, просто
 rem откроется его окно — второй экземпляр Chrome не создаётся.
-start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir=%AGENT_ROOT%\chrome-profile --remote-debugging-port=9222 --no-first-run --no-default-browser-check
+rem 20.10.2026: повторный запуск открытого Chrome добавлял ему лишнее окно — сначала проверяем порт 9222.
+powershell -NoProfile -Command "try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:9222/json/version | Out-Null; exit 1 } catch { exit 0 }"
+if %errorlevel%==0 start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --user-data-dir=%AGENT_ROOT%\chrome-profile --remote-debugging-port=9222 --no-first-run --no-default-browser-check
 
 rem 2. Консоль хоста — не больше одной. Проверка по живому процессу node,
 rem запущенному из agent-host (заголовки окон npm перезаписывает, а

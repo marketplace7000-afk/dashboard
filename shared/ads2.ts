@@ -139,6 +139,8 @@ export type Ads2WatchLink = {
   hidden: boolean; hiddenSince: number | null;
   /** WB: дата набора «Сравнения карточек», из которого заказы/реклама/акции (набор мог уже закрыться — данные последние известные). */
   compDate?: string | null;
+  /** Ozon: за 7 дней продаж нет (в недельном отчёте товара нет, в 28-дневном есть). */
+  noSales7?: boolean;
   /** Ozon: те же показатели «Товаров на Ozon» за 28 дней (переключатель периода в «Конкурентах»). */
   oz28?: { orders: number | null; gmv: number | null; convPdp: number | null; drr: number | null; ctr?: number | null; inAds: boolean | null; inPromo: boolean | null } | null;
 };
@@ -148,7 +150,7 @@ export type Ads2CompRefresh = {
   /** Последний полный ночной проход (аналитика кабинета) и последний замер витрины. */
   fullAt: number | null; cardsAt: number | null;
   /** Последнее задание «Конкуренты» по площадке. */
-  task: { id: number; status: string; light: boolean; createdAt: number; finishedAt: number | null; message: string | null } | null;
+  task: { id: number; status: string; light: boolean; createdAt: number; finishedAt: number | null; message: string | null; progress?: string | null } | null;
   /** Ближайшие запуски по расписанию (мс). */
   nextRuns: number[];
   /** Последний проход по витрине: когда сняты цены, сколько карточек и у скольких есть цена. */

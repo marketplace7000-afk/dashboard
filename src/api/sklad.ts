@@ -28,7 +28,7 @@ export type Product = {
   createdAt: number; updatedAt: number; volumeL: number | null;
 };
 export type User = {
-  id: number; login: string; name: string; role: Role; tgId: number | null;
+  id: number; login: string; name: string; role: Role;
   active: boolean; hasPassword: boolean; warehouseIds: number[]; sections: string[]; customSections: boolean;
   createdAt: number; lastLoginAt: number | null;
 };

@@ -524,7 +524,7 @@ function UsersTab({ data, reload }: { data: Bootstrap; reload: () => void }) {
                   <td className="sk-mono">{u.login}</td>
                   <td>{ROLE_LABEL[u.role]}</td>
                   <td>{u.role === 'warehouse' ? u.warehouseIds.map(whName).join(', ') : <span className="muted">все</span>}</td>
-                  <td>{[u.hasPassword && 'пароль', u.tgId && 'Telegram'].filter(Boolean).join(' + ')}</td>
+                  <td>{u.hasPassword ? 'пароль' : '—'}</td>
                   <td className="muted">{fmtDate(u.lastLoginAt)}</td>
                 </tr>
               ))}
@@ -541,7 +541,7 @@ function UsersTab({ data, reload }: { data: Bootstrap; reload: () => void }) {
 function UserModal({ data, user, onClose, onSaved }: { data: Bootstrap; user: User | null; onClose: () => void; onSaved: () => void }) {
   const roleSections = (r: Role) => data.dict.roles.find(x => x.value === r)?.sections ?? ['sklad'];
   const [f, setF] = useState({ name: user?.name ?? '', login: user?.login ?? '', role: user?.role ?? 'warehouse' as Role,
-    password: '', tgId: user?.tgId ? String(user.tgId) : '', active: user?.active ?? true, warehouseIds: user?.warehouseIds ?? [] as number[],
+    password: '', active: user?.active ?? true, warehouseIds: user?.warehouseIds ?? [] as number[],
     sections: user?.sections ?? roleSections('warehouse'), sectionsTouched: false });
   const [err, setErr] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
@@ -551,7 +551,7 @@ function UserModal({ data, user, onClose, onSaved }: { data: Bootstrap; user: Us
   const sectionsEditable = f.role === 'manager' || f.role === 'buyer';
   const save = () => {
     const input: Record<string, unknown> = { name: f.name, login: f.login, role: f.role, active: f.active,
-      tgId: f.tgId.trim() ? Number(f.tgId.trim()) : null, warehouseIds: f.role === 'warehouse' ? f.warehouseIds : [] };
+      warehouseIds: f.role === 'warehouse' ? f.warehouseIds : [] };
     if (sectionsEditable && (f.sectionsTouched || user?.customSections)) input.sections = f.sections;
     if (f.password) input.password = f.password;
     sklad.saveUser(user?.id ?? null, input).then(onSaved).catch(e => setErr(skladErr(e)));
@@ -563,7 +563,6 @@ function UserModal({ data, user, onClose, onSaved }: { data: Bootstrap; user: Us
         <Field label="Логин" hint="Почта сотрудника или любое слово латиницей"><input className="input" value={f.login} onChange={set('login')} autoCapitalize="none" /></Field>
         <Field label="Роль"><select className="input" value={f.role} onChange={setRole}>{data.dict.roles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}</select></Field>
         <Field label={user ? 'Новый пароль' : 'Пароль'} hint={user ? 'Пусто — оставить прежний' : 'Не короче 8 символов'}><input className="input" type="text" value={f.password} onChange={set('password')} autoComplete="new-password" /></Field>
-        <Field label="Telegram-ID" hint="Для входа из Telegram без пароля"><input className="input" inputMode="numeric" value={f.tgId} onChange={set('tgId')} /></Field>
       </div>
       {f.role === 'warehouse' && (
         <Field label="Какие склады видит">

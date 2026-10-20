@@ -3,7 +3,6 @@ import { CheckIcon, WarningIcon, ClockIcon, InfoIcon } from '@phosphor-icons/rea
 import { WbScope, SCOPE_LABEL, getAllWbTokens, setWbToken } from '../api/wb';
 import { getOzonPerfCreds, setOzonPerfCreds, ozonPerfFetch } from '../api/ozonAds';
 import { getGlobalSettings, saveGlobalSettings, defaultSettings, GlobalSettings } from '../utils/procurementLogic';
-import { getTgDiagnostics } from '../api/telegramApp';
 import { fetchAppSettings, saveAppSettings, type AppSettings } from '../api/productEcon';
 import { errText } from '../api/http';
 
@@ -335,39 +334,6 @@ function ProcurementSettingsCard() {
   );
 }
 
-// Диагностика Telegram Mini App. Нужна потому, что полноэкранный режим может
-// тихо не включиться (старый клиент, десктоп, отказ устройства), а на телефоне
-// консоль недоступна — иначе причину не узнать.
-function TelegramAppCard() {
-  const [d, setD] = useState(getTgDiagnostics());
-  useEffect(() => {
-    const t = setInterval(() => setD(getTgDiagnostics()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  if (!d.inTelegram) return null;
-  return (
-    <div className="card">
-      <div className="flex-between" style={{ marginBottom: 10 }}>
-        <h2 style={{ margin: 0 }}>Telegram мини-приложение</h2>
-        <span className={`chip ${d.isFullscreen ? 'good' : 'warn'}`}>
-          {d.isFullscreen ? 'полный экран' : 'обычный режим'}
-        </span>
-      </div>
-      <div className="muted" style={{ fontSize: 15.5, lineHeight: 1.7 }}>
-        Платформа: <b>{d.platform ?? '—'}</b> · версия Bot API: <b>{d.version ?? '—'}</b><br />
-        Полный экран поддерживается: <b>{d.fullscreenSupported ? 'да' : 'нет'}</b>
-        {d.error && (
-          <><br /><span style={{ color: 'var(--bad)' }}>Причина отказа: {d.error}</span></>
-        )}
-        {!d.isFullscreen && !d.error && d.fullscreenSupported && (
-          <><br />Запрос отправлен, ответ от Telegram ещё не пришёл.</>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
 /**
  * Схема работы со складом — она задаёт, какие ставки комиссии и логистики
  * подставлять в расчёт прибыли. У FBO и FBS они разные, и показать чужие значит
@@ -437,7 +403,6 @@ function FulfilmentCard() {
 export function Settings() {
   return (
     <div className="grid" style={{ gap: 20 }}>
-      <TelegramAppCard />
       <WbTokensCard />
       <OzonPerfCard />
       <CollectorStatusCard />
@@ -455,7 +420,6 @@ export function Settings() {
             <li><code>WB_TOKEN</code> — рабочий токен WB для фонового сборщика</li>
             <li><code>OZON_CLIENT_ID</code> / <code>OZON_API_KEY</code> — Ozon Seller API</li>
             <li><code>ANTHROPIC_API_KEY</code> — ключ Claude (через релей)</li>
-            <li><code>TELEGRAM_BOT_TOKEN</code> / chat_id — для Telegram-бота (в работе)</li>
             <li><code>AI_DAILY_LIMIT_RUB</code> — дневной лимит трат на ИИ</li>
           </ul>
           После изменения <code>.env</code> — перезапуск сервиса: <code>systemctl restart autovibe</code>.

@@ -116,7 +116,7 @@ type UserRow = {
 };
 
 export type UserView = {
-  id: number; login: string; name: string; role: Role; tgId: number | null;
+  id: number; login: string; name: string; role: Role;
   active: boolean; hasPassword: boolean; warehouseIds: number[];
   /** Итоговые разделы и признак «свои галочки, не по роли». */
   sections: Section[]; customSections: boolean;
@@ -130,7 +130,7 @@ function warehouseIdsOf(userId: number): number[] {
 
 function toView(r: UserRow): UserView {
   return {
-    id: r.id, login: r.login, name: r.name, role: r.role, tgId: r.tg_id,
+    id: r.id, login: r.login, name: r.name, role: r.role,
     active: !!r.active, hasPassword: !!r.pass_hash, warehouseIds: warehouseIdsOf(r.id),
     sections: sectionsOf(r.role, r.sections), customSections: !!r.sections && r.role !== 'owner' && r.role !== 'warehouse',
     createdAt: r.created_at, lastLoginAt: r.last_login_at,
@@ -172,17 +172,9 @@ export function loginWithPassword(login: string, pw: string): AuthUser | null {
   return toAuthUser(r);
 }
 
-/** Вход из Telegram Mini App: пользователь с этим Telegram-ID. */
-export function loginWithTelegram(tgId: number): AuthUser | null {
-  const r = getSkladDb().prepare('SELECT * FROM users WHERE tg_id = ?').get(tgId) as UserRow | undefined;
-  if (!r || !r.active) return null;
-  getSkladDb().prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(Date.now(), r.id);
-  return toAuthUser(r);
-}
-
 // ─── Изменение ─────────────────────────────────────────────────────────────
 export type UserInput = {
-  login?: string; name?: string; role?: Role; password?: string; tgId?: number | null;
+  login?: string; name?: string; role?: Role; password?: string;
   active?: boolean; warehouseIds?: number[];
   /** Свои разделы; null — вернуть набор по роли. */
   sections?: string[] | null;
@@ -204,9 +196,6 @@ function clean(input: UserInput, isNew: boolean): { error?: string } {
     const e = validatePassword(input.password);
     if (e) return { error: e };
   }
-  if (input.tgId !== undefined && input.tgId !== null && !(Number.isInteger(input.tgId) && input.tgId > 0)) {
-    return { error: 'Telegram-ID — целое число' };
-  }
   if (input.sections) {
     const bad = input.sections.filter(s => !(SECTIONS as readonly string[]).includes(s));
     if (bad.length) return { error: `Неизвестные разделы: ${bad.join(', ')}` };
@@ -224,7 +213,6 @@ function setWarehouses(userId: number, ids: number[]): void {
 function uniqueError(e: unknown): string | null {
   const m = String((e as Error)?.message ?? '');
   if (/users\.login/.test(m)) return 'Такой логин уже есть';
-  if (/users\.tg_id/.test(m)) return 'Этот Telegram-ID уже привязан к другому пользователю';
   return null;
 }
 
@@ -233,7 +221,7 @@ export function createUser(input: UserInput, by: AuthUser): { user?: UserView; e
   if (c.error) return c;
   if (input.role !== 'warehouse' && input.warehouseIds?.length) input.warehouseIds = [];
   if (input.role === 'warehouse' && !input.warehouseIds?.length) return { error: 'Сотруднику склада нужно выбрать хотя бы один склад' };
-  if (!input.password && !input.tgId) return { error: 'Задайте пароль или Telegram-ID — иначе пользователь не сможет войти' };
+  if (!input.password) return { error: 'Задайте пароль — иначе пользователь не сможет войти' };
   const d = getSkladDb();
   const now = Date.now();
   try {
@@ -241,7 +229,7 @@ export function createUser(input: UserInput, by: AuthUser): { user?: UserView; e
     const r = d.prepare(`INSERT INTO users (login, name, role, pass_hash, tg_id, active, sections, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`).run(
       String(input.login).trim(), String(input.name).trim(), input.role,
-      input.password ? hashPassword(input.password) : null, input.tgId ?? null,
+      hashPassword(input.password), null,
       storedSections(input.role as Role, input.sections), now, now,
     );
     const id = Number(r.lastInsertRowid);
@@ -281,7 +269,6 @@ export function updateUser(id: number, input: UserInput, by: AuthUser): { user?:
   put('login', 'login', before.login, input.login?.trim());
   put('name', 'name', before.name, input.name?.trim());
   put('role', 'role', before.role, input.role);
-  put('tg_id', 'tgId', before.tg_id, input.tgId);
   if (input.active !== undefined) put('active', 'active', before.active, input.active ? 1 : 0);
   if (input.sections !== undefined || (input.role !== undefined && input.role !== before.role)) {
     // Сменили роль без своих галочек — разделы снова по роли.

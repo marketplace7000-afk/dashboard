@@ -13,7 +13,7 @@ import { apiGet, apiPost, errText } from '../api/http';
 
 type Role = 'owner' | 'manager' | 'buyer' | 'warehouse';
 type User = {
-  id: number; login: string; name: string; role: Role; tgId: number | null; active: boolean; hasPassword: boolean;
+  id: number; login: string; name: string; role: Role; active: boolean; hasPassword: boolean;
   sections: string[]; customSections: boolean; createdAt: number; lastLoginAt: number | null;
 };
 type Data = {
@@ -81,7 +81,7 @@ export function Access() {
                   <td className="sk-mono">{u.login}</td>
                   <td>{roleLabel(u.role)}</td>
                   <td className="muted sk-name">{u.role === 'owner' ? 'все' : u.customSections ? u.sections.map(label).join(', ') : 'по роли'}</td>
-                  <td>{[u.hasPassword && 'пароль', u.tgId && 'Telegram'].filter(Boolean).join(' + ') || '—'}</td>
+                  <td>{u.hasPassword ? 'пароль' : '—'}</td>
                   <td className="muted">{fmt(u.lastLoginAt)}</td>
                 </tr>
               ))}
@@ -136,19 +136,19 @@ function UserModal({ data, user, onClose, onSaved }: { data: Data; user: User | 
   const firstRole = data.roles.find(r => r.value === 'manager')?.value ?? data.roles[0].value;
   const [f, setF] = useState({
     name: user?.name ?? '', login: user?.login ?? '', role: (user?.role ?? firstRole) as Role,
-    password: user ? '' : genPassword(), tgId: user?.tgId ? String(user.tgId) : '', active: user?.active ?? true,
+    password: user ? '' : genPassword(), active: user?.active ?? true,
     sections: user?.sections ?? roleSections(firstRole), touched: false,
   });
   const [e, setE] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const roleKnown = data.roles.some(r => r.value === f.role);
   const editable = f.role === 'manager' || f.role === 'buyer';
-  const set = (k: 'name' | 'login' | 'password' | 'tgId') => (ev: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: ev.target.value });
+  const set = (k: 'name' | 'login' | 'password') => (ev: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: ev.target.value });
   const toggle = (s: string) => setF({ ...f, touched: true, sections: f.sections.includes(s) ? f.sections.filter(x => x !== s) : [...f.sections, s] });
 
   const save = async () => {
     setBusy(true); setE(null);
-    const input: Record<string, unknown> = { name: f.name, login: f.login, active: f.active, tgId: f.tgId.trim() ? Number(f.tgId.trim()) : null };
+    const input: Record<string, unknown> = { name: f.name, login: f.login, active: f.active };
     if (roleKnown) input.role = f.role;
     if (editable && (f.touched || user?.customSections)) input.sections = f.sections;
     if (f.password) input.password = f.password;
@@ -179,7 +179,6 @@ function UserModal({ data, user, onClose, onSaved }: { data: Data; user: User | 
               <button className="btn btn-sm" type="button" title="Придумать пароль" onClick={() => setF({ ...f, password: genPassword() })}><ArrowsClockwiseIcon size={14} /></button>
             </div>
           </div>
-          <div className="field"><label className="field-label">Telegram-ID (необязательно)</label><input className="input" inputMode="numeric" value={f.tgId} onChange={set('tgId')} placeholder="для входа из Telegram без пароля" /></div>
         </div>
         <div className="muted sk-hint">{ROLE_HINT[f.role]}</div>
         {f.role !== 'owner' && (

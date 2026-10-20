@@ -209,8 +209,7 @@ export function LiveOzonStocks() {
                 </tbody>
               </table>
               <div className="muted" style={{ fontSize: 15.5, marginTop: 10 }}>
-                Прогноз = текущие остатки / средние продажи за 30 дней. Telegram-бот будет слать алерт
-                за N дней до прогнозируемого окончания.
+                Прогноз = текущие остатки / средние продажи за 30 дней.
               </div>
             </div>
           )}

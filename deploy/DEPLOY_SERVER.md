@@ -67,9 +67,6 @@ nano .env
 - `ANTHROPIC_API_KEY` (+ `ANTHROPIC_DEFAULT_MODEL`);
 - `AUTH_PASSWORD` + `AUTH_SECRET` (пароль входа в дашборд);
 - `CRON_SECRET` = `openssl rand -hex 24`;
-- `TELEGRAM_BOT_TOKEN` (от @BotFather) - нужен и боту, и входу в мини-аппу;
-- `TELEGRAM_ALLOWED_IDS` - TG-ID, кому разрешен вход через Telegram Mini App
-  (через запятую; узнать id: @userinfobot). Пусто = вход по TG закрыт всем.
 
 > Локально WB/Ozon лежали под `VITE_WB_TOKEN` / `VITE_OZON_*` (их читал
 > vite-dev-proxy). На сервере серверный код читает `WB_TOKEN` / `OZON_*`.
@@ -131,8 +128,7 @@ ssh root@200.165.234.229 'journalctl -u autovibe -n 30 --no-pager'
 ```
 Новые env-переменные (rsync их не везет, `.env` исключен) - дописать на сервере:
 ```bash
-ssh root@200.165.234.229 "grep -q TELEGRAM_ALLOWED_IDS /opt/autovibe/.env \
-  || echo 'TELEGRAM_ALLOWED_IDS=123456789' >> /opt/autovibe/.env"
+ssh root@200.165.234.229 "grep -q NEW_VAR /opt/autovibe/.env || echo 'NEW_VAR=value' >> /opt/autovibe/.env"
 # затем повторить шаг 2 (рестарт)
 ```
 

@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import { WarningIcon, SpinnerIcon } from '@phosphor-icons/react';
-import { initTelegramApp } from '../api/telegramApp';
+
+// Коды ошибок сервера → понятный текст. Неизвестный код не показываем как есть.
+const LOGIN_ERRORS: Record<string, string> = {
+  too_many_attempts: 'Слишком много попыток входа. Подождите 15 минут и попробуйте снова.',
+  auth_not_configured: 'Вход не настроен на сервере. Сообщите администратору.',
+};
+
+const SERVER_DOWN = 'Сервер не отвечает. Проверьте интернет и попробуйте через минуту.';
 
 export function Login({ onLogin }: { onLogin: () => void }) {
   const [pwd, setPwd] = useState('');
@@ -9,55 +16,9 @@ export function Login({ onLogin }: { onLogin: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authEnabled, setAuthEnabled] = useState<boolean | null>(null);
-  // Внутри Telegram Mini App показываем не форму пароля, а статус авто-входа.
-  const [tgState, setTgState] = useState<'idle' | 'checking' | 'denied'>('idle');
-  // Запасной вход по паролю внутри Telegram: если авто-вход по TG-ID не прошёл
-  // (бот выключен, ID не в списке), человек не должен оставаться запертым.
-  const [forcePwd, setForcePwd] = useState(false);
-
-  // Открыто внутри Telegram? SDK кладёт window.Telegram.WebApp.initData (подпись бота).
-  const tgInitData = (() => {
-    try { return (window as any)?.Telegram?.WebApp?.initData as string | undefined; }
-    catch { return undefined; }
-  })();
-
-  // Вход по проверенному Telegram-ID. Бэк сам сверит подпись и белый список.
-  const loginViaTelegram = async (initData: string) => {
-    setTgState('checking');
-    setError(null);
-    try {
-      const r = await fetch('/api/auth/tg', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ initData }),
-      });
-      if (r.ok) { onLogin(); return; }
-      const j = await r.json().catch(() => ({}));
-      if (r.status === 403) {
-        setError(`Ваш Telegram${j?.tgId ? ` (ID ${j.tgId})` : ''} не в списке доступа. Обратитесь к администратору.`);
-      } else if (r.status === 401) {
-        setError('Не удалось подтвердить вход из Telegram. Откройте мини-приложение заново.');
-      } else if (r.status === 503) {
-        setError('Вход через Telegram не настроен на сервере.');
-      } else {
-        setError(j?.error || `Ошибка ${r.status}`);
-      }
-      setTgState('denied');
-    } catch (e: any) {
-      setError(e?.message || 'Сетевая ошибка');
-      setTgState('denied');
-    }
-  };
 
   // На mount проверяем — может быть уже залогинены, или auth выключен на бэке
   useEffect(() => {
-    // Telegram Mini App: разворачиваем на весь экран и пробуем авто-вход по TG-ID.
-    if (tgInitData) {
-      initTelegramApp();
-      loginViaTelegram(tgInitData);
-      return;
-    }
     fetch('/api/auth/check', { credentials: 'include' })
       .then(async r => {
         // ПОРЯДОК ВАЖЕН. 401 разбираем ПЕРВЫМ, до любых догадок о теле ответа.
@@ -71,11 +32,14 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           return;
         }
         // Vite-dev возвращает HTML index.html на любой /api/* — это значит
-        // бэка нет (запущен vite dev, а не vercel dev). Пропускаем без пароля.
+        // бэка нет (запущен vite dev без сервера). Пускаем без пароля ТОЛЬКО в
+        // разработке: на проде HTML вместо JSON — это 502 от nginx, и раньше
+        // кабинет открывался пустым, будто «всё сломалось» (прожарка 20.10).
         const ct = r.headers.get('content-type') || '';
         if (!ct.includes('application/json')) {
-          setAuthEnabled(false);
-          onLogin();
+          if (import.meta.env.DEV) { setAuthEnabled(false); onLogin(); return; }
+          setAuthEnabled(true);
+          setError(SERVER_DOWN);
           return;
         }
         const j = await r.json().catch(() => ({}));
@@ -83,17 +47,15 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           // либо auth выключен, либо уже в сессии — оба случая = пускаем
           onLogin();
           setAuthEnabled(j.authEnabled ?? true);
-        } else if (r.status === 401) {
-          // бэк есть, auth включен, но сессии нет — показываем форму
-          setAuthEnabled(true);
         } else {
           setAuthEnabled(true);
         }
       })
       .catch(() => {
-        // Сетевая ошибка — бэка нет, локалка. Пускаем.
-        setAuthEnabled(false);
-        onLogin();
+        // Сетевая ошибка: в разработке — бэка нет, пускаем; на проде — сервер недоступен.
+        if (import.meta.env.DEV) { setAuthEnabled(false); onLogin(); return; }
+        setAuthEnabled(true);
+        setError(SERVER_DOWN);
       });
   /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
@@ -115,61 +77,17 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         return;
       }
       const j = await r.json().catch(() => ({}));
-      if (r.status === 503) setError('Авторизация не настроена на сервере (нет AUTH_PASSWORD в env)');
-      else if (r.status === 401) setError(login.trim() ? 'Неверный логин или пароль' : 'Неверный пароль');
-      else setError(j?.error || `Ошибка ${r.status}`);
-    } catch (e: any) {
-      setError(e?.message || 'Сетевая ошибка');
+      if (r.status === 401) setError(login.trim() ? 'Неверный логин или пароль' : 'Неверный пароль');
+      else if (j?.error && LOGIN_ERRORS[j.error]) setError(LOGIN_ERRORS[j.error]);
+      else if (r.status === 503) setError(LOGIN_ERRORS.auth_not_configured);
+      else if (r.status >= 500) setError(SERVER_DOWN);
+      else setError(`Не удалось войти (код ${r.status}). Попробуйте ещё раз.`);
+    } catch {
+      setError(SERVER_DOWN);
     } finally {
       setLoading(false);
     }
   };
-
-  // Telegram Mini App: вместо формы пароля — статус авто-входа по TG-ID.
-  if (tgInitData && !forcePwd) {
-    return (
-      <div className="login-wrap">
-        <div className="login-card" style={{ textAlign: 'center', padding: 40 }}>
-          <div className="brand" style={{ padding: 0, marginBottom: 18, fontSize: 24.5, justifyContent: 'center' }}>
-            <span>Avto Vibe</span>
-          </div>
-          {tgState !== 'denied' ? (
-            <>
-              <SpinnerIcon size={28} weight="bold" className="spin" style={{ color: 'var(--accent)' }} />
-              <p style={{ marginTop: 14, color: 'var(--muted)', fontSize: 16 }}>Проверяем доступ по Telegram…</p>
-            </>
-          ) : (
-            <>
-              {error && (
-                <div style={{
-                  background: 'rgba(220,38,38,.08)', color: 'var(--bad)',
-                  padding: '10px 12px', borderRadius: 8, fontSize: 15.5, marginBottom: 14,
-                  display: 'flex', gap: 8, alignItems: 'center', textAlign: 'left',
-                }}>
-                  <WarningIcon size={14} weight="bold" /> {error}
-                </div>
-              )}
-              <button
-                className="btn btn-primary"
-                style={{ width: '100%', justifyContent: 'center' }}
-                onClick={() => loginViaTelegram(tgInitData)}
-              >
-                Повторить вход
-              </button>
-              <button
-                type="button"
-                className="btn"
-                style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}
-                onClick={() => { setError(null); setAuthEnabled(true); setForcePwd(true); }}
-              >
-                Войти по паролю
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   if (authEnabled === null) {
     return (

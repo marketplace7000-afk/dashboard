@@ -19,7 +19,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { handleProxy, wbUpstream, ozonUpstream } from './_proxy';
 import { requireAuth, authUser, checkPassword, signSession, setSessionCookie, clearSessionCookie } from './_lib/auth';
-import { validateInitData, isAllowedTgId } from './_lib/telegramAuth';
 import { fetchWithRetry } from './_lib/fetchRetry';
 import { cacheGet, makeCacheKey, makeUpstreamCacheKey, cacheGetNewestByPrefix } from './_lib/cache';
 import { getOzonTransit } from './_lib/ozonTransit';
@@ -91,42 +90,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true });
     }
 
-    // Вход из Telegram Mini App по проверенному Telegram-ID (вместо пароля).
-    // Фронт шлёт window.Telegram.WebApp.initData; проверяем подпись токеном бота
-    // и сверяем user.id с TELEGRAM_ALLOWED_IDS. При успехе — та же сессия-cookie.
-    if (action === 'tg') {
-      if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
-      const botToken = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
-      if (!botToken) return res.status(503).json({ error: 'tg_auth_not_configured' });
-      const secret = process.env.AUTH_SECRET || process.env.AUTH_PASSWORD;
-      if (!secret) return res.status(503).json({ error: 'auth_not_configured' });
-
-      const body = (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body) as { initData?: string };
-      const v = validateInitData(String(body?.initData ?? ''), botToken);
-      if (!v.ok) {
-        const reason = v.reason;
-        await new Promise(r => setTimeout(r, 500));
-        return res.status(401).json({ error: 'tg_invalid', reason });
-      }
-      // Telegram-ID привязан к личной учётке — входим под ней (со своей ролью).
-      try {
-        const { loginWithTelegram, sessionVersion } = await import('./_lib/sklad/users');
-        const u = loginWithTelegram(v.user.id);
-        if (u && u.id !== null) {
-          setSessionCookie(res, signSession(secret, { uid: u.id, ver: sessionVersion(u.id) }));
-          return res.status(200).json({ ok: true, user: { id: v.user.id, username: v.user.username, name: u.name, role: u.role } });
-        }
-      } catch (e) {
-        console.warn('[tg-auth] личные учётки недоступны:', (e as Error).message);
-      }
-      if (!isAllowedTgId(v.user.id)) {
-        console.warn(`[tg-auth] доступ запрещён для tg_id=${v.user.id} (@${v.user.username ?? '—'}): нет в TELEGRAM_ALLOWED_IDS`);
-        return res.status(403).json({ error: 'tg_not_allowed', tgId: v.user.id });
-      }
-      setSessionCookie(res, signSession(secret));
-      return res.status(200).json({ ok: true, user: { id: v.user.id, username: v.user.username } });
-    }
-
     if (action === 'logout') {
       clearSessionCookie(res);
       return res.status(200).json({ ok: true });
@@ -181,65 +144,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.send(text);
     } catch (e: any) {
       return res.status(502).json({ error: 'relay_upstream_unreachable', detail: String(e?.message ?? e) });
-    }
-  }
-
-  // ─── /api/tg-relay/<bot…/method> ───────────────────────────────────────────
-  // Релей для обхода блокировки api.telegram.org на РФ-IP (Timeweb режет Telegram).
-  // Деплоится на не-РФ хост (Vercel). Московский сервер (telegramBot.ts) шлёт сюда
-  // запрос + x-relay-secret, мы прозрачно форвардим в api.telegram.org.
-  // Путь сохраняется: /api/tg-relay/bot<token>/getUpdates → api.telegram.org/bot<token>/getUpdates
-  // ДОЛЖЕН быть ДО requireAuth: своя авторизация по секрету, сессии нет.
-  // ─── /api/tg-webhook ── Telegram присылает сообщения СЮДА ──────────────────
-  // Заменяет постоянный опрос через релей: тот держал ~2 вызова функции Vercel в
-  // минуту круглосуточно. Теперь вызов происходит только когда реально написали.
-  // Защита: секрет в заголовке, который Telegram шлёт по договорённости
-  // (setWebhook secret_token). ДОЛЖЕН быть до requireAuth — у Telegram нет сессии.
-  if (section === 'tg-webhook') {
-    if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
-    const expected = (process.env.TELEGRAM_WEBHOOK_SECRET || process.env.RELAY_SECRET || '').trim();
-    const got = String(req.headers['x-telegram-bot-api-secret-token'] || '').trim();
-    if (!expected || got !== expected) return res.status(401).json({ error: 'webhook_unauthorized' });
-    // Отвечаем Telegram сразу: он ждёт быстрый ответ, иначе повторит доставку.
-    res.status(200).json({ ok: true });
-    void (async () => {
-      try {
-        const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
-        const { handleTelegramUpdate } = await import('./_lib/telegramBot');
-        await handleTelegramUpdate(body);
-      } catch (e) {
-        console.warn('[tg-webhook] ошибка обработки:', (e as Error).message);
-      }
-    })();
-    return;
-  }
-
-  if (section === 'tg-relay') {
-    const expected = (process.env.RELAY_SECRET || '').trim();
-    const got = String(req.headers['x-relay-secret'] || '').trim();
-    if (!expected || got !== expected) return res.status(401).json({ error: 'relay_unauthorized' });
-
-    const tgPath = rest.join('/');                                // bot<token>/<method>
-    const origQs = req.url?.includes('?') ? '?' + req.url.split('?').slice(1).join('?') : '';
-    const url = `https://api.telegram.org/${tgPath}${origQs}`;
-    const method = (req.method ?? 'GET').toUpperCase();
-    let body: string | undefined;
-    if (method !== 'GET' && method !== 'HEAD') {
-      body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {});
-    }
-    try {
-      // getUpdates держит long-poll до 30с — таймаут с запасом, без ретраев (poll сам повторит).
-      const up = await fetchWithRetry(
-        url,
-        { method, headers: body ? { 'content-type': 'application/json' } : {}, body },
-        { maxRetries: 0, timeoutMs: 50_000 },
-      );
-      const text = await up.text();
-      res.status(up.status);
-      res.setHeader('content-type', up.headers.get('content-type') ?? 'application/json');
-      return res.send(text);
-    } catch (e: any) {
-      return res.status(502).json({ error: 'tg_relay_unreachable', detail: String(e?.message ?? e) });
     }
   }
 
@@ -1128,14 +1032,6 @@ if (section === 'wb-stock') {
     if (rest[0] === 'series') {
       const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
       return res.status(200).json({ ok: true, series: getSnapshotSeries(days) });
-    }
-    // База знаний по площадкам: тезисы, которые копят агенты 6/7 и новостной.
-    if (rest[0] === 'knowledge') {
-      const { getTheses } = await import('./_lib/agents/knowledgeBase');
-      const mpRaw = String(req.query.mp ?? '');
-      const mp = mpRaw === 'wb' || mpRaw === 'ozon' ? mpRaw : undefined;
-      const days = Number(req.query.days) || undefined;
-      return res.status(200).json({ ok: true, items: getTheses({ mp, days, limit: 200 }) });
     }
     // Дневной ряд выручки WB для графика «Заказано по дням».
     //

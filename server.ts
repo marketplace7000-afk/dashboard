@@ -95,7 +95,6 @@ app.listen(PORT, '0.0.0.0', () => {
   import('./api/_lib/costs')
     .then(m => m.scheduleCostsSync())
     .catch(e => console.warn('[costs] таймер сверки не запущен:', (e as Error).message));
-  startTelegramBotSafe();
   // Раздел «Склад»: заказы FBS WB/Ozon каждые 5 мин, полный проход раз в час (только чтение API).
   // Раздел «Склад» в архиве (api/_lib/sklad/archive.ts) — опрос не запускаем.
   import('./api/_lib/sklad/archive')
@@ -106,14 +105,6 @@ app.listen(PORT, '0.0.0.0', () => {
     .then(m => m.scheduleReviews())
     .catch(e => console.warn('[reviews] таймер не запущен:', (e as Error).message));
 });
-
-// Telegram-бот (если задан TELEGRAM_BOT_TOKEN). Импортим лениво, чтобы любая
-// проблема с модулем не уронила сервер.
-function startTelegramBotSafe() {
-  import('./api/_lib/telegramBot')
-    .then(m => (m as any).startTelegramBot?.())
-    .catch(e => console.warn('[tg] не удалось запустить бота:', (e as Error).message));
-}
 
 // ─── Прогрев кэша (замена vercel.json crons) ──────────────────────────────
 // Идемпотентные проходы КАЖДЫЕ 2 ЧАСА (раньше — раз в сутки). Проход дешёвый:

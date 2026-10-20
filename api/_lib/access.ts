@@ -4,7 +4,7 @@
  * архиве — api/_lib/sklad/archive.ts), хотя учётки живут в той же базе.
  *
  *   GET  /api/access          → { users, roles, sections, archivedSklad }
- *   POST /api/access          → создать { login, name, role, password?, tgId?, sections? }
+ *   POST /api/access          → создать { login, name, role, password, sections? }
  *   POST /api/access/:id      → изменить (те же поля + active)
  *   GET  /api/access/journal  → журнал изменений учёток
  *

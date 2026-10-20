@@ -339,7 +339,8 @@ export function watchParams(mp: AdMp): { watch: number[]; ours: number[] } {
   try { snap = row ? JSON.parse(row.json) : null; } catch { snap = null; }
   // Все наши товары в наличии (не только с конкурентами): проход заодно проверяет, что карточку видят покупатели.
   const ours = buildWatch(mp, snap).watch.map(p => Number(p.ourId)).filter(id => Number.isFinite(id) && id > 0);
-  return { watch: watchedIds(mp, 80), ours: [...new Set(ours)].slice(0, 120) };
+  // 20.10: было 80 — у Ozon подтверждённых уже 92 разных карточки, и часть из них агент не снимал вовсе.
+  return { watch: watchedIds(mp, 160), ours: [...new Set(ours)].slice(0, 120) };
 }
 
 /**

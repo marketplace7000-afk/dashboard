@@ -313,7 +313,7 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
       const items = (data?.markets ?? []).reduce((s: number, m: any) => s + (m.items?.length ?? 0), 0);
       await api.progress(task.id, stage(1, `Категорий ${data?.markets?.length ?? 0}, товаров рынка ${items}`, { items_done: items, items_total: items }), true);
       // Продажи, выручка, корзина, ДРР, акции по каждому привязанному конкуренту и нашему товару.
-      const skus = [...new Set([...(task.params.watch as number[] ?? []), ...(task.params.ours as number[] ?? [])].map(Number).filter(n => n > 0))].slice(0, 200);
+      const skus = [...new Set([...(task.params.watch as number[] ?? []), ...(task.params.ours as number[] ?? [])].map(Number).filter(n => n > 0))].slice(0, 280);
       if (skus.length) {
         await api.progress(task.id, stage(1, `Продажи по артикулам: ${skus.length} шт., за 7 и 28 дней`), true);
         const r: any = await page.evaluate(OZ_BY_SKU(cid, skus));
@@ -324,7 +324,7 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
     }
     // Карточки привязанных конкурентов и наших товаров на витрине (цена, рейтинг, отзывы, остаток).
     const ids = [...new Set([...(task.params.ours as number[] ?? []), ...(task.params.watch as number[] ?? [])].map(Number).filter(n => n > 0))]
-      .slice(0, 200);
+      .slice(0, 280);
     if (light && !ids.length) { await api.complete(task.id, 'Быстрое обновление: привязанных конкурентов нет'); return; }
     if (data && ids.length) {
       await api.progress(task.id, stage(1, `Карточки конкурентов на витрине: ${ids.length}`), true);

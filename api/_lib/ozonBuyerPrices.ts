@@ -16,6 +16,7 @@
 // продаж в отчёте нет, фронт восстанавливает вторую цену от текущей ЛК по нему.
 
 import { fetchWithRetry } from './fetchRetry';
+import { listOzonFbsPostings } from './ozonFbsList';
 import { cacheGet, cacheSet, isFresh } from './cache';
 import { noteSwallowed } from './log';
 
@@ -86,7 +87,7 @@ async function getSppHistory(): Promise<OzonSppHistory> {
  * доступен в течение суток после заказа.
  *
  * ВАЖНО, проверено на живом кабинете 10.08 (иначе легко сделать неправильно):
- *   • FBS: `v3/posting/fbs/list` → `result.postings`, offset-пагинация,
+ *   • FBS: `v4/posting/fbs/list` (с 19.10.2026, см. ozonFbsList.ts; раньше v3 → `result.postings`, offset),
  *     customer_price приходит СРАЗУ в списке (было 224 из 224 позиций).
  *   • FBO: `v3/posting/fbo/list` → `postings` + `cursor` на ВЕРХНЕМ уровне,
  *     и customer_price в списке НЕ приходит вовсе (0 из 100) — ни в v3, ни в v2.
@@ -118,21 +119,10 @@ const MAX_FBO_DETAILS = 80;
 
 /** FBS: список сразу с ценой покупателя, offset-пагинация. */
 async function fetchFbs(sinceIso: string, toIso: string): Promise<any[]> {
-  const out: any[] = [];
-  const LIMIT = 1000;
-  for (let offset = 0; offset < 10_000; offset += LIMIT) {
-    let r: any;
-    try {
-      r = await ozReq('v3/posting/fbs/list', {
-        dir: 'DESC', filter: { since: sinceIso, to: toIso },
-        limit: LIMIT, offset, translit: true, with: { financial_data: true },
-      });
-    } catch { break; }  // окно недоступно — работаем с тем, что успели
-    const batch: any[] = r?.result?.postings ?? (Array.isArray(r?.result) ? r.result : []);
-    out.push(...batch);
-    if (batch.length < LIMIT) break;
-  }
-  return out;
+  // v4 (v3 Ozon отключил 19.10.2026); при сбое — пусто, как раньше «работаем с тем, что есть».
+  try {
+    return await listOzonFbsPostings(ozReq, { filter: { since: sinceIso, to: toIso }, translit: true, with: { financial_data: true } });
+  } catch { return []; }
 }
 
 /**

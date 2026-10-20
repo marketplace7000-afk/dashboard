@@ -12,6 +12,7 @@
  */
 import { getSkladDb, kvGet, kvSet } from './db';
 import { fetchWithRetry } from '../fetchRetry';
+import { listOzonFbsPostings } from '../ozonFbsList';
 import { upsertOrders, wbState, ozonState, pickBarcode, type NormOrder, type OrderMp, type UpsertResult } from './orders';
 
 const WB = 'https://marketplace-api.wildberries.ru';
@@ -90,20 +91,11 @@ function ozHeaders(): Record<string, string> {
 }
 
 async function ozonPostings(fromMs: number): Promise<any[]> {
-  const out: any[] = [];
   const since = new Date(fromMs).toISOString();
   const to = new Date(Date.now() + 86400_000).toISOString();
-  for (let offset = 0, page = 0; page < 60; page++, offset += 1000) {
-    const j = await getJson(`${OZON}/v3/posting/fbs/list`, {
-      method: 'POST', headers: ozHeaders(),
-      body: JSON.stringify({ dir: 'ASC', filter: { since, to }, limit: 1000, offset, with: {} }),
-    }, 'ozon fbs/list');
-    const list: any[] = j?.result?.postings ?? [];
-    out.push(...list);
-    if (!j?.result?.has_next || list.length < 1000) break;
-    await new Promise(r => setTimeout(r, 400)); // лимит Ozon «в секунду»
-  }
-  return out;
+  const post = (path: string, body: Record<string, unknown>) =>
+    getJson(`${OZON}/${path}`, { method: 'POST', headers: ozHeaders(), body: JSON.stringify(body) }, 'ozon fbs/list');
+  return listOzonFbsPostings(post, { filter: { since, to }, with: {} }, { pauseMs: 400 });
 }
 
 async function pollOzon(full: boolean): Promise<UpsertResult & { fetched: number }> {

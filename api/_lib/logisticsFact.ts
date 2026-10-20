@@ -13,13 +13,14 @@
 //   used», проверено 16.09.2026). Замена — v1/finance/accrual/postings: по
 //   номерам отправлений (до 200 за запрос) отдаёт начисления с type_id;
 //   справочник типов — v1/finance/accrual/types. Отправления берём из
-//   v3/posting/fbs/list + v2/posting/fbo/list за 30 дней.
+//   v4/posting/fbs/list + v3/posting/fbo/list за 30 дней.
 //
 // Считаем на единицу: прямая — ₽ за одну доставку; обратная — ₽ на одну
 // ПРОДАННУЮ штуку (все затраты на отмены/невыкупы/возвраты, размазанные по
 // продажам) — именно так её и надо закладывать в цену. Плюс факт выкупа.
 
 import { fetchWithRetry } from './fetchRetry';
+import { listOzonFbsPostings } from './ozonFbsList';
 import { cacheGet, cacheSet, isFresh } from './cache';
 
 const CACHE_KEY = 'logistics-fact:v1';
@@ -123,21 +124,27 @@ const OZ_RET = new Set(['BackwardShipment', 'ReturnFlowLogistic', 'Cancellation'
 
 type Posting = { number: string; skuToOffer: Record<string, string> };
 
-async function listPostings(path: string, since: string, to: string): Promise<Posting[]> {
-  const out: Posting[] = [];
-  let offset = 0;
-  for (let page = 0; page < 20; page++) {
-    const j = await ozPost(path, { dir: 'ASC', filter: { since, to }, limit: 1000, offset, with: {} });
-    const arr: any[] = Array.isArray(j?.result) ? j.result : (j?.result?.postings ?? []);
-    for (const p of arr) {
-      const num = String(p?.posting_number ?? '');
-      if (num === '') continue;
-      const m: Record<string, string> = {};
-      for (const pr of (p?.products ?? [])) { const sku = String(pr?.sku ?? ''); const off = String(pr?.offer_id ?? '').trim().toUpperCase(); if (sku !== '' && off !== '') m[sku] = off; }
-      out.push({ number: num, skuToOffer: m });
+// FBS — v4, FBO — v3 с курсором: v3 FBS и v2 FBO Ozon отключил (19.10.2026).
+async function listPostings(kind: 'fbs' | 'fbo', since: string, to: string): Promise<Posting[]> {
+  let raw: any[] = [];
+  if (kind === 'fbs') raw = await listOzonFbsPostings(ozPost, { filter: { since, to }, with: {} });
+  else {
+    let cursor: string | undefined;
+    for (let page = 0; page < 200; page++) {
+      const j = await ozPost('v3/posting/fbo/list', { dir: 'ASC', filter: { since, to }, limit: 100, with: {}, ...(cursor ? { cursor } : { offset: 0 }) });
+      const arr: any[] = j?.postings ?? j?.result?.postings ?? [];
+      raw.push(...arr);
+      cursor = j?.cursor;
+      if (!j?.has_next || !cursor || arr.length === 0) break;
     }
-    if (arr.length < 1000) break;
-    offset += 1000;
+  }
+  const out: Posting[] = [];
+  for (const p of raw) {
+    const num = String(p?.posting_number ?? '');
+    if (num === '') continue;
+    const m: Record<string, string> = {};
+    for (const pr of (p?.products ?? [])) { const sku = String(pr?.sku ?? ''); const off = String(pr?.offer_id ?? '').trim().toUpperCase(); if (sku !== '' && off !== '') m[sku] = off; }
+    out.push({ number: num, skuToOffer: m });
   }
   return out;
 }
@@ -152,7 +159,7 @@ async function computeOzon(diag: string[]): Promise<Record<string, FactItem>> {
   const since = new Date(Date.now() - 30 * dayMs).toISOString();
   const to = new Date().toISOString();
   const postings: Posting[] = [];
-  for (const path of ['v3/posting/fbs/list', 'v2/posting/fbo/list']) {
+  for (const path of ['fbs', 'fbo'] as const) {
     try { postings.push(...await listPostings(path, since, to)); }
     catch (e) { diag.push(`Ozon: ${path} — ${String((e as Error)?.message ?? e).slice(0, 120)}`); }
   }

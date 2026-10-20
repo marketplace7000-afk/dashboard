@@ -32,6 +32,7 @@ import { mkdirSync } from 'node:fs';
 import { cacheGet, cacheSet, isFresh, cacheGetNewestByPrefix, makeUpstreamCachePrefix, makeUpstreamCacheKey } from './cache';
 import { mskDate } from './mskDate';
 import { fetchWithRetry } from './fetchRetry';
+import { listOzonFbsPostings } from './ozonFbsList';
 import { getUiState } from './uiState';
 import type { RnpMp, RnpItem, RnpResponse } from '../../shared/rnp';
 
@@ -788,16 +789,9 @@ async function collectOzonSpp(): Promise<string> {
   };
 
   // FBS: цена покупателя сразу в списке.
-  let fbs = 0;
-  for (let offset = 0; offset < 20_000; offset += 1000) {
-    const j = await ozPost('v3/posting/fbs/list', {
-      dir: 'ASC', filter: { since: sinceIso, to: toIso }, limit: 1000, offset, with: { financial_data: true },
-    });
-    const batch: any[] = j?.result?.postings ?? [];
-    batch.forEach(take);
-    fbs += batch.length;
-    if (!j?.result?.has_next || batch.length < 1000) break;
-  }
+  const fbsList = await listOzonFbsPostings(ozPost, { filter: { since: sinceIso, to: toIso }, with: { financial_data: true } });
+  fbsList.forEach(take);
+  const fbs = fbsList.length;
 
   // FBO: список без цены покупателя → деталь по каждому отправлению.
   const fboList: any[] = [];

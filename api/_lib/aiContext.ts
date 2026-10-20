@@ -10,7 +10,7 @@
  */
 import { cacheGet, cacheSet, makeCacheKey, makeUpstreamCacheKey, makeUpstreamCachePrefix, cacheGetNearestWindow, windowKeyFor } from './cache';
 import { getLatestSnapshot } from './history';
-import { mskDate } from './mskDate';
+import { wbFunnelBody, ozAnalyticsBody, windowRange } from './period';
 
 export type SnapshotContext = {
   generatedAt: number;
@@ -48,10 +48,6 @@ export type SnapshotContext = {
 const CONTEXT_TTL_MS = 30 * 60_000;
 const CONTEXT_KEY = makeCacheKey('ai-context', 'snapshot');
 
-// Даты — по Москве, как у сборщика (route.ts). Иначе ключи кэша не совпадают
-// и снимок для бота/копилота приходит пустым на ночной границе суток.
-const iso = (back: number) => mskDate(back);
-
 /** Тихо достаёт JSON из кэша прокси, не падая на отсутствии.
  *  Сначала точный ключ (то же окно дат), затем — ближайшее окно ТОЙ ЖЕ ДЛИНЫ.
  *  Длину менять нельзя: раньше fallback брал свежайший снимок по префиксу, и
@@ -77,16 +73,18 @@ export async function buildSnapshot(force = false): Promise<SnapshotContext> {
     if (cached && Date.now() - cached.fetchedAt < CONTEXT_TTL_MS) return cached.data;
   }
 
-  const today = 0;
   const week = 7;
-  const period = { begin: iso(week), end: iso(today) };
+  // Окно — ровно 7 суток, как у сборщика (period.ts). Было iso(7)..iso(0) = 8 суток:
+  // ключ кэша не совпадал с прогретым, и выручка WB в снимок не попадала никогда.
+  const w = windowRange(week);
+  const period = { begin: w.from, end: w.to };
 
   // ── Ozon analytics за неделю ──
   let ozon: SnapshotContext['ozon'] = null;
   // Тот же НАБОР метрик/dimension, что прогревает cron (ozAnalytics: day,
   // ordered_units+revenue) — иначе префикс кэша не совпадёт и снимок будет пустым.
   // Порядок метрик в ключе нормализуется (sort), но набор должен совпадать.
-  const ozonBody = { date_from: iso(week), date_to: iso(today), metrics: ['ordered_units', 'revenue'], dimension: ['day'], limit: 1000 };
+  const ozonBody = ozAnalyticsBody(week, ['ordered_units', 'revenue'], ['day'], 1000);
   const ozonRaw = await readProxyCache<any>('ozon-seller', 'POST', 'v1/analytics/data', '', ozonBody);
   if (ozonRaw?.result?.data) {
     const rows = ozonRaw.result.data as { metrics: number[] }[];
@@ -105,12 +103,7 @@ export async function buildSnapshot(force = false): Promise<SnapshotContext> {
 
   // ── WB Sales Funnel v3 за неделю ──
   let wb: SnapshotContext['wb'] = null;
-  const wbBody = {
-    period: { start: iso(week), end: iso(today) },
-    timezone: 'Europe/Moscow', limit: 200, offset: 0,
-    brandNames: [], subjectIDs: [], tagIDs: [], nmIDs: [],
-    orderBy: { field: 'ordersSumRub', mode: 'desc' },
-  };
+  const wbBody = wbFunnelBody(week);
   const wbRaw = await readProxyCache<any>('wb:analytics', 'POST', 'api/analytics/v3/sales-funnel/products', '', wbBody);
   const wbCards = wbRaw?.data?.cards as any[] | undefined;
   if (wbCards) {

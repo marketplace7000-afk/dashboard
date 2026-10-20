@@ -20,6 +20,7 @@
 // продажам) — именно так её и надо закладывать в цену. Плюс факт выкупа.
 
 import { fetchWithRetry } from './fetchRetry';
+import { mskDate } from './mskDate';
 import { listOzonFbsPostings } from './ozonFbsList';
 import { cacheGet, cacheSet, isFresh } from './cache';
 
@@ -60,7 +61,7 @@ function finish(w: FactWin, mode: 'wb' | 'ozon' = 'wb'): FactWin {
   return w;
 }
 const dayMs = 86_400_000;
-function isoDay(back: number): string { return new Date(Date.now() - back * dayMs).toISOString().slice(0, 10); }
+function isoDay(back: number): string { return mskDate(back); }   // сутки по Москве, как у площадок
 
 // ─── WB ─────────────────────────────────────────────────────────────────────
 async function computeWb(diag: string[]): Promise<Record<string, FactItem>> {

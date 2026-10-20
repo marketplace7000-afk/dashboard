@@ -83,8 +83,10 @@ type Bucket = {
   hourRequests: number;
 };
 
-const buckets = new Map<string, Bucket>();
-let seq = 0;
+// Вёдра — на process, как кэш в cache.ts: под tsx модуль грузится в двух копиях,
+// и у каждой были свои вёдра — общий лимит кабинета не соблюдался, прилетали 429.
+const G: { buckets: Map<string, Bucket>; seq: number } = ((process as any).__AV_GATEWAY__ ??= { buckets: new Map<string, Bucket>(), seq: 0 });
+const buckets = G.buckets;
 
 export class GatewayBusy extends Error {
   retryAfterSec: number;
@@ -152,7 +154,7 @@ export async function gate(url: string, prio: Priority = 1, maxWaitMs = DEFAULT_
   const estimate = Math.max(0, readyAt(b) - Date.now()) + ahead * b.intervalMs;
   if (estimate > maxWaitMs) throw new GatewayBusy(b.id, estimate);
   const t0 = Date.now();
-  await new Promise<void>(resolve => { b.queue.push({ prio, seq: seq++, resolve }); pump(b); });
+  await new Promise<void>(resolve => { b.queue.push({ prio, seq: G.seq++, resolve }); pump(b); });
   b.waitedMs += Date.now() - t0;
   return b.id;
 }

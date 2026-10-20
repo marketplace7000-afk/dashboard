@@ -70,6 +70,16 @@ export async function handleCron(req: VercelRequest, res: VercelResponse) {
     return res.status(503).json({ error: 'cron_secret_missing' });
   }
 
+  // Один проход за раз. Плановый прогрев (раз в 2 ч) и прогрев перед выпуском
+  // «Советника» накладывались: два цикла fullstats WB с паузами по 65 с и 429.
+  // На process — одна отметка на обе копии модуля под tsx (см. cache.ts).
+  const G: { running: boolean } = ((process as any).__AV_CRON__ ??= { running: false });
+  if (G.running) return res.status(200).json({ ok: true, skipped: 'already_running' });
+  G.running = true;
+  try { await cronPass(req, res); } finally { G.running = false; }
+}
+
+async function cronPass(req: VercelRequest, res: VercelResponse) {
   // Даты окон — ПО МОСКВЕ (mskDate). Раньше здесь был UTC: с 00:00 до 03:00 МСК
   // iso(0) давал вчерашнюю дату, сборщик грел окно «по вчера», а клиент в кабинете
   // видел сегодняшний день — отсюда «у вас 122 тысячи, а на ВБ 158» (телемост 11.08).

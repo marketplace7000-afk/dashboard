@@ -400,9 +400,13 @@ export function setFlag(mp: AdMp, sku: string, noAds: boolean, reason: NoAdsReas
   return { mp, sku, no_ads: noAds, archived, reason: noAds ? reason : null, note, updated_at: now, updated_by: by };
 }
 
-/** Можно ли автопилоту трогать товар. */
+/**
+ * Нельзя ли автопилоту трогать товар. Если база недоступна — считаем, что нельзя:
+ * отметку «Не рекламировать» ставят под самовыкуп и вывод, и молча её
+ * проигнорировать хуже, чем пропустить один проход автопилота.
+ */
 export function isNoAds(mp: AdMp, sku: string): boolean {
   const d = adsDb();
-  if (!d) return false;
-  try { return !!(d.prepare('SELECT no_ads FROM ad_product_flag WHERE mp = ? AND sku = ?').get(mp, sku) as any)?.no_ads; } catch { return false; }
+  if (!d) return true;
+  try { return !!(d.prepare('SELECT no_ads FROM ad_product_flag WHERE mp = ? AND sku = ?').get(mp, sku) as any)?.no_ads; } catch { return true; }
 }

@@ -46,6 +46,11 @@ export async function fetchWithRetry(
     try {
       const res = await fetch(url, { ...init, signal: ac.signal });
       clearTimeout(t);
+      // Тело читают вызывающие (r.json()/r.text()) уже после возврата. Раньше таймаут
+      // снимался на заголовках, и оборванный посередине ответ (финотчёт WB) висел
+      // минутами. Даём на чтение тела ещё столько же; после чтения abort ничего не делает.
+      const bodyTimer = setTimeout(() => ac.abort(), timeoutMs);
+      (bodyTimer as any).unref?.();
       // WB отдаёт окно ожидания в X-Ratelimit-Retry (секунды), а НЕ в Retry-After.
       // Например sales-funnel: корзина 1 запрос, X-Ratelimit-Retry: 37. Читаем оба,
       // приоритет — WB-заголовку. +1с запас, чтобы корзина точно успела пополниться.

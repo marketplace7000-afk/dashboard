@@ -510,7 +510,20 @@ export async function listProposals(mp: AdMp | null, history = false): Promise<A
 
 const ACTIONABLE: Ads2ProposalKind[] = ['bid', 'pause', 'daily_limit', 'weekly_budget'];
 
+// Предложения, которые сейчас применяются. Статус «applied» ставится только после
+// ответа площадки, и двойной клик «Применить» успевал отправить команду дважды
+// (прожарка 20.10.2026). На process — из-за двух копий модуля под tsx.
+const inFlight: Set<number> = ((process as any).__AV_PROPOSAL_INFLIGHT__ ??= new Set<number>());
+
 export async function decideProposal(id: number, decision: 'apply' | 'reject', by: string, note: string | null, confirmBig = false)
+  : Promise<{ ok: boolean; message: string; needConfirm?: boolean }> {
+  if (inFlight.has(id)) return { ok: false, message: 'это предложение уже применяется — подождите несколько секунд' };
+  inFlight.add(id);
+  try { return await decideProposalOnce(id, decision, by, note, confirmBig); }
+  finally { inFlight.delete(id); }
+}
+
+async function decideProposalOnce(id: number, decision: 'apply' | 'reject', by: string, note: string | null, confirmBig: boolean)
   : Promise<{ ok: boolean; message: string; needConfirm?: boolean }> {
   const d = db();
   const r = d.prepare('SELECT * FROM ad_proposal WHERE id = ?').get(id) as any;

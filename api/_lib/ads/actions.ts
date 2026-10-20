@@ -22,7 +22,7 @@ import {
   getCampaign, patchCampaign, patchItemBid, upsertDailyLimits, logChange,
   type AdMp, type ChangeEntry,
 } from './store';
-import { parseWbDailyLimits } from './sync';
+import { parseWbDailyLimits, readOzonCampaignProducts } from './sync';
 
 export type AdActionKind = 'pause' | 'start' | 'bid' | 'daily_limit' | 'weekly_budget';
 
@@ -174,7 +174,14 @@ async function ozBid(a: AdAction, c: NonNullable<ReturnType<typeof getCampaign>>
   if (c.bid_type !== 'TARGET_BIDS') {
     throw new ActionError(`у кампании стратегия ${c.bid_type ?? '—'}: ставку ведёт Ozon, вручную меняется только при «Средней стоимости клика»`);
   }
-  const cur = it.bid_raw != null ? Number(it.bid_raw) / OZ_MICRO : null;
+  // Полный список товаров — прямо у Ozon, а не из снимка: PUT ниже перезаписывает
+  // товары кампании, и всё, чего нет в списке, из неё выпадет.
+  const live = await readOzonCampaignProducts(c.id, p => ozCall(p, { method: 'GET' }));
+  if (!live) throw new ActionError('не удалось прочитать товары кампании у Ozon — ставку не меняем, попробуйте позже');
+  const liveMine = live.find(p => String(p?.sku) === it.sku);
+  if (!liveMine) throw new ActionError('Ozon не показывает этот товар в кампании — обновите данные рекламы');
+  const liveBid = liveMine.bid != null && Number(liveMine.bid) > 0 ? Number(liveMine.bid) : (it.bid_raw != null ? Number(it.bid_raw) : null);
+  const cur = liveBid != null ? liveBid / OZ_MICRO : null;
   const next = a.valueRub!;
   if (cur && next > cur * BIG_JUMP && !a.confirmBig) {
     throw new ActionError(`ставка вырастет в ${(next / cur).toFixed(1)} раза (${rub(cur)} → ${rub(next)}) — подтвердите`, true);
@@ -182,22 +189,21 @@ async function ozBid(a: AdAction, c: NonNullable<ReturnType<typeof getCampaign>>
   const raw = String(Math.round(next * OZ_MICRO));
   // PUT products по описанию «перезаписывает» настройки — шлём все товары кампании
   // с их текущими ставками, меняя только нужный, чтобы не обнулить соседей.
-  const bids = c.items
-    .filter(x => x.sku === it.sku || (x.bid_raw != null && Number(x.bid_raw) > 0))
-    .map(x => ({ sku: x.sku, bid: x.sku === it.sku ? raw : String(x.bid_raw) }));
+  const bids = live
+    .filter(p => p?.sku != null && (String(p.sku) === it.sku || (p.bid != null && Number(p.bid) > 0)))
+    .map(p => ({ sku: String(p.sku), bid: String(p.sku) === it.sku ? raw : String(p.bid) }));
   const r = await ozCall(`api/client/campaign/${encodeURIComponent(c.id)}/products`, { method: 'PUT', body: JSON.stringify({ bids }) });
   if (!r.ok) throw new ActionError(`Ozon ответил ${r.status}: ${await bodyText(r)}`);
   patchItemBid('ozon', c.id, it.sku, { bid_raw: raw });
 
   // Сверка: перечитываем товары кампании.
   let check = '';
-  const g = await ozCall(`api/client/campaign/${encodeURIComponent(c.id)}/v2/products?page=1&pageSize=100`, { method: 'GET' });
-  if (g.ok) {
-    const prods: any[] = ((await g.json().catch(() => null)) as any)?.products ?? [];
+  const prods = await readOzonCampaignProducts(c.id, p => ozCall(p, { method: 'GET' }));
+  if (prods) {
     const mine = prods.find(p => String(p?.sku) === it.sku);
     if (!mine) check = ' · ВНИМАНИЕ: Ozon не вернул товар в кампании';
     else if (String(mine.bid) !== raw) check = ` · ВНИМАНИЕ: Ozon показывает ставку ${rub(Number(mine.bid) / OZ_MICRO)}`;
-    const lost = c.items.filter(x => !prods.some(p => String(p?.sku) === x.sku)).length;
+    const lost = bids.filter(x => !prods.some(p => String(p?.sku) === x.sku)).length;
     if (prods.length && lost) check += ` · ВНИМАНИЕ: из кампании пропало товаров: ${lost}`;
   }
   return { before: { bid_rub: cur }, after: { bid_rub: next }, message: `ставка ${cur == null ? '' : `${rub(cur)} → `}${rub(next)}${check}` };

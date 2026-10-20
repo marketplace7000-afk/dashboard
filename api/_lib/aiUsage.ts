@@ -12,6 +12,7 @@
  * TTL логов: 90 дней. Агрегатов: 365 дней.
  */
 import { cacheGet, cacheSet, makeCacheKey } from './cache';
+import { mskDate } from './mskDate';
 import { noteSwallowed } from './log';
 
 /**
@@ -119,7 +120,8 @@ export type DailyAgg = {
 };
 
 function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Сутки — по Москве: траты с 00:00 до 03:00 МСК уходили во вчерашний день.
+  return mskDate(0);
 }
 
 function priceFor(model: string) {
@@ -203,10 +205,8 @@ export async function readDailyAgg(date: string): Promise<DailyAgg | null> {
 /** Агрегат за N последних дней (today included). */
 export async function readRecentAgg(days: number): Promise<DailyAgg[]> {
   const out: DailyAgg[] = [];
-  const now = new Date();
   for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(now.getTime() - i * 24 * 60 * 60_000);
-    const date = d.toISOString().slice(0, 10);
+    const date = mskDate(i);
     const agg = await readDailyAgg(date);
     if (agg) out.push(agg);
     else out.push({ date, totalRequests: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCostRub: 0, totalCostUsd: 0, byAgent: {}, byModel: {} });

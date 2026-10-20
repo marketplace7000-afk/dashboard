@@ -562,7 +562,10 @@ async function collectWbFunnel(): Promise<string> {
       if (r.status === 401 || r.status === 402 || r.status === 403) break;
       continue;
     }
-    const hist = parseWbFunnelHistory(await r.json().catch(() => null));
+    const json = await r.json().catch(() => null);
+    // Ответ не разобрался — не стираем дни этих товаров: «лучше старые данные, чем дыра».
+    if (!json) { failed += chunk.length; lastErr = 'ответ не JSON'; continue; }
+    const hist = parseWbFunnelHistory(json);
     d.exec('BEGIN');
     try {
       for (const nm of chunk) del.run(nm, start, end, ...WB_FUNNEL_METRICS);
@@ -636,7 +639,9 @@ async function collectOzonAnalytics(items: Map<string, RnpItem>): Promise<string
   const backfilled = metaGet(BACKFILL_KEY) === '1';
   const from = mskDate(backfilled ? 3 : 29);
   const to = mskDate(0);
-  let set = metaGet('ozon:analytics:basic') === '1' ? OZ_BASIC : OZ_FULL;
+  // Урезанный набор — только на сегодня: раньше один отказ 400/403 включал его
+  // навсегда, и расширенные метрики не возвращались, даже когда Ozon снова их отдавал.
+  let set = metaGet('ozon:analytics:basic') === mskDate(0) ? OZ_BASIC : OZ_FULL;
   let rows: any[];
   try {
     rows = await fetchOzAnalytics(from, to, set);
@@ -644,7 +649,7 @@ async function collectOzonAnalytics(items: Map<string, RnpItem>): Promise<string
     const status = (e as { status?: number }).status;
     if (set === OZ_FULL && (status === 400 || status === 403)) {
       console.warn('[rnp] Ozon не отдал расширенные метрики, берём заказы и выручку:', (e as Error).message);
-      metaSet('ozon:analytics:basic', '1');
+      metaSet('ozon:analytics:basic', mskDate(0));
       set = OZ_BASIC;
       await sleep(OZ_ANALYTICS_PAUSE_MS);
       rows = await fetchOzAnalytics(from, to, set);
@@ -939,15 +944,25 @@ async function fillSheetCategories(items: Map<string, RnpItem>): Promise<void> {
 
 // ─── Сбор ──────────────────────────────────────────────────────────────────
 
-let collecting: Promise<string[]> | null = null;
+// Состояние на process: под tsx модуль грузится в двух копиях (см. cache.ts), и
+// флаг в переменной модуля не мешал планировщику и крону собирать одновременно.
+const run: { collecting: Promise<string[]> | null; scope: RnpMp | 'all' | null } =
+  ((process as any).__AV_RNP_RUN__ ??= { collecting: null, scope: null });
 
 /**
  * Один проход сбора по обеим площадкам. Каждый источник независим: сбой одного
- * не мешает остальным. Повторный вызов во время прохода ждёт текущий.
+ * не мешает остальным. Повторный вызов во время прохода ждёт текущий, а если
+ * текущий собирает другую площадку — после него собирает свою (раньше Ozon в
+ * этом случае просто пропускался).
  */
 export function collectRnp(only?: RnpMp): Promise<string[]> {
-  if (collecting) return collecting;
-  collecting = (async () => {
+  const want = only ?? 'all';
+  if (run.collecting) {
+    if (run.scope === 'all' || run.scope === want) return run.collecting;
+    return run.collecting.catch(() => []).then(() => collectRnp(only));
+  }
+  run.scope = want;
+  run.collecting = (async () => {
     const log: string[] = [];
     if (!getDb()) return ['РНП: node:sqlite недоступен, сбор выключен'];
     const step = async (name: string, fn: () => string | Promise<string>) => {
@@ -976,12 +991,12 @@ export function collectRnp(only?: RnpMp): Promise<string[]> {
     }
     console.warn('[rnp]', log.join(' · '));
     return log;
-  })().finally(() => { collecting = null; });
-  return collecting;
+  })().finally(() => { run.collecting = null; run.scope = null; });
+  return run.collecting;
 }
 
 export function rnpCollecting(): boolean {
-  return collecting != null;
+  return run.collecting != null;
 }
 
 // ─── Чтение ────────────────────────────────────────────────────────────────

@@ -470,13 +470,16 @@ async function pace(mp: AdMp, slot: Ads2IssueSlot, now: number, products: Ads2Pr
 
 // ─── Выпуск ─────────────────────────────────────────────────────────────────
 
-let building: Promise<Ads2AdvisorIssue> | null = null;
-export function issueBuilding(): boolean { return building != null; }
+// На process — одна на обе копии модуля под tsx (см. cache.ts): иначе ручной и
+// плановый выпуск собирались параллельно и задваивали запись.
+const B: { building: Promise<Ads2AdvisorIssue> | null } = ((process as any).__AV_ISSUE_BUILD__ ??= { building: null });
+export function issueBuilding(): boolean { return B.building != null; }
 
 /** Собрать выпуск по площадке. `collect` — обновить РНП перед сборкой, если она старше 25 минут. */
 export function buildIssue(mp: AdMp, slot: Ads2IssueSlot, opts: { collect?: boolean } = {}): Promise<Ads2AdvisorIssue> {
-  if (building) return building.then(() => buildIssue(mp, slot, opts));
-  building = (async () => {
+  // Ждём текущую сборку, даже если она упала: иначе её ошибка доставалась чужому выпуску.
+  if (B.building) return B.building.catch(() => undefined).then(() => buildIssue(mp, slot, opts));
+  B.building = (async () => {
     const notes: string[] = [];
     if (opts.collect && !rnpCollecting()) {
       const probe = await getRnp(mp, mskDate(0), mskDate(0));
@@ -504,8 +507,8 @@ export function buildIssue(mp: AdMp, slot: Ads2IssueSlot, opts: { collect?: bool
     const r = d.prepare('INSERT INTO advisor_issue (mp, slot, date, at, json) VALUES (?, ?, ?, ?, ?)').run(mp, slot, issue.date, now, JSON.stringify(issue));
     d.prepare('DELETE FROM advisor_issue WHERE date < ?').run(addDays(mskDate(0), -KEEP_ISSUES_DAYS));
     return { id: Number(r.lastInsertRowid), ...issue };
-  })().finally(() => { building = null; });
-  return building;
+  })().finally(() => { B.building = null; });
+  return B.building;
 }
 
 /** Выпуски и сигналы для экрана. */
@@ -551,16 +554,20 @@ export function startIssueScheduler(warm: () => void): void {
       const cur = minutesOf(mskHM(now));
       for (const s of ISSUE_SLOTS) {
         const rk = `warm:${date}:${s.slot}`;
-        if (cur === minutesOf(s.refresh) && !fired.has(rk)) { fired.add(rk); warm(); }
+        // Окно, а не точная минута: при задержке таймера или занятом сервере минута
+        // проскакивала, и прогрев перед выпуском не случался.
+        const sinceRefresh = cur - minutesOf(s.refresh);
+        if (sinceRefresh >= 0 && sinceRefresh <= 10 && !fired.has(rk)) { fired.add(rk); warm(); }
         const diff = cur - minutesOf(s.time);
         if (diff < 0 || diff > 120) continue;
         const ik = `issue:${date}:${s.slot}`;
         if (fired.has(ik)) continue;
         const d = db();
-        const exists = d.prepare('SELECT 1 FROM advisor_issue WHERE date = ? AND slot = ? LIMIT 1').get(date, s.slot);
         fired.add(ik);
-        if (exists) continue;
         for (const mp of ['wb', 'ozon'] as AdMp[]) {
+          // Проверка по площадке: если WB собрался, а Ozon упал, после рестарта
+          // Ozon раньше не пересобирался — выпуск «уже есть».
+          if (d.prepare('SELECT 1 FROM advisor_issue WHERE date = ? AND slot = ? AND mp = ? LIMIT 1').get(date, s.slot, mp)) continue;
           try {
             const r = await buildIssue(mp, s.slot, { collect: true });
             console.warn(`[advisor] выпуск ${s.label} ${mp}: сигналов ${r.signals.length}`);

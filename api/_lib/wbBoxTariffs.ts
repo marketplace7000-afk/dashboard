@@ -11,6 +11,7 @@
 // клиента. Литраж товара фронт считает из габаритов карточки. Кэш 24ч.
 
 import { fetchWithRetry } from './fetchRetry';
+import { mskDate } from './mskDate';
 import { cacheGet, cacheSet, isFresh } from './cache';
 
 const CACHE_KEY = 'wb-box-tariffs:v1';
@@ -32,7 +33,7 @@ function wbToken(): string {
 const numRu = (v: any): number => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isNaN(n) ? 0 : n; };
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  return mskDate(0);   // тарифы WB — на дату по Москве
 }
 
 async function compute(): Promise<WbBoxTariffs> {

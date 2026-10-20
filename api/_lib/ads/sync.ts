@@ -244,10 +244,9 @@ async function syncOzonCampaigns(): Promise<string> {
   // 14.10: было не больше 40 кампаний за проход — при 44 товарных часть терялась.
   // Лимит Performance — 100 000 запросов в сутки, полсотни запросов не в счёт.
   for (const c of live.filter(x => (x.raw as any)?.advObjectType === 'SKU')) {
-    const pr = await ozPerf(`api/client/campaign/${c.id}/v2/products?page=1&pageSize=100`, token);
-    if (!pr.ok) { failed++; continue; }
-    const pj: any = await pr.json().catch(() => null);
-    for (const p of (pj?.products ?? [])) {
+    const products = await readOzonCampaignProducts(c.id, p => ozPerf(p, token));
+    if (!products) { failed++; continue; }
+    for (const p of products) {
       if (p?.sku == null) continue;
       items.push({
         campaign_id: c.id, sku: String(p.sku), title: p.title ?? null,
@@ -261,6 +260,28 @@ async function syncOzonCampaigns(): Promise<string> {
   const stats = await syncOzonStats(token, live.filter(x => (x.raw as any)?.advObjectType === 'SKU' && x.status !== 'planned').map(x => x.id))
     .catch(e => `статистика: сбой ${(e as Error).message.slice(0, 120)}`);
   return `Ozon: кампаний ${live.length} (всего ${all.length}), со ставками ${fetched}${failed ? `, не ответили ${failed}` : ''}, товаров ${items.length} · ${stats}`;
+}
+
+const OZ_PRODUCTS_PAGE = 100;
+
+/**
+ * Все товары кампании Ozon, постранично. Раньше читали только первую страницу
+ * (100 товаров), а смена ставки шлёт Ozon ПОЛНЫЙ список — товары со второй
+ * страницы выпали бы из кампании (прожарка 20.10.2026).
+ * null — какая-то страница не ответила: неполному списку верить нельзя.
+ */
+export async function readOzonCampaignProducts(campaignId: string, get: (path: string) => Promise<Response>): Promise<any[] | null> {
+  const out: any[] = [];
+  for (let page = 1; page <= 100; page++) {
+    const r = await get(`api/client/campaign/${encodeURIComponent(campaignId)}/v2/products?page=${page}&pageSize=${OZ_PRODUCTS_PAGE}`);
+    if (!r.ok) return null;
+    const j: any = await r.json().catch(() => null);
+    if (!j) return null;
+    const list: any[] = Array.isArray(j.products) ? j.products : [];
+    out.push(...list);
+    if (list.length < OZ_PRODUCTS_PAGE) return out;
+  }
+  return out;
 }
 
 /**

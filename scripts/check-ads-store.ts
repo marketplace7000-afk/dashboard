@@ -175,6 +175,12 @@ async function checkActions() {
     sent.push({ method: init.method ?? 'GET', url: u, body: init.body ? JSON.parse(init.body) : null });
     if (u.includes('/daily-limits?')) return new Response(JSON.stringify({ adverts: [{ advertId: 40898103, enabled: true, dailyLimit: 150000, spentToday: 0 }] }), { status: 200 });
     if (u.includes('/daily-limits')) return new Response(JSON.stringify({ adverts: [{ advertId: 40898103, belowMinLimit: false, requiredLimit: 0 }] }), { status: 200 });
+    if (u.includes('/campaign/779/v2/products')) {
+      // Большая кампания: 150 товаров на двух страницах.
+      const page = Number(new URL(u).searchParams.get('page'));
+      const all = Array.from({ length: 150 }, (_, i) => ({ sku: String(9000 + i), bid: '4000000' }));
+      return new Response(JSON.stringify({ products: all.slice((page - 1) * 100, page * 100) }), { status: 200 });
+    }
     if (u.includes('/v2/products')) return new Response(JSON.stringify({ products: [{ sku: '5385887749', bid: '9500000' }, { sku: '111', bid: '5000000' }] }), { status: 200 });
     return new Response('{}', { status: 200 });
   }) as any;
@@ -214,6 +220,15 @@ async function checkActions() {
     const ozPut = sent.find(s => s.method === 'PUT' && s.url.endsWith('/campaign/777/products'));
     check('Ozon ставка 9,5 ₽ → "9500000", сосед уходит со своей ставкой', [r.ok, [...(ozPut?.body?.bids ?? [])].sort((x: any, y: any) => x.sku.localeCompare(y.sku)), r.message.includes('ВНИМАНИЕ')],
       [true, [{ sku: '111', bid: '5000000' }, { sku: '5385887749', bid: '9500000' }], false]);
+    store.saveCampaigns('ozon',
+      [{ mp: 'ozon', id: '779', name: 'BIG', status: 'active', status_code: null, payment: 'cpc', bid_type: 'TARGET_BIDS', placements: null,
+         daily_limit: null, daily_limit_on: null, spent_today: null, weekly_budget: 26000, created_at: null, started_at: null },
+       ...store.listCampaigns('ozon').filter((x: any) => x.id !== '779')],
+      [{ campaign_id: '779', sku: '9000', bid_raw: '4000000' }, { campaign_id: '779', sku: '9001', bid_raw: '4000000' },
+       { campaign_id: '777', sku: '5385887749', bid_raw: '8000000' }, { campaign_id: '777', sku: '111', bid_raw: '5000000' }, { campaign_id: '778', sku: '222', bid_raw: '0' }]);
+    r = await applyAdAction({ mp: 'ozon', campaignId: '779', kind: 'bid', sku: '9000', valueRub: 5 });
+    const bigPut = sent.find(s => s.method === 'PUT' && s.url.endsWith('/campaign/779/products'));
+    check('Ozon: в кампании 150 товаров, в снимке 2 — в PUT уходят все 150', [r.ok, bigPut?.body?.bids?.length, bigPut?.body?.bids?.find((b: any) => b.sku === '9000')?.bid], [true, 150, '5000000']);
     r = await applyAdAction({ mp: 'ozon', campaignId: '778', kind: 'bid', sku: '222', valueRub: 10 });
     check('Ozon: при MAX_CLICKS ставку не трогаем', r.ok, false);
     r = await applyAdAction({ mp: 'ozon', campaignId: '777', kind: 'weekly_budget', valueRub: 30000 });
@@ -221,7 +236,7 @@ async function checkActions() {
     check('Ozon недельный бюджет 30 000 ₽ → "30000000000"', [r.ok, patch?.body], [true, { weeklyBudget: '30000000000' }]);
     const log = store.listChanges(20);
     check('журнал: успехи и отказы записаны, неподтверждённый скачок — нет',
-      [log.filter(l => l.status === 'applied').length, log.filter(l => l.status === 'failed').length], [5, 2]);
+      [log.filter(l => l.status === 'applied').length, log.filter(l => l.status === 'failed').length], [6, 2]);
   } finally {
     globalThis.fetch = realFetch;
   }

@@ -13,6 +13,7 @@
  *   - паузы площадок с истёкшим paused_until → закрываются (cleared_by 'timer');
  */
 import { join } from 'node:path';
+import { mskDate } from './mskDate';
 import { mkdirSync } from 'node:fs';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import {
@@ -319,6 +320,12 @@ export function failTask(id: number, error: string, retryable: boolean, pause?: 
     addRun(id, 'info', 'cancelled_by_user', { error });
     return t;
   }
+  // Запоздалый «провал» от хоста, у которого задачу уже забрали (вернули в очередь
+  // как зависшую или она уже завершена), не должен перезаписать её статус.
+  if (t.status !== 'claimed' && t.status !== 'running') {
+    addRun(id, 'warn', `запоздалая ошибка проигнорирована (задача уже «${t.status}»): ${error}`);
+    return t;
+  }
   const retry = retryable && t.attempts < t.max_attempts && !pause;
   if (retry) {
     d.prepare(`UPDATE agent_tasks SET status='queued', claimed_by=NULL, claimed_at=NULL, error=?, scheduled_for=? WHERE id=?`)
@@ -472,7 +479,8 @@ export function liveState() {
   }));
   const active = listTasks({ status: ['running', 'claimed'], limit: 10 });
   const queued = listTasks({ status: ['queued'], limit: 10 });
-  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  // Начало суток по Москве, а не по часовому поясу сервера.
+  const dayStart = new Date(`${mskDate(0)}T00:00:00+03:00`);
   const finished = d.prepare(`SELECT * FROM agent_tasks WHERE status IN ('done','failed','cancelled') AND finished_at >= ? ORDER BY finished_at DESC LIMIT 20`)
     .all(dayStart.getTime()).map(rowToTask);
   const activeIds = active.map(x => x.id);

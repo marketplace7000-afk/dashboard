@@ -1,10 +1,9 @@
 /**
  * Обработчики публичных данных маркетплейсов и рекламного кабинета Ozon.
  *
- * Что объединяет эти три темы: все они ходят наружу за данными, которых нет в
+ * Что объединяет эти темы: все они ходят наружу за данными, которых нет в
  * основном кабинете продавца, и у каждой свои правила лимитов.
  *
- *   handleCompetitors — единый парсер выдачи WB и Ozon (см. _lib/competitors)
  *   handleWbPublic    — публичный поиск и карточка WB для сравнения с конкурентами
  *   handleOzonPerf    — прокси в Ozon Performance с собственной авторизацией
  *
@@ -16,41 +15,10 @@ import { upstreamQs } from '../_proxy';
 import { fetchWithRetry } from './fetchRetry';
 import { cacheGet, cacheSet, isFresh, makeCacheKey, makeUpstreamCacheKey } from './cache';
 import { getOzonPerfToken, PERF_HOST, OzonPerfAuthError } from './ozonPerfAuth';
-import { competitorSearch, competitorCard, type Platform } from './competitors';
 import { wbBasketHost, wbImageUrl } from './wbBasket';
 
 /** 90 минут на публичный поиск конкурентов: выдача меняется не поминутно. */
 const WB_PUBLIC_CACHE_TTL_MS = 90 * 60_000;
-
-// ────────────────────────────────────────────────────────────────────────────
-// Конкуренты — единый парсер WB + Ozon (api/_lib/competitors.ts)
-// ────────────────────────────────────────────────────────────────────────────
-export async function handleCompetitors(req: VercelRequest, res: VercelResponse, rest: string[]) {
-  const action = rest[0];
-  const mp: Platform = req.query.mp === 'ozon' ? 'ozon' : 'wb';
-
-  if (action === 'search') {
-    const q = String(req.query.q || '').trim();
-    if (!q) return res.status(400).json({ error: 'missing_q' });
-    const limit = Math.min(Number(req.query.limit) || 16, 30);
-    const data = await competitorSearch(mp, q, limit);
-    res.setHeader('x-av-cache', data.error ? 'ERROR' : data.partial ? 'STALE' : 'OK');
-    return res.status(200).json(data);
-  }
-
-  if (action === 'card') {
-    const id = String(req.query.id || '').trim();
-    if (!id) return res.status(400).json({ error: 'missing_id' });
-    try {
-      const card = await competitorCard(mp, id);
-      return res.status(200).json(card);
-    } catch (e: any) {
-      return res.status(502).json({ error: 'card_failed', detail: String(e?.message ?? e) });
-    }
-  }
-
-  return res.status(404).json({ error: 'competitors_action_not_found' });
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // WB basket-CDN хелперы (для фото и card.json конкурентов)

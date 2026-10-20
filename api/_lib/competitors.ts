@@ -12,7 +12,6 @@
 import { fetchWithRetry } from './fetchRetry';
 import { cacheGet, cacheSet, isFresh, makeCacheKey } from './cache';
 import { wbBasketNumber } from './wbBasket';
-import { noteSwallowed } from './log';
 
 export type Platform = 'wb' | 'ozon';
 
@@ -39,20 +38,7 @@ export type CompetitorSearch = {
   error?: string;
 };
 
-export type CompetitorCard = {
-  platform: Platform;
-  id: string;
-  name: string;
-  brand: string | null;
-  description: string;
-  characteristics: Array<{ name: string; value: string }>;
-  photoCount: number;
-  images: string[];
-  link: string;
-};
-
 const SEARCH_TTL_MS = 8 * 60 * 60_000;   // выдача за день почти не меняется
-const CARD_TTL_MS = 12 * 60 * 60_000;
 const COOLDOWN_MS = 10 * 60_000;          // после бана хоста — пауза
 
 // ─── Очередь per-host с троттлом ────────────────────────────────────────────
@@ -136,12 +122,6 @@ const WB_SEARCH_HOST = 'search.wb.ru';
 // Перебор соседей при 404 ниже остаётся: он страхует, если WB сменит шаг.
 const wbBasket = wbBasketNumber;
 function wbHostStr(b: number): string { return `https://basket-${String(b).padStart(2, '0')}.wbbasket.ru`; }
-function wbImageUrl(nm: number, basket: number, idx: number, size = 'big'): string {
-  const vol = Math.floor(nm / 1e5);
-  const part = Math.floor(nm / 1e3);
-  return `${wbHostStr(basket)}/vol${vol}/part${part}/${nm}/images/${size}/${idx}.webp`;
-}
-
 function normalizeWbSearchItem(p: any): CompetitorItem | null {
   const id = p?.id;
   if (!id || !Number.isFinite(id)) return null;
@@ -180,82 +160,6 @@ async function fetchWbSearch(query: string, limit: number): Promise<CompetitorSe
   const products = (json?.data?.products ?? []) as any[];
   const items = products.slice(0, limit).map(normalizeWbSearchItem).filter(Boolean) as CompetitorItem[];
   return { platform: 'wb', query, fetchedAt: Date.now(), items };
-}
-
-/** Позиция своего nmId в поисковой выдаче WB по запросу.
- *  Сканирует до `pages` страниц (≈100 товаров каждая). Возвращает позицию
- *  (1-based) и страницу, либо null если не найден в просмотренных страницах. */
-export type WbRank = { query: string; nmId: number; position: number | null; page: number | null; scanned: number; fetchedAt: number };
-
-export async function wbSearchRank(query: string, nmId: number, pages = 5): Promise<WbRank> {
-  let scanned = 0;
-  for (let page = 1; page <= pages; page++) {
-    const url = `https://${WB_SEARCH_HOST}/exactmatch/ru/common/v9/search?ab_testing=false&appType=1&curr=rub&dest=-1257786&page=${page}&query=${encodeURIComponent(query)}&resultset=catalog&sort=popular&spp=30&suppressSpellcheck=false`;
-    // WB иногда отдаёт битый JSON/429-stub — пробуем до 2 раз с паузой.
-    let products: any[] | null = null;
-    for (let attempt = 0; attempt < 2 && products === null; attempt++) {
-      if (attempt) await new Promise(r => setTimeout(r, 1200));
-      const r = await fetchWithRetry(url, { method: 'GET', headers: BROWSER_HEADERS });
-      const text = await r.text();
-      if (text.trim().startsWith('<') || r.status === 429) { markBlocked(WB_SEARCH_HOST); continue; }
-      if (!r.ok) continue;
-      try { products = (JSON.parse(text)?.data?.products ?? []) as any[]; } catch { products = null; }
-    }
-    if (products === null) { markBlocked(WB_SEARCH_HOST); throw new Error('wb_search_rate_limited'); }
-    if (!products.length) break;
-    const idx = products.findIndex(p => Number(p?.id) === nmId);
-    if (idx >= 0) {
-      return { query, nmId, position: scanned + idx + 1, page, scanned: scanned + products.length, fetchedAt: Date.now() };
-    }
-    scanned += products.length;
-  }
-  return { query, nmId, position: null, page: null, scanned, fetchedAt: Date.now() };
-}
-
-async function fetchWbCard(nm: number): Promise<CompetitorCard> {
-  const vol = Math.floor(nm / 1e5);
-  const part = Math.floor(nm / 1e3);
-  // auto-bump: пробуем вычисленный баскет и соседние (формула устаревает по мере
-  // роста nmId — так card.json не ломается для свежих карточек).
-  const base = wbBasket(nm);
-  const candidates = Array.from(new Set([base, base + 1, base - 1, base + 2]))
-    .filter(b => b >= 1 && b <= 30);
-  let c: any = null;
-  for (const b of candidates) {
-    const host = wbHostStr(b);
-    try {
-      const r = await fetchWithRetry(`${host}/vol${vol}/part${part}/${nm}/info/ru/card.json`,
-        { method: 'GET', headers: BROWSER_HEADERS });
-      if (r.ok) { c = await r.json(); break; }
-    } catch (e) {
-      // Перебор баскетов штатен, поэтому пишем редко: важен случай, когда
-      // недоступны все, и карточка не находится вообще.
-      noteSwallowed('competitors', 'баскет WB не ответил', e, 30 * 60_000);
-    }
-  }
-  if (!c) throw new Error('wb_card_not_found');
-
-  const chars: Array<{ name: string; value: string }> = [];
-  if (Array.isArray(c?.options)) for (const o of c.options) if (o?.name) chars.push({ name: o.name, value: String(o.value ?? '') });
-  if (Array.isArray(c?.grouped_options)) for (const g of c.grouped_options) for (const o of (g?.options || [])) if (o?.name) chars.push({ name: o.name, value: String(o.value ?? '') });
-
-  const photoCount = Number(c?.media?.photo_count) || Number(c?.photo_count) ||
-    (Array.isArray(c?.media?.photos) ? c.media.photos.length : 0) || 1;
-  const basket = wbBasket(nm);
-  const images: string[] = [];
-  for (let i = 1; i <= Math.min(photoCount, 15); i++) images.push(wbImageUrl(nm, basket, i, 'big'));
-
-  return {
-    platform: 'wb',
-    id: String(nm),
-    name: c?.imt_name || c?.subj_name || c?.subj_root_name || '',
-    brand: c?.selling?.brand_name || c?.brand || null,
-    description: c?.description || '',
-    characteristics: chars,
-    photoCount,
-    images,
-    link: `https://www.wildberries.ru/catalog/${nm}/detail.aspx`,
-  };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -406,13 +310,4 @@ export async function competitorSearch(platform: Platform, query: string, limit 
   } catch (e: any) {
     return { platform, query, fetchedAt: Date.now(), items: [], error: String(e?.message ?? e) };
   }
-}
-
-export async function competitorCard(platform: Platform, id: string): Promise<CompetitorCard> {
-  if (platform !== 'wb') throw new Error('card_unsupported_platform'); // Ozon-карточка — позже
-  const nm = Number(id);
-  if (!Number.isFinite(nm)) throw new Error('bad_id');
-  const key = makeCacheKey('comp', 'wb', 'card', String(nm));
-  const { data } = await cachedFetch<CompetitorCard>(key, CARD_TTL_MS, 'card.wbbasket', () => fetchWbCard(nm));
-  return data;
 }

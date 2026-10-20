@@ -51,7 +51,7 @@ fi
 
 echo
 echo "=== эндпоинты (код · секунды) ==="
-for p in /api/auth/check /api/meta/status /api/bi?days=30 /api/penalties?days=30 \
+for p in /api/auth/check /api/meta/status /api/rnp?mp=wb /api/product-econ?days=7 \
          "/api/ads-advisor/by-sku?days=7" /api/ozon-buyer-prices /api/wb-buyer-prices; do
   printf '%-42s %s\n' "$p" "$(curl -s -o /dev/null -m 60 -b "$JAR" -w '%{http_code} · %{time_total}s' "$BASE$p")"
 done

@@ -21,25 +21,18 @@ import { handleProxy, wbUpstream, ozonUpstream } from './_proxy';
 import { requireAuth, authUser, checkPassword, signSession, setSessionCookie, clearSessionCookie, authRequiredButMissing, secretEquals } from './_lib/auth';
 import { fetchWithRetry } from './_lib/fetchRetry';
 import { cacheGet, makeCacheKey, makeUpstreamCacheKey, cacheGetNewestByPrefix } from './_lib/cache';
-import { getOzonTransit } from './_lib/ozonTransit';
-import { getWbTransit } from './_lib/wbTransit';
-import { getWbSupplies } from './_lib/wbSuppliesLog';
 import { getWbBuyerPrices } from './_lib/wbBuyerPrices';
 import { getOzonBuyerPrices } from './_lib/ozonBuyerPrices';
-import { getWbCommissions } from './_lib/wbCommissions';
-import { getOzonFactProfit } from './_lib/ozonFactProfit';
 import { getWbBoxTariffs } from './_lib/wbBoxTariffs';
 import { getWbStock } from './_lib/wbStock';
 import { getWbCardEcon } from './_lib/wbCardEcon';
-import { WB_DAILY_KEY } from './_lib/wbFunnelReport';
 import { pingAnthropic } from './_lib/anthropic';
 import { readRecentAgg, getDailyLimitRub, getUsdRate } from './_lib/aiUsage';
-import { getLatestSnapshot, getSnapshotSeries } from './_lib/history';
+import { getLatestSnapshot } from './_lib/history';
 import { CRON_WARM_INTERVAL_MS } from './_lib/cronSchedule';
 import { handleCron } from './_lib/cron';
 import { handleAi } from './_lib/aiHandlers';
-import { handleCompetitors, handleWbPublic, handleOzonPerf } from './_lib/publicHandlers';
-import { wbSearchRank } from './_lib/competitors';
+import { handleWbPublic, handleOzonPerf } from './_lib/publicHandlers';
 
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -447,75 +440,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // ─── /api/competitor-watch ── конкуренты, закреплённые за нашим товаром ────
-  // GET  ?sku=ARTICLE      → привязки одного товара
-  // GET                    → всё сразу (для страницы со списком)
-  // POST { sku, link }     → добавить вручную (ссылка WB или номер артикула)
-  // POST { sku, nmId, status } → одобрить авто-находку / убрать из расчёта
-  // POST { sku, nmId, remove: true } → удалить привязку
-  if (section === 'competitor-watch') {
-    try {
-      const w = await import('./_lib/competitorWatch');
-      if (req.method === 'POST') {
-        const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
-        // Ручной запуск сбора цен — чтобы не ждать ночного прохода при настройке.
-        if (body?.collect) {
-          const { collectCompetitorPrices } = await import('./_lib/competitorPrices');
-          return res.status(200).json({ ok: true, ...(await collectCompetitorPrices()) });
-        }
-        const sku = String(body?.sku ?? '').trim();
-        if (!sku) return res.status(400).json({ ok: false, error: 'sku_required' });
-
-        if (body?.remove && body?.nmId) {
-          return res.status(200).json({ ok: true, links: w.removeLink(sku, Number(body.nmId)) });
-        }
-        if (body?.status && body?.nmId) {
-          return res.status(200).json({ ok: true, links: w.setLinkStatus(sku, Number(body.nmId), body.status) });
-        }
-        // Ссылку принимаем в любом виде: клиент шлёт и полный URL, и «nm123», и число.
-        const nmId = body?.nmId ? Number(body.nmId) : w.parseNmId(String(body?.link ?? ''));
-        if (!nmId) return res.status(400).json({ ok: false, error: 'bad_link', detail: 'Не удалось разобрать артикул WB из ссылки' });
-        const links = w.addLink(sku, nmId, { source: 'manual', note: body?.note, title: body?.title, brand: body?.brand });
-        return res.status(200).json({ ok: true, links });
-      }
-
-      const sku = String(req.query.sku ?? '').trim();
-      if (sku) {
-        // Наша цена приходит с фронта: она уже посчитана в калькуляторе цен
-        // (с СПП и всеми приоритетами источников), дублировать расчёт незачем.
-        const { getMarketPosition } = await import('./_lib/competitorPrices');
-        const ourPrice = Number(req.query.ourPrice) || null;
-        return res.status(200).json({ ok: true, ...getMarketPosition(sku, ourPrice) });
-      }
-      return res.status(200).json({ ok: true, ...w.getWatchList() });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
-    }
-  }
-
-  // ─── /api/product-econ ── экономика товара по артикулу ─────────────────────
-  // Одна точка сборки входных данных для расчёта прибыли: себестоимость, ДРР,
-  // комиссия и логистика по выбранной схеме работы. Каждое поле несёт признак
-  // происхождения, а неизвестное значение приходит как null, а не как дефолт.
-  // Подробнее, зачем это отдельным модулем, — в шапке _lib/productEcon.ts.
-  if (section === 'ads-insight') {
-    try {
-      const ins = await import('./_lib/ads/insight');
-      const mp = String(req.query.mp ?? 'wb') === 'ozon' ? 'ozon' : 'wb';
-      if (String(req.query.journal ?? '') === '1') return res.status(200).json({ ok: true, entries: ins.getInsightJournal(mp) });
-      return res.status(200).json({ ok: true, ...(await ins.getAdsInsight(mp, String(req.query.refresh ?? '') === '1')) });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
-    }
-  }
-  if (section === 'ads-manage') {
-    try {
-      const { getAdsManage } = await import('./_lib/ads/manage');
-      return res.status(200).json({ ok: true, ...(await getAdsManage(String(req.query.refresh ?? '') === '1')) });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
-    }
-  }
   // ─── /api/rnp — «Рука на пульсе»: метрики по дням и товарам (api/_lib/rnp.ts).
   //   GET  /api/rnp?mp=wb|ozon&from=YYYY-MM-DD&to=YYYY-MM-DD
   //   POST /api/rnp/collect?mp=wb|ozon — внеочередной сбор (фоном)
@@ -533,6 +457,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
     }
   }
+
+  // ─── /api/product-econ ── экономика товара по артикулу ─────────────────────
+  // Одна точка сборки входных данных для расчёта прибыли: себестоимость, ДРР,
+  // комиссия и логистика по выбранной схеме работы. Каждое поле несёт признак
+  // происхождения, а неизвестное значение приходит как null, а не как дефолт.
+  // Подробнее, зачем это отдельным модулем, — в шапке _lib/productEcon.ts.
   if (section === 'product-econ') {
     try {
       const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
@@ -544,45 +474,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await syncFromSkladThrottled(60_000);
       }
       return res.status(200).json({ ok: true, ...(await buildProductEcon(days)) });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
-    }
-  }
-
-  // ─── /api/price-debug?sku=ARTICLE ── сырые поля цены по артикулу ───────────
-  // Клиент регулярно показывает расхождение цены в кабинете с витриной, и
-  // спорить об этом на скриншотах бесполезно: у обеих площадок несколько полей
-  // цены, и какое из них соответствует витрине, зависит от акций. Этот эндпоинт
-  // отдаёт ВСЕ поля как есть, из уже прогретого кэша — без нагрузки на площадки.
-  // Нужен, чтобы такие вопросы закрывались фактом за один запрос.
-  if (section === 'price-debug') {
-    try {
-      const sku = String(req.query.sku ?? '').trim().toUpperCase();
-      if (!sku) return res.status(400).json({ ok: false, error: 'sku_required' });
-
-      const wbKey = makeUpstreamCacheKey('wb:discounts', 'GET', 'api/v2/list/goods/filter', '?limit=1000', undefined);
-      const ozKey = makeUpstreamCacheKey('ozon-seller', 'POST', 'v5/product/info/prices', '',
-        JSON.stringify({ filter: { visibility: 'ALL' }, limit: 100 }));
-      const [wbC, ozC] = await Promise.all([
-        cacheGet<{ text: string }>(wbKey),
-        cacheGet<{ text: string }>(ozKey),
-      ]);
-
-      const parse = <T,>(t: string | undefined, pick: (j: any) => T): T | null => {
-        if (!t) return null;
-        try { return pick(JSON.parse(t)); } catch { return null; }
-      };
-      const wbRow = parse(wbC?.data?.text, (j) =>
-        (j?.data?.listGoods ?? []).find((g: any) => String(g?.vendorCode ?? '').trim().toUpperCase() === sku) ?? null);
-      const ozRow = parse(ozC?.data?.text, (j) =>
-        (j?.items ?? []).find((i: any) => String(i?.offer_id ?? '').trim().toUpperCase() === sku) ?? null);
-
-      return res.status(200).json({
-        ok: true,
-        sku,
-        wb: wbRow ? { raw: wbRow, warmedAt: wbC?.fetchedAt ?? null } : { raw: null, note: 'артикула нет в прогретых ценах WB' },
-        ozon: ozRow ? { raw: ozRow, warmedAt: ozC?.fetchedAt ?? null } : { raw: null, note: 'артикула нет в прогретых ценах Ozon' },
-      });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
     }
@@ -619,36 +510,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true, ...(await r.buildSuggestions()) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
-    }
-  }
-
-  // ─── /api/bi ── ОПиУ, разложение рубля, ДДС, воронка ───────────────────────
-  if (section === 'bi') {
-    const days = Math.min(Math.max(Number(req.query.days) || 30, 7), 180);
-    const noCache = req.headers['x-av-no-cache'] === '1';
-    try {
-      const { getBiSummary, getBiSummaryCached } = await import('./_lib/bi');
-      // Ручное обновление ждёт расчёт, обычный заход — только кэш (иначе на
-      // холодную страница висит на полном проходе по транзакциям).
-      if (noCache) return res.status(200).json({ ok: true, ...(await getBiSummary(days, true)) });
-      const cached = await getBiSummaryCached(days);
-      return res.status(200).json(cached ? { ok: true, ...cached } : { ok: true, building: true });
-    } catch (e) {
-      return res.status(502).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
-    }
-  }
-
-  // ─── /api/penalties ── штрафы и удержания WB + Ozon ────────────────────────
-  if (section === 'penalties') {
-    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 90);
-    const noCache = req.headers['x-av-no-cache'] === '1';
-    try {
-      const { getPenalties, getPenaltiesCached } = await import('./_lib/penalties');
-      if (noCache) return res.status(200).json({ ok: true, ...(await getPenalties(days, true)) });
-      const cached = await getPenaltiesCached(days);
-      return res.status(200).json(cached ? { ok: true, ...cached } : { ok: true, building: true });
-    } catch (e) {
-      return res.status(502).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
     }
   }
 
@@ -733,20 +594,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return handleOzonPerf(req, res, rest.join('/'));
   }
 
-  // ─── /api/ozon-transit — транзит на склады Ozon FBO (в пути + на приёмке) ──
-  // Серверная агрегация 3 методов supply-order (list→get→bundle) с часовым кэшем:
-  // тяжёлую пагинацию не тащим в браузер, отдаём готовую карту offer_id→кол-во.
-  if (section === 'ozon-transit') {
-    try {
-      const noCache = req.headers['x-av-no-cache'] === '1';
-      const data = await getOzonTransit(noCache);
-      res.setHeader('x-av-cache-age', String(Math.round((Date.now() - data.fetchedAt) / 1000)));
-      return res.status(200).json(data);
-    } catch (e: any) {
-      return res.status(502).json({ error: 'ozon_transit_unreachable', detail: String(e?.message ?? e) });
-    }
-  }
-
   // ─── /api/ozon-buyer-prices — цена покупателя Ozon с СПП (из акций) ────────
   // Ozon убрал marketing_price из API; берём action_price из /v1/actions/products
   // (цена со скидкой площадки/соинвеста). Фронт использует вместо таблицы.
@@ -758,18 +605,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(data);
     } catch (e: any) {
       return res.status(502).json({ error: 'ozon_buyer_prices_failed', detail: String(e?.message ?? e) });
-    }
-  }
-
-  // ─── /api/wb-transit — транзит на склады WB FBW (в пути + на приёмке) ──────
-  if (section === 'wb-transit') {
-    try {
-      const noCache = req.headers['x-av-no-cache'] === '1';
-      const data = await getWbTransit(noCache);
-      res.setHeader('x-av-cache-age', String(Math.round((Date.now() - data.fetchedAt) / 1000)));
-      return res.status(200).json(data);
-    } catch (e: any) {
-      return res.status(502).json({ error: 'wb_transit_unreachable', detail: String(e?.message ?? e) });
     }
   }
 
@@ -858,18 +693,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // ─── /api/ozon-fact — факт-прибыль Ozon из финансовых операций (как у КАН) ──
-  if (section === 'ozon-fact') {
-    try {
-      const noCache = req.headers['x-av-no-cache'] === '1';
-      const data = await getOzonFactProfit(noCache);
-      res.setHeader('x-av-cache-age', String(Math.round((Date.now() - data.fetchedAt) / 1000)));
-      return res.status(200).json(data);
-    } catch (e: any) {
-      return res.status(502).json({ error: 'ozon_fact_failed', detail: String(e?.message ?? e) });
-    }
-  }
-
   // ─── /api/wb-card-econ — комиссия + объём по nmId (полный обход карточек) ───
   if (section === 'wb-card-econ') {
     try {
@@ -912,19 +735,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // ─── /api/logistics-fact — факт прямой/обратной логистики по артикулам (16.09.2026) ───
-  // WB: finance-api sales-reports/detailed; Ozon: v1/finance/accrual/postings. force=1 — пересобрать.
-  if (section === 'logistics-fact') {
-    try {
-      const { getLogisticsFact } = await import('./_lib/logisticsFact');
-      const data = await getLogisticsFact(req.query.force === '1');
-      res.setHeader('x-av-cache-age', String(Math.round((Date.now() - data.fetchedAt) / 1000)));
-      return res.status(200).json({ ok: true, ...data });
-    } catch (e: any) {
-      return res.status(502).json({ ok: false, error: 'logistics_fact_failed', detail: String(e?.message ?? e).slice(0, 200) });
-    }
-  }
-
   // ─── /api/ozon-stock — живые остатки Ozon FBO/FBS по offer_id (01.10.2026) ───
   if (section === 'ozon-stock') {
     try {
@@ -949,33 +759,6 @@ if (section === 'wb-stock') {
     return res.status(502).json({ error: 'wb_stock_failed', detail: String(e?.message ?? e) });
   }
 }
-
-// ─── /api/wb-commissions — комиссия WB по предметам (tariffs/commission) ────
-  // Компактная карта { subjectID: комиссия% }. Фронт матчит по card.subjectID и
-  // подставляет реальную комиссию в калькулятор прибыли вместо ручного ввода.
-  if (section === 'wb-commissions') {
-    try {
-      const noCache = req.headers['x-av-no-cache'] === '1';
-      const data = await getWbCommissions(noCache);
-      res.setHeader('x-av-cache-age', String(Math.round((Date.now() - data.fetchedAt) / 1000)));
-      return res.status(200).json(data);
-    } catch (e: any) {
-      return res.status(502).json({ error: 'wb_commissions_failed', detail: String(e?.message ?? e) });
-    }
-  }
-
-  // ─── /api/wb-supplies — журнал поставок на склад WB (даты, статус приёмки) ──
-  // Источник — supplies-api (старый statistics /api/v1/supplies удалён WB 06.2026).
-  if (section === 'wb-supplies') {
-    try {
-      const noCache = req.headers['x-av-no-cache'] === '1';
-      const data = await getWbSupplies(noCache);
-      res.setHeader('x-av-cache-age', String(Math.round((Date.now() - data.fetchedAt) / 1000)));
-      return res.status(200).json(data);
-    } catch (e: any) {
-      return res.status(502).json({ error: 'wb_supplies_unreachable', detail: String(e?.message ?? e) });
-    }
-  }
 
   // ─── /api/ai/* ───────────────────────────────────────────────────────────
   if (section === 'ai') {
@@ -1028,66 +811,18 @@ if (section === 'wb-stock') {
     return handleWbPublic(req, res, rest);
   }
 
-  // ─── /api/competitors/* — единый парсер конкурентов WB + Ozon ─────────────
-  if (section === 'competitors') {
-    return handleCompetitors(req, res, rest);
-  }
-
-  // ─── /api/positions?q=<запрос>&nm=<nmId> — позиция своего товара в выдаче WB ─
-  if (section === 'positions') {
-    const q = String(req.query.q || '').trim();
-    const nm = Number(req.query.nm);
-    if (!q || !Number.isFinite(nm)) return res.status(400).json({ error: 'q_and_nm_required' });
-    try {
-      const rank = await wbSearchRank(q, nm, 5);
-      return res.status(200).json({ ok: true, ...rank });
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      const limited = msg.includes('rate_limited');
-      return res.status(limited ? 503 : 502).json({
-        error: limited ? 'wb_search_rate_limited' : 'positions_failed',
-        detail: limited ? 'WB временно ограничил поиск — повторите через минуту.' : msg,
-      });
-    }
-  }
-
   // ─── /api/meta/* ─────────────────────────────────────────────────────────
   if (section === 'meta') {
     return handleMeta(req, res, rest[0]);
   }
 
   // ─── /api/history/* ──────────────────────────────────────────────────────
-  // Последний снимок дня из SQLite + ряд по дням (для трендов). Фронт читает
+  // Последний снимок дня из SQLite. Фронт читает
   // отсюда, когда живой кэш WB пуст (лимит 429) — чтобы цифры не «пропадали».
   if (section === 'history') {
     if (rest[0] === 'latest') {
       const latest = getLatestSnapshot();
       return res.status(200).json({ ok: true, latest });
-    }
-    if (rest[0] === 'series') {
-      const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
-      return res.status(200).json({ ok: true, series: getSnapshotSeries(days) });
-    }
-    // Дневной ряд выручки WB для графика «Заказано по дням».
-    //
-    // Ряд наполнялся из АСИНХРОННОГО отчёта WB, а тот стабильно возвращает
-    // FAILED (проверено 23.07 на разных диапазонах — сломан движок отчётов на
-    // стороне WB, не наш запрос). Мы перешли на синхронную воронку, а у неё
-    // разбивки по дням нет, поэтому ряда сейчас нет вообще.
-    //
-    // Отвечаем об этом ЯВНО, а не пустым массивом с ok:true: пустой график без
-    // объяснения читается как «продаж не было», и это ровно тот случай, где
-    // подставленная пустота дороже честной надписи.
-    if (rest[0] === 'wb-daily') {
-      const c = await cacheGet<{ series: { date: string; revenue: number; orders: number }[]; maxDt: string }>(WB_DAILY_KEY);
-      const series = c?.data?.series ?? [];
-      return res.status(200).json({
-        ok: true,
-        series,
-        maxDt: c?.data?.maxDt ?? null,
-        reason: series.length ? undefined
-          : 'Разбивки по дням у WB сейчас нет: асинхронный отчёт со стороны WB не собирается, а синхронная воронка отдаёт только итог за период.',
-      });
     }
     return res.status(404).json({ error: 'history_action_not_found' });
   }

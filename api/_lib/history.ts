@@ -154,13 +154,3 @@ export function alertAlreadySent(key: string, ttlMs: number): boolean {
     return false;
   } catch { return false; }
 }
-
-/** Ряд снимков за последние N дней (по возрастанию даты) — для трендов/графиков. */
-export function getSnapshotSeries(days: number): DailyRow[] {
-  const d = getDb();
-  if (!d) return [];
-  try {
-    const rows = d.prepare(`SELECT * FROM daily_snapshot ORDER BY date DESC LIMIT ?`).all(Math.max(1, days)) as any[];
-    return rows.map(mapRow).reverse();
-  } catch { return []; }
-}

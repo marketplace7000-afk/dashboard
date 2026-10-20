@@ -435,12 +435,10 @@ export function parseOzon(data: any, ourSellerId: string): NonNullable<Ads2Compe
   });
   const categories = (data?.markets ?? []).map((m: any) => {
     const all: Ads2OzMarketItem[] = (m.items ?? []).map(toItem);
-    // Места 51–200 (агент с 20.10 присылает оттуда только наши и привязанные товары) — с настоящим местом.
-    const extra: Ads2OzMarketItem[] = (m.extra ?? []).map((x: any, i: number) => ({ ...toItem(x, i), rank: Number(x.rank) || 51 + i }));
     const b = m.benchmark ?? {};
     return {
       category3Id: String(m.category3Id), name: String(m.items?.[0]?.category3 ?? m.category3Id), updateDate: m.updateDate ?? null,
-      ours: [...all, ...extra].filter(x => x.ours), top: all.slice(0, 10),
+      ours: all.filter(x => x.ours), top: all.slice(0, 10),
       benchmark: { price: num(b.avgGmv), convSearch: num(b.convToCartSearch), convPdp: num(b.pdpToCartConversion), drr: num(b.drr) },
     };
   });
@@ -474,7 +472,7 @@ const blankLink = (id: string, mp: AdMp): Ads2WatchLink => ({
   id, url: mp === 'wb' ? `https://www.wildberries.ru/catalog/${id}/detail.aspx` : `https://www.ozon.ru/product/${id}/`,
   source: 'manual', status: 'active', title: '', brand: '', seller: '', note: '', photo: '',
   price: null, rating: null, feedbacks: null, stock: null, orders: null, ordersDyn: null, avgPos: null, ctr: null, openCard: null,
-  inAds: null, inPromo: null, gmv: null, drr: null, ordersDays: null, convPdp: null, priceAt: null, price1d: null, price7d: null, hidden: false, hiddenSince: null, compDate: null,
+  inAds: null, inPromo: null, gmv: null, drr: null, ordersDays: null, convPdp: null, priceAt: null, price1d: null, price7d: null, hidden: false, hiddenSince: null, compDate: null, oz28: null,
 });
 
 /** Фото карточки WB по номеру (basket-CDN, как на витрине). */
@@ -516,7 +514,17 @@ function metricsIndex(mp: AdMp, data: any): Map<string, Partial<Ads2WatchLink>> 
     // Наборы, которые уже закрылись, — последние известные данные сравнения (после свежих: свежие главнее).
     try { for (const [nm, c] of compLast()) put(nm, fromComp(c.x, c.date)); } catch (e) { console.warn('[competitors] данные сравнений не прочитаны:', (e as Error).message); }
   } else {
-    for (const mk of data?.markets ?? []) for (const x of [...(mk.items ?? []), ...(mk.extra ?? [])]) {
+    // «Товары на Ozon» по каждому SKU (агент с 20.10, за 7 и 28 дней) — точнее топа категории, идут первыми.
+    const ozM = (x: any): Partial<Ads2WatchLink> => ({ title: x.name || undefined, brand: x.brand || undefined, seller: x.sellerName || undefined, photo: x.photo || undefined,
+      price: num(x.avgPrice), gmv: num(x.gmvSum ?? x.soldSum), orders: num(x.soldCount), ordersDyn: num(x.salesDynamics),
+      ordersDays: num(x.soldCount) != null ? 7 : undefined, drr: num(x.drr), convPdp: num(x.pdpToCartConversion ?? x.convToCartPdp),
+      inPromo: num(x.daysInPromo) != null ? Number(x.daysInPromo) > 0 : null, inAds: num(x.daysWithTrafarets) != null ? Number(x.daysWithTrafarets) > 0 : null });
+    for (const x of data?.bySku?.weekly ?? []) put(String(x.sku), ozM(x));
+    for (const x of data?.bySku?.monthly ?? []) {
+      const v = ozM(x);
+      put(String(x.sku), { oz28: { orders: v.orders ?? null, gmv: v.gmv ?? null, convPdp: v.convPdp ?? null, drr: v.drr ?? null, inAds: v.inAds ?? null, inPromo: v.inPromo ?? null } });
+    }
+    for (const mk of data?.markets ?? []) for (const x of mk.items ?? []) {
       put(String(x.sku), { title: x.name || undefined, brand: x.brand || undefined, seller: x.sellerName || undefined, photo: x.photo || undefined,
         price: num(x.avgPrice), gmv: num(x.gmvSum ?? x.soldSum), orders: num(x.soldCount), ordersDyn: num(x.salesDynamics),
         ordersDays: num(x.soldCount) != null ? 7 : undefined, drr: num(x.drr), convPdp: num(x.pdpToCartConversion ?? x.convToCartPdp),
@@ -560,7 +568,7 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
   if (mp === 'wb') for (const g of data?.report?.groups ?? []) for (const it of g.items ?? []) {
     if (it.vendorCode) fromSnap.set(up(it.vendorCode), { id: String(it.nmId ?? ''), name: String(it.name ?? ''), photo: String(it.mainPhoto ?? '') });
   }
-  else for (const mk of data?.markets ?? []) for (const x of [...(mk.items ?? []), ...(mk.extra ?? [])]) {
+  else for (const mk of data?.markets ?? []) for (const x of mk.items ?? []) {
     const ourSeller = String(process.env.OZON_CLIENT_ID || '').trim();
     if ((ourSeller && String(x.sellerId) === ourSeller) || x.blockedAsYourGood) fromSnap.set(up(x.article), { id: String(x.sku ?? ''), name: String(x.name ?? ''), photo: String(x.photo ?? '') });
   }

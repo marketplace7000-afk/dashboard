@@ -14,7 +14,9 @@
  *        Аналитика WB требует заголовков сессии (authorizev3, seller-lk): берём их
  *        из собственного запроса страницы, держим только в памяти, никуда не пишем.
  *   Ozon «Товары на Ozon» по нашим категориям (топ-50 по выручке за неделю) и
- *        «Конкурентная позиция» (наше место среди продавцов, ближайший конкурент).
+ *        «Конкурентная позиция» (наше место среди продавцов, ближайший конкурент);
+ *        тот же отчёт по каждому привязанному конкуренту и нашему товару — фильтр по SKU
+ *        без категорий, за 7 и за 28 дней (bySku).
  *   Обе  карточки конкурентов, привязанных к нашим товарам (params.watch — сервер
  *        заполняет при выдаче), и наших товаров (params.ours) на витрине покупателя.
  *
@@ -193,13 +195,7 @@ async function ozonShowcaseCards(page: Page, ids: number[], settings: AgentSetti
   return { cards, errors, notShown };
 }
 
-// Глубина «Товаров на Ozon»: кабинет отдаёт по 50 строк (limit 100+ → 400), листаем offset.
-// 20.10.2026: в топ-50 категории попадала лишь половина привязанных конкурентов (60 из 114),
-// у остальных не было продаж, выручки, корзины и рекламы. Первые 50 храним целиком (рынок,
-// предложения конкурентов), из мест 51–200 — только привязанные конкуренты и наши товары (extra).
-const OZ_MARKET_PAGES = 4;
-
-const OZ_COLLECT = (companyId: string, ourCats: string[], want: number[]) => `(async (CID, OUR, WANT) => {
+const OZ_COLLECT = (companyId: string, ourCats: string[]) => `(async (CID, OUR) => {
   const HD = { 'Content-Type': 'application/json', 'x-o3-app-name': 'seller-ui', 'x-o3-company-id': CID, 'x-o3-language': 'ru' };
   const j = async (u, body) => {
     const r = await fetch(u, { method: 'POST', credentials: 'include', headers: HD, body: JSON.stringify(body) });
@@ -216,25 +212,13 @@ const OZ_COLLECT = (companyId: string, ourCats: string[], want: number[]) => `(a
     if (c.error) errors.push(c.error);
     cats = (c.json && c.json.categoryIds || []).slice(0, 8);
   }
-  const want = new Set(WANT.map(String));
   const markets = [];
   for (const cat of cats) {
-    let first = null;
-    const extra = [];
-    for (let pg = 0; pg < ${OZ_MARKET_PAGES}; pg++) {
-      const w = await j('https://api.seller.ozon.ru/api/site/seller-analytics/what_to_sell/data/v3',
-        { limit: '50', offset: String(pg * 50), filter: { stock: 'any_stock', period: 'weekly', categories: [cat] }, sort: { key: 'sum_gmv_desc' } });
-      if (w.error) { errors.push(w.error); break; }
-      const items = w.json && w.json.items || [];
-      if (!pg) first = w.json;
-      else items.forEach((x, i) => {
-        if (want.has(String(x.sku)) || String(x.sellerId) === CID || x.blockedAsYourGood) extra.push(Object.assign({ rank: pg * 50 + i + 1 }, x));
-      });
-      await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500));
-      if (items.length < 50) break;
-    }
-    if (!first) continue;
-    markets.push({ category3Id: cat, items: first.items || [], extra: extra, benchmark: first.benchmark || null, updateDate: first.updateDate || null });
+    const w = await j('https://api.seller.ozon.ru/api/site/seller-analytics/what_to_sell/data/v3',
+      { limit: '50', offset: '0', filter: { stock: 'any_stock', period: 'weekly', categories: [cat] }, sort: { key: 'sum_gmv_desc' } });
+    if (w.error) { errors.push(w.error); continue; }
+    markets.push({ category3Id: cat, items: w.json && w.json.items || [], benchmark: w.json && w.json.benchmark || null, updateDate: w.json && w.json.updateDate || null });
+    await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500));
   }
   const c2 = [];
   for (const m of markets) for (const it of m.items) if (it.category2Id && c2.indexOf(it.category2Id) < 0) { c2.push(it.category2Id); break; }
@@ -250,7 +234,34 @@ const OZ_COLLECT = (companyId: string, ourCats: string[], want: number[]) => `(a
     await new Promise(r => setTimeout(r, 1000 + Math.random() * 1000));
   }
   return { categories: cats, markets: markets, positions: positions, errors: errors };
-})(${JSON.stringify(companyId)}, ${JSON.stringify(ourCats)}, ${JSON.stringify(want)})`;
+})(${JSON.stringify(companyId)}, ${JSON.stringify(ourCats)})`;
+
+// «Товары на Ozon» по конкретным SKU — как поле «Название или SKU» на странице (20.10.2026).
+// Поле sku в запросе — одно число (int64): список через запятую кабинет обрезает до первого,
+// массив — 400. Поэтому по запросу на SKU; проверено: из 114 привязанных конкурентов
+// нашлись 109 (остальные не на витрине), 114 запросов ≈ 3 мин, без 429.
+const OZ_BY_SKU = (companyId: string, skus: number[]) => `(async (CID, SKUS) => {
+  const HD = { 'Content-Type': 'application/json', 'x-o3-app-name': 'seller-ui', 'x-o3-company-id': CID, 'x-o3-language': 'ru' };
+  const out = { weekly: [], monthly: [] }, errors = [];
+  let stop = false;
+  for (const period of ['weekly', 'monthly']) {
+    for (const s of SKUS) {
+      if (stop) break;
+      const r = await fetch('https://api.seller.ozon.ru/api/site/seller-analytics/what_to_sell/data/v3', { method: 'POST', credentials: 'include', headers: HD,
+        body: JSON.stringify({ limit: '50', offset: '0', filter: { stock: 'any_stock', period: period, sku: String(s) }, sort: { key: 'sum_gmv_desc' } }) });
+      if (!r.ok) {
+        errors.push('товары Ozon по SKU ' + s + ': ' + r.status);
+        if (r.status === 429 || r.status === 403) stop = true;
+        continue;
+      }
+      let j = null; try { j = await r.json(); } catch (e) {}
+      const it = j && j.items && j.items.find(x => String(x.sku) === String(s));
+      if (it) out[period].push(it);
+      await new Promise(r => setTimeout(r, 1000 + Math.random() * 800));
+    }
+  }
+  return { bySku: out, errors: errors };
+})(${JSON.stringify(companyId)}, ${JSON.stringify(skus)})`;
 
 export async function runCompetitorWatch(task: AgentTask, settings: AgentSettings): Promise<void> {
   const mp = task.params.marketplace === 'ozon' ? 'ozon' : 'wb';
@@ -286,11 +297,18 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
       if (!cid) { await api.fail(task.id, { error: 'сервер не передал company_id Ozon', retryable: false }); return; }
       await api.progress(task.id, stage(1, 'Товары на Ozon по нашим категориям и конкурентная позиция'), true);
       const cats = Array.isArray(task.params.categories) ? task.params.categories.map(String) : [];
-      const want = [...(task.params.watch as number[] ?? []), ...(task.params.ours as number[] ?? [])].map(Number).filter(n => n > 0);
-      data = await page.evaluate(OZ_COLLECT(cid, cats, want));
+      data = await page.evaluate(OZ_COLLECT(cid, cats));
       const items = (data?.markets ?? []).reduce((s: number, m: any) => s + (m.items?.length ?? 0), 0);
-      const extra = (data?.markets ?? []).reduce((s: number, m: any) => s + (m.extra?.length ?? 0), 0);
-      await api.progress(task.id, stage(1, `Категорий ${data?.markets?.length ?? 0}, товаров рынка ${items}, наших и привязанных с мест 51–200: ${extra}`, { items_done: items, items_total: items }), true);
+      await api.progress(task.id, stage(1, `Категорий ${data?.markets?.length ?? 0}, товаров рынка ${items}`, { items_done: items, items_total: items }), true);
+      // Продажи, выручка, корзина, ДРР, акции по каждому привязанному конкуренту и нашему товару.
+      const skus = [...new Set([...(task.params.watch as number[] ?? []), ...(task.params.ours as number[] ?? [])].map(Number).filter(n => n > 0))].slice(0, 200);
+      if (skus.length) {
+        await api.progress(task.id, stage(1, `Продажи по артикулам: ${skus.length} шт., за 7 и 28 дней`), true);
+        const r: any = await page.evaluate(OZ_BY_SKU(cid, skus));
+        data.bySku = r?.bySku ?? null;
+        data.errors = [...(data.errors ?? []), ...((r?.errors ?? []) as string[]).slice(0, 5)];
+        await api.progress(task.id, stage(1, `Продажи по артикулам: найдено ${data.bySku?.weekly?.length ?? 0} из ${skus.length}`, { items_done: data.bySku?.weekly?.length ?? 0, items_total: skus.length }), true);
+      }
     }
     // Карточки привязанных конкурентов и наших товаров на витрине (цена, рейтинг, отзывы, остаток).
     const ids = [...new Set([...(task.params.ours as number[] ?? []), ...(task.params.watch as number[] ?? [])].map(Number).filter(n => n > 0))]

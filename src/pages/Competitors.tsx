@@ -102,7 +102,14 @@ function RefreshBar({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
 }
 
 /** Строка таблицы сравнения: наш товар и конкуренты в одних колонках. */
-function CmpCells({ l, mp, our, passAt }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2WatchLink | null; passAt: number | null }) {
+/** Период показателей «Товаров на Ozon» в таблице конкурентов: 7 или 28 дней. */
+type OzPer = 7 | 28;
+
+function CmpCells({ l, mp, our, passAt, per = 7 }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2WatchLink | null; passAt: number | null; per?: OzPer }) {
+  const oz = per === 28
+    ? (l.oz28 ?? { orders: null, gmv: null, convPdp: null, drr: null, inAds: null, inPromo: null })
+    : { orders: l.orders, gmv: l.gmv, convPdp: l.convPdp, drr: l.drr, inAds: l.inAds, inPromo: l.inPromo };
+  const ads = mp === 'ozon' ? oz : l;
   const diff = l !== our && l.price != null && our?.price ? Math.round((l.price / our.price - 1) * 100) : null;
   const day = l.price != null && l.price1d ? Math.round((l.price / l.price1d - 1) * 100) : null;
   const ordSuffix = mp === 'wb' && l.orders != null && l.ordersDays === 7 ? <span className="muted cmp-unit"> за 7 дн</span>
@@ -127,12 +134,12 @@ function CmpCells({ l, mp, our, passAt }: { l: Ads2WatchLink; mp: Ads2Mp; our: A
         <td className="ad2-num">{num(l.avgPos)}</td>
         <td className="ad2-num">{pct(l.ctr)}</td>
       </> : <>
-        <td className="ad2-num">{num(l.orders)}</td>
-        <td className="ad2-num">{l.gmv != null ? kRub(l.gmv) : '–'}</td>
-        <td className="ad2-num">{pct(l.convPdp)}</td>
-        <td className="ad2-num">{pct(l.drr)}</td>
+        <td className="ad2-num">{num(oz.orders)}</td>
+        <td className="ad2-num">{oz.gmv != null ? kRub(oz.gmv) : '–'}</td>
+        <td className="ad2-num">{pct(oz.convPdp)}</td>
+        <td className="ad2-num">{pct(oz.drr)}</td>
       </>}
-      <td className="cmp-yn">{l.inAds == null ? '–' : l.inAds ? 'да' : 'нет'} / {l.inPromo == null ? '–' : l.inPromo ? 'да' : 'нет'}</td>
+      <td className="cmp-yn">{ads.inAds == null ? '–' : ads.inAds ? 'да' : 'нет'} / {ads.inPromo == null ? '–' : ads.inPromo ? 'да' : 'нет'}</td>
     </>
   );
 }
@@ -148,8 +155,8 @@ function HiddenNote({ mp, since }: { mp: Ads2Mp; since: number | null }) {
   );
 }
 
-function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast }: {
-  p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; showIgnored: boolean; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
+function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7 }: {
+  p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; showIgnored: boolean; per?: OzPer; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [link, setLink] = useState('');
@@ -207,14 +214,14 @@ function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast }: {
               <th className="ad2-num">Рейтинг</th><th className="ad2-num">Отзывы</th>
               {mp === 'wb'
                 ? <><th className="ad2-num" title="Из «Сравнения карточек» WB за 30 дней; у нашего товара без открытого сравнения — за 7 дней">Заказы, 30 дн</th><th className="ad2-num">Позиция</th><th className="ad2-num">CTR</th></>
-                : <><th className="ad2-num">Продано, нед</th><th className="ad2-num">Выручка, нед</th><th className="ad2-num" title="Из карточки в корзину">В корзину</th><th className="ad2-num">ДРР</th></>}
+                : <><th className="ad2-num">Продано, {per} дн</th><th className="ad2-num">Выручка, {per} дн</th><th className="ad2-num" title="Из карточки в корзину">В корзину</th><th className="ad2-num" title="Доля рекламных расходов в выручке">ДРР</th></>}
               <th className="cmp-yn" title="Участвует в рекламе / в акции площадки">Реклама / акция</th><th className="cmp-decide">Решение</th>
             </tr></thead>
             <tbody>
               {our && (
                 <tr className="cmp-our">
                   <td className="cmp-col-prod"><ProductCell p={{ photo: our.photo || p.photo, name: our.title || p.name, article: `наш товар · ${p.key}`, link: our.url }} /></td>
-                  <CmpCells l={our} mp={mp} our={our} passAt={passAt} />
+                  <CmpCells l={our} mp={mp} our={our} passAt={passAt} per={per} />
                   <td className="cmp-decide"><span className="chip ad2-chipsm cmp-chip-our">наш товар</span></td>
                 </tr>
               )}
@@ -227,7 +234,7 @@ function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast }: {
                       {l.hidden && <div className="cmp-note cmp-gone">нет на витрине {mpName} {l.hiddenSince ? `с ${whenRel(l.hiddenSince)}` : ''}</div>}
                       {(l.note || l.source === 'manual') && <div className="muted cmp-note">{l.source === 'manual' ? 'добавлен вручную' : ''}{l.source === 'manual' && l.note ? ' · ' : ''}{l.note}</div>}
                     </td>
-                    <CmpCells l={l} mp={mp} our={our} passAt={passAt} />
+                    <CmpCells l={l} mp={mp} our={our} passAt={passAt} per={per} />
                     <td className="cmp-decide">
                       <span className={`chip ${W_STATUS[l.status].cls} ad2-chipsm`}>{W_STATUS[l.status].label}</span>
                       <div className="cmp-btns">
@@ -257,6 +264,8 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
   const [onlyPending, setOnlyPending] = useState(false);
   const [showIgnored, setShowIgnored] = useState(false);
   const [more, setMore] = useState(15);
+  const [per, setPer] = useState<OzPer>(() => { try { return localStorage.getItem('cmp:ozPer') === '28' ? 28 : 7; } catch { return 7; } });
+  const pickPer = (v: OzPer) => { setPer(v); try { localStorage.setItem('cmp:ozPer', String(v)); } catch { /* приватное окно */ } };
   const withLinks = d.watch.filter(p => p.links.length > 0);
   const gone = d.watch.filter(p => p.our?.hidden);
   const pendingOf = (p: Ads2WatchProduct) => p.links.filter(l => l.status === 'suggested').length;
@@ -288,6 +297,12 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
             <button className={`period-btn ${!all ? 'active' : ''}`} onClick={() => setAll(false)}>С конкурентами <span className="ad2-cnt">{withLinks.length}</span></button>
             <button className={`period-btn ${all ? 'active' : ''}`} onClick={() => setAll(true)}>Все товары <span className="ad2-cnt">{d.watch.length}</span></button>
           </div>
+          {mp === 'ozon' && (
+            <div className="period-switch" role="group" aria-label="Период продаж Ozon" title="Продажи, выручка, корзина, ДРР и реклама/акции — из «Товаров на Ozon» за выбранный период">
+              <button className={`period-btn ${per === 7 ? 'active' : ''}`} onClick={() => pickPer(7)}>7 дней</button>
+              <button className={`period-btn ${per === 28 ? 'active' : ''}`} onClick={() => pickPer(28)}>28 дней</button>
+            </div>
+          )}
           <label className="cmp-check"><input type="checkbox" checked={onlyPending} onChange={e => setOnlyPending(e.target.checked)} /> только ждущие решения</label>
           <label className="cmp-check"><input type="checkbox" checked={showIgnored} onChange={e => setShowIgnored(e.target.checked)} /> показывать «не наших»</label>
         </div>
@@ -304,7 +319,7 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
         </section>
       )}
       {list.length === 0 && <div className="card muted">{all || needle || onlyPending ? 'Ничего не найдено.' : 'Привязок пока нет. Предложения появятся после ночного прохода агента; своего конкурента можно привязать в «Все товары».'}</div>}
-      {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} showIgnored={showIgnored} onData={onData} setToast={setToast} />)}
+      {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} per={per} showIgnored={showIgnored} onData={onData} setToast={setToast} />)}
       {list.length > more && <button className="btn" onClick={() => setMore(m => m + 20)}>Показать ещё ({list.length - more})</button>}
     </>
   );

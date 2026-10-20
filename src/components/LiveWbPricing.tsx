@@ -28,7 +28,7 @@ import { usePricingPrefs, fmt, buyoutPct } from './usePricingPrefs';
 import { calcWbProfit, WB_DEFAULTS, type WbCalcInput } from '../utils/wbProfit';
 import { AiAdvice } from './AiAdvice';
 import { PricingGlobalParams, type GParamField } from './PricingGlobalParams';
-import { PriceToolbar, PriceKpis, type ListMode } from './PriceToolbar';
+import { PriceToolbar, PriceKpis } from './PriceToolbar';
 import { wbBuyerPricesRes, wbCardEconRes, wbBoxTariffsRes, adsBySkuRes, productEconRes, wbShowcaseRes, wbStockRes, LIVE_POLL_MS } from '../api/pricingResources';
 import { fmtClock, fmtDateClock } from '../api/sideResource';
 import { wbImageUrl } from '../utils/wbBasket';

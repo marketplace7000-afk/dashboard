@@ -12,7 +12,7 @@ import { usePricingPrefs, fmt, buyoutPct } from './usePricingPrefs';
 import { AiAdvice } from './AiAdvice';
 import { calcOzonProfit, OZON_DEFAULTS, type OzonCalcInput } from '../utils/ozonProfit';
 import { PricingGlobalParams, type GParamField } from './PricingGlobalParams';
-import { PriceToolbar, PriceKpis, type ListMode } from './PriceToolbar';
+import { PriceToolbar, PriceKpis } from './PriceToolbar';
 import { ozonBuyerPricesRes, ozonSkuAdsRes, ozonShowcaseRes } from '../api/pricingResources';
 import { fmtClock, fmtDateClock } from '../api/sideResource';
 import { productEconRes, ozonStockRes, LIVE_POLL_MS } from '../api/pricingResources';

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, PaperPlaneTiltIcon,
-  GearIcon, SquaresFourIcon,
+  GearIcon,
   CaretRightIcon, MegaphoneIcon,
   ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, BinocularsIcon, WarehouseIcon, UsersThreeIcon
 } from '@phosphor-icons/react';
@@ -12,7 +12,6 @@ import { Prices } from './pages/Prices';
 import { Reviews } from './pages/Reviews';
 import { Chats } from './pages/Chats';
 import { Settings } from './pages/Settings';
-import { Modules } from './pages/Modules';
 import { Ads } from './pages/Ads';
 import { Competitors } from './pages/Competitors';
 import { Rnp } from './pages/Rnp';
@@ -31,7 +30,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 // закрыт (api/_lib/sklad/archive.ts). Вернуть — false здесь и SKLAD_ENABLED=1 на сервере.
 const SKLAD_ARCHIVED = true;
 
-type Page = 'dashboard' | 'access' | 'sklad' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'modules' | 'ads' | 'competitors' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'access' | 'sklad' | 'prices' | 'rnp' | 'reviews' | 'chats' | 'ads' | 'competitors' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -58,9 +57,6 @@ const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   { key: 'ads',         Icon: MegaphoneIcon,       label: 'Реклама' },
   // 15.10.2026: конкуренты — отдельный раздел (привязка, позиции и рынок, советник по продажам).
   { key: 'competitors', Icon: BinocularsIcon,      label: 'Конкуренты' },
-  // «Модули» скрыт из меню по просьбе клиента (28.07) — роут и страница живы,
-  // вернуть = раскомментировать строку ниже.
-  // { key: 'modules',     Icon: SquaresFourIcon,     label: 'Модули' },
 ];
 const NAV_CONFIG: { key: Page; Icon: any; label: string }[] = [
   // «Сборщики» — сеть агентов на ПК (ТЗ «Сеть агентов»): очередь, живой ход
@@ -82,7 +78,6 @@ const TITLES: Record<Page, string> = {
   rnp: 'Рука на пульсе (РНП)',
   ads: 'Реклама',
   competitors: 'Конкуренты',
-  modules: 'Модули · акции, аудит карточек',
   collectors: 'Сборщики · агенты на ПК',
   settings: 'Настройки',
 };
@@ -102,7 +97,7 @@ export function App() {
 
   useEffect(() => {
     if (!logged) { setMe(null); return; }
-    const OWNER = { name: 'Владелец', role: 'owner' as Role, sections: [...NAV_TOP, ...NAV_AFTER_PROCUREMENT, ...NAV_CONFIG, { key: 'modules' }].map(n => n.key) };
+    const OWNER = { name: 'Владелец', role: 'owner' as Role, sections: [...NAV_TOP, ...NAV_AFTER_PROCUREMENT, ...NAV_CONFIG].map(n => n.key) };
     // Общая память настроек — вместе с ролью: страницы рисуются уже с серверным архивом и параметрами.
     const ui = loadUiState().finally(() => startUiStateSync());
     apiGet<{ user?: { name: string; role: Role; sections?: string[] } }>('/api/auth/check')
@@ -225,7 +220,6 @@ export function App() {
           {view === 'ads' && <Ads />}
           {view === 'competitors' && <Competitors />}
           {view === 'settings' && <Settings />}
-          {view === 'modules' && <Modules />}
           {view === 'collectors' && <AgentHosts />}
           {view === 'access' && <Access />}
           {view === null && <div className="card muted">Для вашей учётной записи сейчас нет доступных разделов.</div>}

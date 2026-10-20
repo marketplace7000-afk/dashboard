@@ -267,24 +267,6 @@ export async function ozonProductPricesAll(): Promise<OzonPriceRow[]> {
   });
 }
 
-export type OzonUpdatePriceItem = {
-  offer_id?: string;
-  product_id?: number;
-  price: string;            // новая цена
-  old_price?: string;       // зачёркнутая
-  min_price?: string;       // минимальная
-  currency_code?: 'RUB';
-};
-
-// НЕ дёргаем без явного клика — это меняет цены в проде клиента.
-export async function ozonUpdatePrices(prices: OzonUpdatePriceItem[]): Promise<any> {
-  const r = await fetch('/ozon/v1/product/import/prices', {
-    method: 'POST',
-    body: JSON.stringify({ prices }),
-  });
-  return json(r);
-}
-
 export type OzonStockRow = {
   product_id: number;
   offer_id: string;

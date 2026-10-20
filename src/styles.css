@@ -355,16 +355,6 @@ tbody tr:last-child td { border-bottom: none; }
 .field { margin-bottom: 14px; }
 .row { display: flex; gap: 10px; align-items: center; }
 
-/* Stub banner */
-.stub {
-  background: var(--accent-soft);
-  color: var(--accent-2);
-  padding: 12px 16px; border-radius: 10px;
-  font-size: 16px;
-  display: flex; gap: 10px; align-items: flex-start;
-}
-.stub b { color: var(--accent-2); font-weight: 600; }
-
 /* Login */
 .login-wrap {
   display: grid; place-items: center; height: 100vh;

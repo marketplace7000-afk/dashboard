@@ -81,13 +81,22 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
   }
   const lim = await j('/v1/competitor-comparison/limits');
   if (lim.error) errors.push(lim.error);
-  const hist = await j('/v1/competitor-comparison/history', { orderBy: { field: 'date', mode: 'desc' }, limit: 50, offset: 0 });
-  if (hist.error) errors.push(hist.error);
+  // История наборов — постранично (по 50): при 50+ товарах наборов больше одной страницы.
+  const hist = { json: { data: [] }, error: null };
+  for (let off = 0; off < 500; off += 50) {
+    const h = await j('/v1/competitor-comparison/history', { orderBy: { field: 'date', mode: 'desc' }, limit: 50, offset: off });
+    if (h.error) { errors.push(h.error); break; }
+    const page = (h.json && h.json.data) || [];
+    hist.json.data.push(...page);
+    if (page.length < 50) break;
+    await new Promise(r => setTimeout(r, 800 + Math.random() * 700));
+  }
   // Отчёты сравнений: только наборы со status.available — их открытие лимит не тратит
   // (проверено 14.10: счётчик comparisonsThisMonth не меняется). Истёкший набор кабинет
   // не отдаёт без списания (RequiresLimitCharge) — такие не трогаем.
   const compDetails = [];
-  const sets = ((hist.json && hist.json.data) || []).filter(h => h && h.status && h.status.available).slice(0, 12);
+  // Открытый набор живёт 3–4 дня — читаем все открытые за ночь (до 80, ≈2–3 с на набор).
+  const sets = ((hist.json && hist.json.data) || []).filter(h => h && h.status && h.status.available).slice(0, 80);
   for (const h of sets) {
     const scope = (h.nms || []).map(n => n.nmID);
     const r = await j('/v4/competitor-comparison/nms/detail', { period: { start: d(29), end: d(0) }, id: h.ID,
@@ -313,7 +322,7 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
       const items = (data?.markets ?? []).reduce((s: number, m: any) => s + (m.items?.length ?? 0), 0);
       await api.progress(task.id, stage(1, `Категорий ${data?.markets?.length ?? 0}, товаров рынка ${items}`, { items_done: items, items_total: items }), true);
       // Продажи, выручка, корзина, ДРР, акции по каждому привязанному конкуренту и нашему товару.
-      const skus = [...new Set([...(task.params.watch as number[] ?? []), ...(task.params.ours as number[] ?? [])].map(Number).filter(n => n > 0))].slice(0, 280);
+      const skus = [...new Set([...(task.params.watch as number[] ?? []), ...(task.params.ours as number[] ?? [])].map(Number).filter(n => n > 0))].slice(0, 700);
       if (skus.length) {
         await api.progress(task.id, stage(1, `Продажи по артикулам: ${skus.length} шт., за 7 и 28 дней`), true);
         const r: any = await page.evaluate(OZ_BY_SKU(cid, skus));
@@ -324,7 +333,7 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
     }
     // Карточки привязанных конкурентов и наших товаров на витрине (цена, рейтинг, отзывы, остаток).
     const ids = [...new Set([...(task.params.ours as number[] ?? []), ...(task.params.watch as number[] ?? [])].map(Number).filter(n => n > 0))]
-      .slice(0, 280);
+      .slice(0, 700);
     if (light && !ids.length) { await api.complete(task.id, 'Быстрое обновление: привязанных конкурентов нет'); return; }
     if (data && ids.length) {
       await api.progress(task.id, stage(1, `Карточки конкурентов на витрине: ${ids.length}`), true);

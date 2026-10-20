@@ -107,8 +107,8 @@ type OzPer = 7 | 28;
 
 function CmpCells({ l, mp, our, passAt, per = 7 }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2WatchLink | null; passAt: number | null; per?: OzPer }) {
   const oz = per === 28
-    ? (l.oz28 ?? { orders: null, gmv: null, convPdp: null, drr: null, inAds: null, inPromo: null })
-    : { orders: l.orders, gmv: l.gmv, convPdp: l.convPdp, drr: l.drr, inAds: l.inAds, inPromo: l.inPromo };
+    ? (l.oz28 ?? { orders: null, gmv: null, convPdp: null, drr: null, ctr: null, inAds: null, inPromo: null })
+    : { orders: l.orders, gmv: l.gmv, convPdp: l.convPdp, drr: l.drr, ctr: l.ctr, inAds: l.inAds, inPromo: l.inPromo };
   const ads = mp === 'ozon' ? oz : l;
   const diff = l !== our && l.price != null && our?.price ? Math.round((l.price / our.price - 1) * 100) : null;
   const day = l.price != null && l.price1d ? Math.round((l.price / l.price1d - 1) * 100) : null;
@@ -130,10 +130,11 @@ function CmpCells({ l, mp, our, passAt, per = 7 }: { l: Ads2WatchLink; mp: Ads2M
       <td className="ad2-num">{l.rating ? nf1.format(l.rating) : <span className="muted">{l.rating === 0 ? 'нет' : '–'}</span>}</td>
       <td className="ad2-num">{num(l.feedbacks)}</td>
       {mp === 'wb' ? <>
+        <td className="ad2-num">{pct(l.ctr)}</td>
         <td className="ad2-num">{num(l.orders)}{ordSuffix} <PctDyn v={l.ordersDyn} />{compNote}</td>
         <td className="ad2-num">{num(l.avgPos)}</td>
-        <td className="ad2-num">{pct(l.ctr)}</td>
       </> : <>
+        <td className="ad2-num">{pct(oz.ctr ?? null)}</td>
         <td className="ad2-num">{num(oz.orders)}</td>
         <td className="ad2-num">{oz.gmv != null ? kRub(oz.gmv) : '–'}</td>
         <td className="ad2-num">{pct(oz.convPdp)}</td>
@@ -213,8 +214,8 @@ function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7 }:
               <th className="ad2-num">Цена</th><th className="ad2-num" title="Цена конкурента против нашей">К нашей</th>
               <th className="ad2-num">Рейтинг</th><th className="ad2-num">Отзывы</th>
               {mp === 'wb'
-                ? <><th className="ad2-num" title="Из «Сравнения карточек» WB за 30 дней; у нашего товара без открытого сравнения — за 7 дней">Заказы, 30 дн</th><th className="ad2-num">Позиция</th><th className="ad2-num">CTR</th></>
-                : <><th className="ad2-num">Продано, {per} дн</th><th className="ad2-num">Выручка, {per} дн</th><th className="ad2-num" title="Из карточки в корзину">В корзину</th><th className="ad2-num" title="Доля рекламных расходов в выручке">ДРР</th></>}
+                ? <><th className="ad2-num" title="CTR в поиске: переходы в карточку ÷ показы. Из «Сравнения карточек» WB (30 дней); у нашего товара без сравнения — «Поисковые запросы» за 7 дней. Зависит и от фото, и от позиции/рекламы">CTR</th><th className="ad2-num" title="Из «Сравнения карточек» WB за 30 дней; у нашего товара без открытого сравнения — за 7 дней">Заказы, 30 дн</th><th className="ad2-num">Позиция</th></>
+                : <><th className="ad2-num" title="Просмотры карточки ÷ показы, из «Товаров на Ozon» за выбранный период — одна формула для нас и конкурентов. Считает все просмотры карточки, поэтому выше CTR в РНП в 1,4–1,8 раза. Зависит и от фото, и от позиции/рекламы">CTR</th><th className="ad2-num">Продано, {per} дн</th><th className="ad2-num">Выручка, {per} дн</th><th className="ad2-num" title="Из карточки в корзину">В корзину</th><th className="ad2-num" title="Доля рекламных расходов в выручке">ДРР</th></>}
               <th className="cmp-yn" title="Участвует в рекламе / в акции площадки">Реклама / акция</th><th className="cmp-decide">Решение</th>
             </tr></thead>
             <tbody>

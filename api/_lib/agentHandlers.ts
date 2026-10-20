@@ -126,7 +126,7 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     // товары с привязками — агент снимает их карточки на витрине для сравнения.
     if (task.type === 'competitor_watch') {
       const { watchParams } = await import('./ads/cabinet');
-      task.params = { ...task.params, ...watchParams(task.params.marketplace === 'ozon' ? 'ozon' : 'wb') };
+      task.params = { ...task.params, ...watchParams(task.params.marketplace === 'ozon' ? 'ozon' : 'wb', !!task.params.light) };
     }
     res.status(200).json({ task, settings: getSettings() });
     return;

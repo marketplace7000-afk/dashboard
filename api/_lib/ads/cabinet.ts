@@ -331,7 +331,10 @@ export function autoSuggest(mp: AdMp, data: any): number {
 }
 
 /** Параметры задания competitor_watch: кого снимать на витрине (конкуренты + наши товары с привязками). */
-export function watchParams(mp: AdMp): { watch: number[]; ours: number[] } {
+/** Пределы списка для агента — с запасом на рост ассортимента (50 товаров × 5 конкурентов = 250 + наши). */
+export const WATCH_LIMITS = { watch: 400, ours: 300 };
+
+export function watchParams(mp: AdMp, light = false): { watch: number[]; ours: number[] } {
   // Наши карточки с привязками — тем же способом, что и на странице (справочник РНП, а если там товара нет —
   // номер из снимка кабинета), иначе у такого товара цена так и осталась бы «из аналитики».
   const row = db().prepare('SELECT json FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT 1').get(mp) as any;
@@ -340,7 +343,8 @@ export function watchParams(mp: AdMp): { watch: number[]; ours: number[] } {
   // Все наши товары в наличии (не только с конкурентами): проход заодно проверяет, что карточку видят покупатели.
   const ours = buildWatch(mp, snap).watch.map(p => Number(p.ourId)).filter(id => Number.isFinite(id) && id > 0);
   // 20.10: было 80 — у Ozon подтверждённых уже 92 разных карточки, и часть из них агент не снимал вовсе.
-  return { watch: watchedIds(mp, 160), ours: [...new Set(ours)].slice(0, 120) };
+  // Быстрый дневной проход — только подтверждённые (витрина Ozon ≈5 с на карточку), ночной — и предложенные.
+  return { watch: watchedIds(mp, WATCH_LIMITS.watch, !light), ours: [...new Set(ours)].slice(0, WATCH_LIMITS.ours) };
 }
 
 /**
@@ -483,6 +487,17 @@ function wbPhoto(nm: string): string {
 }
 
 /** Цифры по номеру товара из всего, что агент снял этой ночью. */
+/**
+ * CTR карточки Ozon из «Товаров на Ozon»: просмотры карточки (qtyViewPdp) ÷ показы (views), %.
+ * Сверено 20.10 на наших товарах: показы совпадают с аналитикой Seller API ±5–10 %, а qtyViewPdp —
+ * все просмотры карточки (не уникальные), поэтому CTR в 1,4–1,8 раза выше, чем session_view_pdp ÷ hits_view
+ * в РНП. Для сравнения с конкурентами годится: у всех один отчёт и одна формула.
+ */
+function ozCtr(x: any): number | undefined {
+  const v = Number(x?.views), p = Number(x?.qtyViewPdp);
+  return Number.isFinite(v) && v > 0 && Number.isFinite(p) ? Math.round(p / v * 1000) / 10 : undefined;
+}
+
 function metricsIndex(mp: AdMp, data: any): Map<string, Partial<Ads2WatchLink>> {
   const m = new Map<string, Partial<Ads2WatchLink>>();
   const put = (id: string, v: Partial<Ads2WatchLink>) => {
@@ -518,17 +533,17 @@ function metricsIndex(mp: AdMp, data: any): Map<string, Partial<Ads2WatchLink>> 
     // «Товары на Ozon» по каждому SKU (агент с 20.10, за 7 и 28 дней) — точнее топа категории, идут первыми.
     const ozM = (x: any): Partial<Ads2WatchLink> => ({ title: x.name || undefined, brand: x.brand || undefined, seller: x.sellerName || undefined, photo: x.photo || undefined,
       price: num(x.avgPrice), gmv: num(x.gmvSum ?? x.soldSum), orders: num(x.soldCount), ordersDyn: num(x.salesDynamics),
-      ordersDays: num(x.soldCount) != null ? 7 : undefined, drr: num(x.drr), convPdp: num(x.pdpToCartConversion ?? x.convToCartPdp),
+      ordersDays: num(x.soldCount) != null ? 7 : undefined, drr: num(x.drr), convPdp: num(x.pdpToCartConversion ?? x.convToCartPdp), ctr: ozCtr(x),
       inPromo: num(x.daysInPromo) != null ? Number(x.daysInPromo) > 0 : null, inAds: num(x.daysWithTrafarets) != null ? Number(x.daysWithTrafarets) > 0 : null });
     for (const x of data?.bySku?.weekly ?? []) put(String(x.sku), ozM(x));
     for (const x of data?.bySku?.monthly ?? []) {
       const v = ozM(x);
-      put(String(x.sku), { oz28: { orders: v.orders ?? null, gmv: v.gmv ?? null, convPdp: v.convPdp ?? null, drr: v.drr ?? null, inAds: v.inAds ?? null, inPromo: v.inPromo ?? null } });
+      put(String(x.sku), { oz28: { orders: v.orders ?? null, gmv: v.gmv ?? null, convPdp: v.convPdp ?? null, drr: v.drr ?? null, ctr: v.ctr ?? null, inAds: v.inAds ?? null, inPromo: v.inPromo ?? null } });
     }
     for (const mk of data?.markets ?? []) for (const x of mk.items ?? []) {
       put(String(x.sku), { title: x.name || undefined, brand: x.brand || undefined, seller: x.sellerName || undefined, photo: x.photo || undefined,
         price: num(x.avgPrice), gmv: num(x.gmvSum ?? x.soldSum), orders: num(x.soldCount), ordersDyn: num(x.salesDynamics),
-        ordersDays: num(x.soldCount) != null ? 7 : undefined, drr: num(x.drr), convPdp: num(x.pdpToCartConversion ?? x.convToCartPdp),
+        ordersDays: num(x.soldCount) != null ? 7 : undefined, drr: num(x.drr), convPdp: num(x.pdpToCartConversion ?? x.convToCartPdp), ctr: ozCtr(x),
         inPromo: num(x.daysInPromo) != null ? Number(x.daysInPromo) > 0 : null, inAds: num(x.daysWithTrafarets) != null ? Number(x.daysWithTrafarets) > 0 : null });
     }
   }

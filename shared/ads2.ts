@@ -140,7 +140,7 @@ export type Ads2WatchLink = {
   /** WB: дата набора «Сравнения карточек», из которого заказы/реклама/акции (набор мог уже закрыться — данные последние известные). */
   compDate?: string | null;
   /** Ozon: те же показатели «Товаров на Ozon» за 28 дней (переключатель периода в «Конкурентах»). */
-  oz28?: { orders: number | null; gmv: number | null; convPdp: number | null; drr: number | null; inAds: boolean | null; inPromo: boolean | null } | null;
+  oz28?: { orders: number | null; gmv: number | null; convPdp: number | null; drr: number | null; ctr?: number | null; inAds: boolean | null; inPromo: boolean | null } | null;
 };
 
 /** Обновление данных конкурентов: последний проход агента и следующий по расписанию. */

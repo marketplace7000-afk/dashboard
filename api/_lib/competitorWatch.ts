@@ -227,9 +227,9 @@ export function parseOzonSku(input: string): number | null {
 }
 
 /** Номера конкурентов площадки, которых агенту снимать: подтверждённые и предложенные. */
-export function watchedIds(mp: WatchMp, limit = 80): number[] {
+export function watchedIds(mp: WatchMp, limit = 80, withSuggested = true): number[] {
   const out = new Set<number>();
-  for (const st of ['active', 'suggested'] as const) {
+  for (const st of (withSuggested ? ['active', 'suggested'] : ['active']) as Array<'active' | 'suggested'>) {
     for (const entry of Object.values(bucket(read(), mp))) {
       for (const l of entry.links) if (l.status === st) out.add(l.nmId);
     }

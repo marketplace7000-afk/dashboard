@@ -20,12 +20,9 @@ import { secretEquals } from './auth';
 import { wbUpstream, ozonUpstream } from '../_proxy';
 import { fetchWithRetry } from './fetchRetry';
 import { cacheGet, cacheSet, makeCacheKey, makeUpstreamCacheKey, needsRefresh } from './cache';
-import { getWbTransit } from './wbTransit';
-import { getWbSupplies } from './wbSuppliesLog';
 import { getWbBuyerPrices } from './wbBuyerPrices';
 import { getOzonBuyerPrices } from './ozonBuyerPrices';
 import { getWbCommissions } from './wbCommissions';
-import { getOzonFactProfit } from './ozonFactProfit';
 import { warmOzonAccruals } from './ozonAccruals';
 import { getWbBoxTariffs } from './wbBoxTariffs';
 
@@ -35,7 +32,6 @@ import { warmWbFunnelViaReport } from './wbFunnelReport';
 import { refreshUsdRate } from './aiUsage';
 import { buildSnapshot } from './aiContext';
 import { recordDailySnapshot } from './history';
-import { competitorSearch } from './competitors';
 import { mskDate, mskIso } from './mskDate';
 import { REFRESH_LIVE_MS } from './cronSchedule';
 import { wbFunnelBody, ozAnalyticsBody } from './period';
@@ -503,11 +499,6 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
     } catch (e) { console.warn('[history] снимок дня не записан:', (e as Error).message); }
   })();
 
-  // Транзит и журнал поставок WB — принудительно освежаем (force=true) каждый
-  // проход cron. Кэш у них 3ч > 2ч между проходами, поэтому браузер на
-  // «Распределении» ВСЕГДА читает свежий кэш и сам НЕ ходит в supplies-api.
-  void getWbTransit(true).catch(() => null);
-  void getWbSupplies(true).catch(() => null);
   // Цена покупателя с СПП — пересчёт из прогретых продаж (в WB не ходит).
   void getWbBuyerPrices(true).catch(() => null);
   // Цена покупателя Ozon (action_price из акций) — освежаем каждый проход.
@@ -519,19 +510,11 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
   void getWbStock().catch(() => null); // тёплый кэш остатков WB для фильтра «В продаже»
   // Экономика карточек WB по nmId (комиссия + объём) — полный обход карточек.
   void getWbCardEcon().catch(() => null);
-  // Начисления Ozon за 31 день (по дню на запрос, свежие дни перечитываются раз в час),
-  // затем факт-прибыль из них — реальная выплата/шт.
-  void warmOzonAccruals(31).then(() => getOzonFactProfit()).catch(() => null);
-
-  // Прогрев конкурентов — ПОСЛЕ ответа, fire-and-forget (search.wb.ru/ozon бывают
-  // медленными/банят, не должны задерживать прогрев кабинета).
-  void (async () => {
-    const COMP_QUERIES = ['CarPlay адаптер', 'Android магнитола', 'видеорегистратор', 'держатель MagSafe', 'FM трансмиттер', 'антирадар'];
-    for (const q of COMP_QUERIES) {
-      await competitorSearch('wb', q, 16).catch(() => null);
-      await competitorSearch('ozon', q, 16).catch(() => null);
-    }
-  })();
+  // Начисления Ozon за 31 день (по дню на запрос, свежие дни перечитываются раз в час):
+  // из них считают «Финансы» (/api/ozon-finance).
+  // 20.10.2026 убраны прогревы, которые никто не читал: транзит и журнал поставок WB,
+  // факт-прибыль Ozon, поиск конкурентов по 6 запросам, BI, удержания, Claude-анализ рекламы.
+  void warmOzonAccruals(31).catch(() => null);
 
   // WB реклама: прогрев fullstats (расход по кампаниям) + payments. Рекламный API
   // WB лимитирует ~1 req/min, поэтому отдельно, с паузами, после ответа.
@@ -649,15 +632,6 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
         const { syncFromSkladThrottled } = await import('./costs');
         await syncFromSkladThrottled(10 * 60_000);
 
-        const [{ getBiSummary }, { getPenalties }] = await Promise.all([
-          import('./bi'), import('./penalties'),
-        ]);
-        for (const days of [30, 7]) {
-          await getBiSummary(days, true).catch(() => null);
-          await getPenalties(days, true).catch(() => null);
-        }
-        console.warn('[warm-extras] BI и удержания готовы');
-
         const { getOzonSkuAdsRange } = await import('./ozonSkuAds');
         // 16.09.2026: добавлены окна 14 и 30 дней (и их предыдущие периоды): таблица «Реклама по артикулам» и фолбэк ДРР 30д
       // читают именно эти диапазоны (29-0, 59-30), а грелись только 6-0 и 13-7 — 30-дневный ДРР Ozon был от 26.08.
@@ -738,11 +712,6 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
           cp ? `отслеживаем ${cp.tracked}, записано ${cp.saved}${cp.error ? ` · ${cp.error}` : ''}` : 'не удалось'
         }`);
 
-        try {
-        // Claude-анализ рекламы раз в сутки после 06:00 МСК (17.09.2026) — когда реклама и остатки уже прогреты.
-        const { runAdsInsightIfDue } = await import('./ads/insight');
-        console.warn('[warm-extras] анализ рекламы Claude:', await runAdsInsightIfDue());
-      } catch (e) { console.warn('[warm-extras] анализ рекламы не удался:', (e as Error)?.message); }
       console.warn('[warm-extras] цепочка завершена');
       } catch (e) {
         console.warn('[warm-extras] failed:', (e as Error)?.message);

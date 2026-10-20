@@ -31,10 +31,8 @@ function writeSections(section: string, sub: string): Section[] | null | 'owner'
       if (sub === 'competitors') return ['competitors', 'ads'];
       if (sub === 'signals') return ['rnp', 'prices', 'ads'];
       return ['ads'];
-    case 'ads-advisor': case 'ads-manage': case 'ads-insight':
+    case 'ads-advisor':
       return ['ads'];
-    case 'competitor-watch': case 'competitors':
-      return ['competitors', 'ads'];
     case 'repricer':
       return ['prices'];
     case 'costs': case 'settings':

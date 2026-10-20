@@ -15,6 +15,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { reviewsApi } from '../api/reviews';
+import { notifyUnauthorized } from '../api/http';
 import type { ReviewsOverview } from '../../shared/reviews';
 import { fetchAiUsage, type UsageResponse, type AiHealth } from '../api/aiUsage';
 import {
@@ -333,10 +334,13 @@ function IdleCard({ live, busy, post }: { live: Live; busy: boolean; post: Post 
             : 'Расписания выключены. Запустите нужное направление кнопкой в карточке агента.'}
         </div>
       </div>
-      <button className="btn btn-sm ah-idle-demo" disabled={busy} onClick={() => post('/api/agents/dev/fake-task', { marketplace: 'wb' })}
-        title="Фиктивное задание: прогресс двигает сам сервер — проверка экрана без ПК">
-        Демо-задание
-      </button>
+      {/* Фиктивный прогон — только при разработке: на проде клиент принимал его за настоящий. */}
+      {import.meta.env.DEV && (
+        <button className="btn btn-sm ah-idle-demo" disabled={busy} onClick={() => post('/api/agents/dev/fake-task', { marketplace: 'wb' })}
+          title="Фиктивное задание: прогресс двигает сам сервер — проверка экрана без ПК">
+          Демо-задание
+        </button>
+      )}
     </div>
   );
 }
@@ -578,8 +582,12 @@ function AgentCards({ live, busy, post }: { live: Live; busy: boolean; post: Pos
 function Timeline({ taskId }: { taskId: number }) {
   const [data, setData] = useState<{ stages: Array<{ stage: string; started_at: number; finished_at: number | null }> } | null>(null);
   useEffect(() => {
+    // Ответ с ошибкой ({error}) раньше попадал в состояние без stages, и
+    // data.stages.length ронял всю страницу.
     fetch(`/api/agents/tasks/${taskId}/timeline`, { credentials: 'include' })
-      .then(r => r.json()).then(setData).catch(() => setData({ stages: [] }));
+      .then(r => { notifyUnauthorized(r.status); return r.ok ? r.json() : null; })
+      .then(j => setData({ stages: Array.isArray(j?.stages) ? j.stages : [] }))
+      .catch(() => setData({ stages: [] }));
   }, [taskId]);
   if (!data) return <div className="ah-sub">Загружаю этапы…</div>;
   if (!data.stages.length) return <div className="ah-sub">Этапы не записаны.</div>;
@@ -808,12 +816,14 @@ export function AgentHosts() {
   const [live, setLive] = useState<Live | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cmdErr, setCmdErr] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const ai = useAiStatus();
 
   const load = useCallback(async () => {
     try {
       const r = await fetch('/api/agents/live', { credentials: 'include' });
+      notifyUnauthorized(r.status);
       if (!r.ok) { setErr(`сервер ответил ${r.status}`); return; }
       setLive(await r.json()); setErr(null);
     } catch { setErr('нет связи с сервером'); }
@@ -832,7 +842,16 @@ export function AgentHosts() {
 
   const post = useCallback(async (url: string, bodyObj?: unknown) => {
     setBusy(true);
-    try { await fetch(url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyObj ?? {}) }); }
+    // Отказ сервера показываем: раньше «Пауза»/«Запустить» при ошибке молчали,
+    // и казалось, что команда выполнилась.
+    try {
+      const r = await fetch(url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyObj ?? {}) });
+      notifyUnauthorized(r.status);
+      if (!r.ok) {
+        const j = await r.json().catch(() => null);
+        setCmdErr(`Команда не выполнена: ${j?.reason ?? j?.error ?? `сервер ответил ${r.status}`}`);
+      } else setCmdErr(null);
+    } catch { setCmdErr('Команда не выполнена: нет связи с сервером'); }
     finally { setBusy(false); void load(); }
   }, [load]);
 
@@ -843,6 +862,7 @@ export function AgentHosts() {
   return (
     <div className="ah-page">
       {err && <div className="ah-alert ah-alert--warn"><WarningIcon size={15} weight="fill" /> Связь с сервером прервалась ({err}), данные могут быть устаревшими.</div>}
+      {cmdErr && <div className="ah-alert ah-alert--warn"><WarningIcon size={15} weight="fill" /> {cmdErr}</div>}
       <AiAlert health={ai.health} />
       <StatusBar live={live} busy={busy} post={post} />
 

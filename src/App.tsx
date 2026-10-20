@@ -24,6 +24,8 @@ import { prefetchAll } from './api/prefetch';
 import { apiGet, setUnauthorizedHandler } from './api/http';
 import { ROLE_LABEL, type Role } from './api/sklad';
 import { noteSwallowed } from './utils/log';
+import { loadUiState, startUiStateSync } from './utils/uiState';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Раздел «Склад» в архиве (18.10.2026): меню и страница скрыты, сервер тоже
 // закрыт (api/_lib/sklad/archive.ts). Вернуть — false здесь и SKLAD_ENABLED=1 на сервере.
@@ -101,8 +103,11 @@ export function App() {
   useEffect(() => {
     if (!logged) { setMe(null); return; }
     const OWNER = { name: 'Владелец', role: 'owner' as Role, sections: [...NAV_TOP, ...NAV_AFTER_PROCUREMENT, ...NAV_CONFIG, { key: 'modules' }].map(n => n.key) };
+    // Общая память настроек — вместе с ролью: страницы рисуются уже с серверным архивом и параметрами.
+    const ui = loadUiState().finally(() => startUiStateSync());
     apiGet<{ user?: { name: string; role: Role; sections?: string[] } }>('/api/auth/check')
-      .then(r => {
+      .then(async r => {
+        await ui;
         const u = r.data?.user;
         const m = u ? { name: u.name, role: u.role, sections: u.sections ?? OWNER.sections } : OWNER;
         setMe(m);
@@ -127,13 +132,17 @@ export function App() {
   const firstAllowed = (me.sections as Page[]).find(allowed);
   const view: Page | null = allowed(page) ? page : firstAllowed ?? null;
 
+  // Переход из колокольчика/Дашборда: только на существующий раздел. Раньше
+  // ссылки на удалённые «Закупки» и «ROI» молча уводили на первый доступный.
+  const navTo = (k: string) => { if (k in TITLES) setPage(k as Page); };
+
   // Выбор пункта меню: переключаем страницу и закрываем мобильный drawer.
   const goTo = (k: Page) => { setPage(k); setMobileNavOpen(false); };
 
   const renderNavItem = (n: { key: Page; Icon: any; label: string }) => {
     const I = n.Icon;
     return (
-      <div key={n.key} className={`nav-item ${page === n.key ? 'active' : ''}`} onClick={() => goTo(n.key)} title={n.label}>
+      <div key={n.key} className={`nav-item ${view === n.key ? 'active' : ''}`} onClick={() => goTo(n.key)} title={n.label}>
         <I size={18} weight="bold" /> <span className="nav-label">{n.label}</span>
       </div>
     );
@@ -192,7 +201,7 @@ export function App() {
             <span className="chip">
               {new Date().toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
             </span>
-            {!restricted && <NotificationsBell onNav={(k) => setPage(k as Page)} />}
+            {!restricted && <NotificationsBell onNav={navTo} />}
             <div className="profile-pill" title={`${me.name} · ${ROLE_LABEL[me.role]}`}>
               <div className="profile-avatar">{me.name.split(/s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'РА'}</div>
               <button className="btn btn-sm" onClick={async () => {
@@ -205,8 +214,9 @@ export function App() {
             </div>
           </div>
         </div>
-        <div className={`content ${view === 'rnp' ? 'content-wide' : page === 'prices' || page === 'ads' || page === 'competitors' || page === 'sklad' ? 'content-prices' : ''}`}>
-          {view === 'dashboard' && <Dashboard onNav={(k) => setPage(k as Page)} />}
+        <div className={`content ${view === 'rnp' ? 'content-wide' : view === 'prices' || view === 'ads' || view === 'competitors' || view === 'sklad' ? 'content-prices' : ''}`}>
+          <ErrorBoundary key={view ?? 'none'} name={view ? TITLES[view] : ''}>
+          {view === 'dashboard' && <Dashboard onNav={navTo} />}
           {view === 'sklad' && <Sklad />}
           {view === 'prices' && <Prices />}
           {view === 'reviews' && <Reviews />}
@@ -219,11 +229,12 @@ export function App() {
           {view === 'collectors' && <AgentHosts />}
           {view === 'access' && <Access />}
           {view === null && <div className="card muted">Для вашей учётной записи сейчас нет доступных разделов.</div>}
+          </ErrorBoundary>
         </div>
       </main>
 
       {/* AI-копилот: плавающая кнопка в правом нижнем углу, видна на всех страницах после логина. */}
-      {!restricted && <AiChatBubble currentPage={TITLES[page]} />}
+      {!restricted && <AiChatBubble currentPage={view ? TITLES[view] : ''} />}
     </div>
   );
 }

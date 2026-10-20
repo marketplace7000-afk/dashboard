@@ -293,7 +293,7 @@ type WbScope =
   | 'common' | 'content' | 'statistics' | 'feedbacks' | 'discounts'
   | 'promotion' | 'analytics' | 'supplies' | 'finance';
 
-const WB_HOSTS: Record<WbScope, string> = {
+export const WB_HOSTS: Record<WbScope, string> = {
   common:     'https://common-api.wildberries.ru',
   content:    'https://content-api.wildberries.ru',
   statistics: 'https://statistics-api.wildberries.ru',

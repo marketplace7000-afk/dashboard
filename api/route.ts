@@ -218,6 +218,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return handleReviews(req, res, rest);
   }
 
+  // ─── /api/wb-token-check?scope=statistics ── «Проверить токен» в «Настройках».
+  // Прямой /ping к WB с присланным токеном, БЕЗ кэша: прокси /wb кэширует ответы
+  // без учёта токена и мог выдать «ок» неверному ключу.
+  if (section === 'wb-token-check') {
+    const { WB_HOSTS } = await import('./_proxy');
+    const scope = String(req.query.scope ?? '');
+    const base = (WB_HOSTS as Record<string, string>)[scope];
+    const token = String(req.headers['x-wb-token'] ?? '').trim();
+    if (!base || !token) return res.status(400).json({ error: 'bad_request' });
+    try {
+      const r = await fetch(`${base}/ping`, { headers: { Authorization: token }, signal: AbortSignal.timeout(15_000) });
+      return res.status(200).json({ ok: r.ok, status: r.status });
+    } catch (e) {
+      return res.status(200).json({ ok: false, status: 0, error: String((e as Error).message).slice(0, 120) });
+    }
+  }
+
   // ─── /api/wb/<scope>/* ───────────────────────────────────────────────────
   if (section === 'wb') {
     const [scope, ...wbRest] = rest;
@@ -363,7 +380,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json({ ok: true, campaigns: store.listCampaigns(mp as any) });
       }
       if (what === 'log') {
-        return res.status(200).json({ ok: true, items: store.listChanges(Number(req.query.limit) || 100) });
+        const logMp = req.query.mp === 'wb' || req.query.mp === 'ozon' ? req.query.mp : undefined;
+        return res.status(200).json({ ok: true, items: store.listChanges(Number(req.query.limit) || 100, logMp) });
       }
       if (what === 'flags') {
         if (req.method === 'POST') {

@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, useEffect } from 'react';
+import { Fragment, useMemo, useState, useEffect, useRef } from 'react';
 import { safeSetItem } from '../utils/safeStorage';
 import { onUiStateChange } from '../utils/uiState';
 import {
@@ -153,6 +153,8 @@ export function LiveOzonPricing() {
   const loadGP = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(GP_LS) || '{}'); } catch { return {}; } };
   const [gpDraft, setGpDraft] = useState<Record<string, string>>(loadGP);
   const [gpApplied, setGpApplied] = useState<Record<string, string>>(loadGP);
+  const gpAppliedRef = useRef(gpApplied);
+  gpAppliedRef.current = gpApplied;
   const gpChange = (k: string, v: string) => setGpDraft(p => ({ ...p, [k]: v }));
   const gpApply = () => { setGpApplied(gpDraft); try { safeSetItem(GP_LS, JSON.stringify(gpDraft)); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); } };
   const gpReset = () => { setGpDraft({}); setGpApplied({}); try { safeSetItem(GP_LS, '{}'); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); } };
@@ -166,7 +168,10 @@ export function LiveOzonPricing() {
   // Кнопка «Проверить цены на витрине»: когда Routine снял витрину — подтянуть свежие цены покупателя.
   const archivedSet = useMemo(() => new Set(getArchivedSKUs('prices-ozon')), [archiveTick]);
   // Общая память: пришли изменения с сервера (другой пользователь/вкладка) — перечитать архив, параметры, сценарии.
-  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP(); setGpApplied(gp); setGpDraft(gp); setOzKnobs(loadKnobs()); setOzBase(loadBase()); }), []);
+  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP();
+    // Черновик (введено, но не применено) не трогаем: синхронизация раз в 30 с стирала ввод.
+    setGpDraft(d => JSON.stringify(d) === JSON.stringify(gpAppliedRef.current) ? gp : d);
+    setGpApplied(gp); setOzKnobs(loadKnobs()); setOzBase(loadBase()); }), []);
 
   // Индекс sku → ProcurementItem (для маржи/ROI)
   const procurementBySku = useMemo(() => {

@@ -138,26 +138,19 @@ function normalizeV1Row(r: WbFinanceRowV1): WbFinanceRow {
 }
 
 /**
- * Получить полный финансовый отчёт за период.
- * Сначала — новый finance-api (sales-reports/detailed), при неудаче — старый
- * v5 reportDetailByPeriod (работает до 15.07.2026, кэш от прежних прогревов).
+ * Получить полный финансовый отчёт за период — finance-api (sales-reports/detailed).
+ * Запасной путь на v5 reportDetailByPeriod убран 20.10.2026: WB удалил метод
+ * 15.07.2026, и вместо настоящей ошибки finance-api пользователь видел 404
+ * от старого адреса.
  */
 export async function wbReportDetail(dateFrom: string, dateTo: string): Promise<WbFinanceRow[]> {
-  // Новый эндпоинт. Cron-only: сборщик греет одну страницу (rrdId=0, limit=100000)
-  // на месячное окно; браузер читает тот же кэш (ключ нормализован по датам).
-  try {
-    const rows = await wbFetch<WbFinanceRowV1[]>(`/wb/finance/api/finance/v1/sales-reports/detailed`, {
-      method: 'POST',
-      body: JSON.stringify({ dateFrom, dateTo, limit: 100000, rrdId: 0, period: 'weekly' }),
-    });
-    if (Array.isArray(rows)) return rows.map(normalizeV1Row);
-  } catch (e) {
-    console.warn('[wbFinance] finance-api недоступен, пробуем старый v5:', (e as Error)?.message);
-  }
-  // Fallback: старый v5 (удаляется 15.07.2026). Держим на переходный период.
-  const url = `/wb/statistics/api/v5/supplier/reportDetailByPeriod?dateFrom=${dateFrom}&dateTo=${dateTo}&rrdid=0&limit=100000`;
-  const batch = await wbFetch<WbFinanceRow[]>(url);
-  return Array.isArray(batch) ? batch : [];
+  // Cron-only: сборщик греет одну страницу (rrdId=0, limit=100000) на месячное
+  // окно; браузер читает тот же кэш (ключ нормализован по датам).
+  const rows = await wbFetch<WbFinanceRowV1[]>(`/wb/finance/api/finance/v1/sales-reports/detailed`, {
+    method: 'POST',
+    body: JSON.stringify({ dateFrom, dateTo, limit: 100000, rrdId: 0, period: 'weekly' }),
+  });
+  return Array.isArray(rows) ? rows.map(normalizeV1Row) : [];
 }
 
 /**

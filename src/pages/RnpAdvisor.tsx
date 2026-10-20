@@ -218,13 +218,17 @@ export function RnpAdvisorSheet({ mp }: { mp: Ads2Mp }) {
   const [busy, setBusy] = useState(false);
   const datesRef = useRef<HTMLDivElement | null>(null);
 
+  // Номер запроса: при быстром переключении фильтров старый ответ мог прийти
+  // позже нового и затереть его (прожарка 20.10.2026) — применяем только последний.
+  const seq = useRef(0);
   const load = useCallback(async (quiet = false) => {
+    const my = ++seq.current;
     if (!quiet) setLoading(true);
     try {
       const r = await apiGet<Ads2SignalsResponse>(`/api/ads2/signals?mp=${mp}${date ? `&date=${date}` : ''}${issueId ? `&id=${issueId}` : ''}`);
-      setD(r.data); setErr(null);
-    } catch (e) { setErr(errText(e)); }
-    finally { setLoading(false); }
+      if (my === seq.current) { setD(r.data); setErr(null); }
+    } catch (e) { if (my === seq.current) setErr(errText(e)); }
+    finally { if (my === seq.current) setLoading(false); }
   }, [mp, date, issueId]);
   useEffect(() => { void load(); }, [load]);
   // Пока сервер собирает выпуск — переспрашиваем; иначе раз в 5 минут (к 12:00 выпуск появится сам).

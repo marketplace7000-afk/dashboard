@@ -13,7 +13,7 @@
  * здесь из сумм — поэтому свёртка по неделям и категориям не искажает проценты.
  * Настройки экрана помнятся в браузере отдельно для WB и Ozon.
  */
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ArrowsClockwiseIcon, DownloadSimpleIcon, FunnelIcon, PlusIcon, TrashIcon, MagnifyingGlassIcon,
   CaretDownIcon, CaretUpIcon, ArrowSquareOutIcon,
@@ -347,13 +347,17 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
   const [panel, setPanel] = useState<'metrics' | 'rules' | null>(null);
   const { from, to } = periodRange(s);
 
+  // Номер запроса: при быстром переключении фильтров старый ответ мог прийти
+  // позже нового и затереть его (прожарка 20.10.2026) — применяем только последний.
+  const seq = useRef(0);
   const load = useCallback(async () => {
+    const my = ++seq.current;
     setLoading(true);
     try {
       const r = await apiGet<RnpResponse & { collecting?: boolean }>(`/api/rnp?mp=${mp}&from=${from}&to=${to}`);
-      setData(r.data); setErr(null);
-    } catch (e) { setErr(errText(e)); }
-    finally { setLoading(false); }
+      if (my === seq.current) { setData(r.data); setErr(null); }
+    } catch (e) { if (my === seq.current) setErr(errText(e)); }
+    finally { if (my === seq.current) setLoading(false); }
   }, [mp, from, to]);
 
   useEffect(() => { void load(); }, [load]);

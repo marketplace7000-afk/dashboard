@@ -9,7 +9,7 @@
  *   - Рекомендация         — вердикт по ROI-таблице (норма/внимание/стоп-докуп/выход)
  *   - Архив                — раздельный scope 'prices-wb'
  */
-import { useState, useMemo, useEffect, Fragment } from 'react';
+import { useState, useMemo, useEffect, Fragment, useRef } from 'react';
 import { safeSetItem } from '../utils/safeStorage';
 import { onUiStateChange } from '../utils/uiState';
 import {
@@ -170,6 +170,8 @@ export function LiveWbPricing() {
   const loadGP = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(GP_LS) || '{}'); } catch { return {}; } };
   const [gpDraft, setGpDraft] = useState<Record<string, string>>(loadGP);
   const [gpApplied, setGpApplied] = useState<Record<string, string>>(loadGP);
+  const gpAppliedRef = useRef(gpApplied);
+  gpAppliedRef.current = gpApplied;
   const gpChange = (k: string, v: string) => setGpDraft(p => ({ ...p, [k]: v }));
   const gpApply = () => { setGpApplied(gpDraft); try { safeSetItem(GP_LS, JSON.stringify(gpDraft)); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); } };
   const gpReset = () => { setGpDraft({}); setGpApplied({}); try { safeSetItem(GP_LS, '{}'); } catch (e) { noteSwallowed('ui-prefs', 'настройка интерфейса не сохранена', e, 60 * 60_000); } };
@@ -184,7 +186,10 @@ export function LiveWbPricing() {
   // Кнопка «Проверить цены на витрине»: когда Routine снял витрину — подтянуть свежие цены покупателя.
   const archivedSet = useMemo(() => new Set(getArchivedSKUs('prices-wb')), [archiveTick]);
   // Общая память: пришли изменения с сервера (другой пользователь/вкладка) — перечитать архив, параметры, сценарии.
-  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP(); setGpApplied(gp); setGpDraft(gp); setKnobs(loadKnobs()); setKnobsBase(loadBase()); }), []);
+  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP();
+    // Черновик (введено, но не применено) не трогаем: синхронизация раз в 30 с стирала ввод.
+    setGpDraft(d => JSON.stringify(d) === JSON.stringify(gpAppliedRef.current) ? gp : d);
+    setGpApplied(gp); setKnobs(loadKnobs()); setKnobsBase(loadBase()); }), []);
 
   const procurementBySku = useMemo(() => {
     const m = new Map<string, typeof procurement.items[number]>();

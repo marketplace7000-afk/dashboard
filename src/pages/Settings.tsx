@@ -4,7 +4,7 @@ import { WbScope, SCOPE_LABEL, getAllWbTokens, setWbToken } from '../api/wb';
 import { getOzonPerfCreds, setOzonPerfCreds, ozonPerfFetch } from '../api/ozonAds';
 import { getGlobalSettings, saveGlobalSettings, defaultSettings, GlobalSettings } from '../utils/procurementLogic';
 import { fetchAppSettings, saveAppSettings, type AppSettings } from '../api/productEcon';
-import { errText } from '../api/http';
+import { apiGet, errText } from '../api/http';
 
 const WB_SCOPES: WbScope[] = ['stats', 'prices', 'analytics', 'promotion', 'supplies'];
 
@@ -16,7 +16,29 @@ const SCOPE_NS: Record<WbScope, string> = {
   stats: 'wb:statistics', prices: 'wb:discounts', analytics: 'wb:analytics',
   promotion: 'wb:promotion', supplies: 'wb:supplies',
 };
-async function pingScope(scope: WbScope): Promise<{ ok: boolean; msg: string }> {
+/**
+ * Проверка токена у самого WB: запрос /ping этой области с введённым токеном
+ * (сервер ходит в WB напрямую, без кэша — /api/wb-token-check). Раньше кнопка
+ * смотрела только, когда сборщик обновлял данные, — и «ок» получал любой токен.
+ * Без введённого токена — показываем состояние сборщика (серверный WB_TOKEN).
+ */
+/** Область WB в интерфейсе → хост на сервере (api/_proxy.ts WB_HOSTS). */
+const SCOPE_HOST: Record<WbScope, string> = {
+  stats: 'statistics', prices: 'discounts', analytics: 'analytics', promotion: 'promotion', supplies: 'supplies',
+};
+
+async function pingScope(scope: WbScope, token: string): Promise<{ ok: boolean; msg: string }> {
+  if (token.trim()) {
+    try {
+      const { data } = await apiGet<{ ok: boolean; status: number }>(`/api/wb-token-check?scope=${SCOPE_HOST[scope]}`, { timeoutMs: 20_000, headers: { 'x-wb-token': token.trim() } });
+      if (data.ok) return { ok: true, msg: 'WB принял токен' };
+      if (data.status === 401 || data.status === 403) return { ok: false, msg: 'WB не принял токен: неверный, просрочен или без этой категории' };
+      if (data.status === 429) return { ok: false, msg: 'WB просит подождать (лимит запросов) — проверьте через минуту' };
+      return { ok: false, msg: data.status ? `WB ответил ${data.status} — проверьте позже` : 'нет связи с WB' };
+    } catch {
+      return { ok: false, msg: 'нет связи с WB' };
+    }
+  }
   try {
     const r = await fetch('/api/meta/status', { credentials: 'include' });
     const j = await r.json();
@@ -50,7 +72,7 @@ function WbTokensCard() {
 
   const checkOne = async (scope: WbScope) => {
     setStatuses(s => ({ ...s, [scope]: 'checking' }));
-    const r = await pingScope(scope);
+    const r = await pingScope(scope, tokens[scope] || '');
     setStatuses(s => ({ ...s, [scope]: r.ok ? 'ok' : 'error' }));
     setMsgs(m => ({ ...m, [scope]: r.msg }));
   };
@@ -85,7 +107,7 @@ function WbTokensCard() {
               <div>
                 <div style={{ fontSize: 16, fontWeight: 500 }}>{SCOPE_LABEL[scope]}</div>
                 {st === 'ok' && <span className="chip good" style={{ marginTop: 2 }}><CheckIcon size={10} weight="bold" /> ок</span>}
-                {st === 'error' && <span className="chip bad" style={{ marginTop: 2 }} title={msg}><WarningIcon size={10} weight="bold" /> нет данных</span>}
+                {st === 'error' && <span className="chip bad" style={{ marginTop: 2 }} title={msg}><WarningIcon size={10} weight="bold" /> не принят</span>}
                 {st === 'checking' && <span className="chip" style={{ marginTop: 2 }}>проверка…</span>}
               </div>
               <input
@@ -103,6 +125,9 @@ function WbTokensCard() {
               <button className="btn btn-sm" onClick={() => checkOne(scope)} disabled={!tok || st === 'checking'}>
                 проверить
               </button>
+              {msg && (st === 'ok' || st === 'error') && (
+                <div className="muted" style={{ gridColumn: '2 / -1', fontSize: 15, marginTop: -4 }}>{msg}</div>
+              )}
             </div>
           );
         })}

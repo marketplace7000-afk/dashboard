@@ -340,10 +340,15 @@ export function logChange(e: ChangeEntry): number | null {
   return Number(r.lastInsertRowid);
 }
 
-export function listChanges(limit = 100): any[] {
+/** Журнал изменений. `mp` — только одна площадка: иначе лимит делился на обе. */
+export function listChanges(limit = 100, mp?: AdMp): any[] {
   const d = adsDb();
   if (!d) return [];
-  return (d.prepare('SELECT * FROM ad_change_log ORDER BY at DESC, id DESC LIMIT ?').all(Math.min(Math.max(limit, 1), 500)) as any[])
+  const n = Math.min(Math.max(limit, 1), 500);
+  const rows = mp
+    ? d.prepare('SELECT * FROM ad_change_log WHERE mp = ? ORDER BY at DESC, id DESC LIMIT ?').all(mp, n)
+    : d.prepare('SELECT * FROM ad_change_log ORDER BY at DESC, id DESC LIMIT ?').all(n);
+  return (rows as any[])
     .map(r => ({ ...r, before: r.before ? JSON.parse(r.before) : null, after: r.after ? JSON.parse(r.after) : null, result: r.result ? JSON.parse(r.result) : null }));
 }
 

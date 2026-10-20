@@ -27,19 +27,19 @@ export function NotificationsBell({ onNav }: { onNav: (page: string) => void }) 
       key: 'order-now', Icon: FireIcon, color: '#dc2626',
       text: `Заказать сейчас: ${orderNow.length} SKU`,
       sub: orderNow.slice(0, 4).map((p) => p.sku).join(', ') + (orderNow.length > 4 ? '…' : ''),
-      page: 'procurement',
+      page: 'rnp',      // раздела «Закупки» нет с 25.09 — остатки и темп продаж видны в РНП
     });
     if (orderSoon.length) list.push({
       key: 'order-soon', Icon: ClockIcon, color: '#d97706',
       text: `Скоро заказывать: ${orderSoon.length} SKU`,
       sub: orderSoon.slice(0, 4).map((p) => p.sku).join(', ') + (orderSoon.length > 4 ? '…' : ''),
-      page: 'procurement',
+      page: 'rnp',      // раздела «Закупки» нет с 25.09 — остатки и темп продаж видны в РНП
     });
     if (lowRoi.length) list.push({
       key: 'low-roi', Icon: CurrencyRubIcon, color: '#dc2626',
       text: `ROI ниже ${ROI_ALERT_THRESHOLD}%: ${lowRoi.length} SKU`,
       sub: lowRoi.slice(0, 4).map((p) => `${p.sku} ${(p.roiOzonMarzha as number).toFixed(0)}%`).join(', ') + (lowRoi.length > 4 ? '…' : ''),
-      page: 'roi',
+      page: 'prices',   // раздела «ROI» нет с 25.09 — маржа и ROI товара в «Ценах»
     });
     return list;
   }, [items]);

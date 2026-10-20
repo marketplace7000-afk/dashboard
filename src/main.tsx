@@ -2,11 +2,14 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import './styles.css';
-import { loadUiState, startUiStateSync } from './utils/uiState';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
-// Сначала подтягиваем общую память с сервера (архив, параметры), потом рендерим.
-void loadUiState().finally(() => { startUiStateSync(); ReactDOM.createRoot(document.getElementById('root')!).render(
+// Общую память настроек (архив, параметры) App подтягивает уже ПОСЛЕ входа:
+// раньше запрос уходил до входа и получал 401 (src/App.tsx).
+ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary name="Кабинет">
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
-); });
+);

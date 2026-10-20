@@ -1920,3 +1920,20 @@ code {
 .acc-pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 8px 0; font-size: 15px; white-space: pre-wrap; }
 .acc-x { background: transparent; border: none; cursor: pointer; color: var(--muted); }
 .acc-journal { margin-top: 10px; }
+
+/* ═══ Телефон: исправления по прожарке 20.10.2026 ═══════════════════════════
+   Липкая строка WB/Ozon (.rnp-tabs) на узком экране ложилась поверх вкладок
+   «Рекламы» и кнопок периода в РНП — нажать их было нельзя. На телефоне она
+   обычная, не липкая. Подпись «Сортировка» не сжимается в столбик по букве.
+   Вкладки отзывов и чатов переносятся, а не уезжают за край без подсказки
+   («Все» в чатах было не нажать, «Журнал» в отзывах — не найти). */
+.rnp-sort > .muted { white-space: nowrap; }
+@media (max-width: 768px) {
+  .rnp-tabs { position: static; margin: 0; box-shadow: none; }
+  .rnp-sort { flex: 1 1 100%; min-width: 0; }
+  .rnp-sort > .select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
+}
+@media (max-width: 760px) {
+  .rv-seg, .rv-tabs { flex-wrap: wrap; overflow-x: visible; }
+  .rv-chat-list { position: static; }
+}

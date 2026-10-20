@@ -19,7 +19,7 @@
  * рекламы, площадки не дёргает). Старые панели (AdsManage, AdsBySku,
  * AdsInsightPanel и ~850 строк мёртвого кода) заменены этим экраном.
  */
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ArrowsClockwiseIcon, MagnifyingGlassIcon, WarningIcon, WarningOctagonIcon, LightbulbIcon, PauseIcon, PlayIcon,
   PencilSimpleIcon, XIcon, CaretDownIcon, CaretRightIcon, ArrowSquareOutIcon, ProhibitIcon, CheckCircleIcon, RobotIcon,
@@ -749,8 +749,10 @@ function Journal({ mp, names }: { mp: Ads2Mp; names: Map<string, string> }) {
   const [items, setItems] = useState<LogItem[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
-    apiGet<{ items: LogItem[] }>('/api/ads2/log?limit=300').then(r => setItems(r.data.items)).catch(e => setErr(errText(e)));
-  }, []);
+    // Площадка — на сервере: раньше 300 записей делились на обе, и по одной была видна только часть.
+    setItems(null); setErr(null);
+    apiGet<{ items: LogItem[] }>(`/api/ads2/log?limit=300&mp=${mp}`).then(r => setItems(r.data.items)).catch(e => setErr(errText(e)));
+  }, [mp]);
   const list = (items ?? []).filter(i => i.mp === mp);
   return (
     <section className="card ad2-tablecard">
@@ -1016,11 +1018,15 @@ function Board({ mp }: { mp: Ads2Mp }) {
   const [productKey, setProductKey] = useState<string | null>(null);
   const [openCamp, setOpenCamp] = useState<string | null>(null);
 
+  // Номер запроса: при быстром переключении фильтров старый ответ мог прийти
+  // позже нового и затереть его (прожарка 20.10.2026) — применяем только последний.
+  const seq = useRef(0);
   const load = useCallback(async () => {
+    const my = ++seq.current;
     setLoading(true);
-    try { const r = await apiGet<Ads2Overview>(`/api/ads2/overview?mp=${mp}&days=${days}`); setData(r.data); setErr(null); }
-    catch (e) { setErr(errText(e)); }
-    finally { setLoading(false); }
+    try { const r = await apiGet<Ads2Overview>(`/api/ads2/overview?mp=${mp}&days=${days}`); if (my === seq.current) { setData(r.data); setErr(null); } }
+    catch (e) { if (my === seq.current) setErr(errText(e)); }
+    finally { if (my === seq.current) setLoading(false); }
   }, [mp, days]);
   useEffect(() => { void load(); }, [load]);
   const { ask, ui, setToast } = useActions(load);

@@ -5,6 +5,7 @@
 // Безопасность: НЕ коммитим токены в репозиторий. Для прод/staging — env vars.
 // Для локальной разработки — Настройки → WB-токены (UI добавлен ниже).
 import { noteSwallowed } from '../utils/log';
+import { safeSetItem } from '../utils/safeStorage';
 
 export type WbScope =
   | 'stats'      // Статистика — заказы, продажи, остатки
@@ -48,12 +49,17 @@ export const SCOPE_LABEL: Record<WbScope, string> = {
 // поэтому если для нужной области нет — пробуем любой непустой токен.
 const FALLBACK_ORDER: WbScope[] = ['stats', 'prices', 'analytics', 'promotion', 'supplies'];
 
+// Хранилище браузера может быть недоступно (приватный режим, запрет сайта) —
+// тогда «Настройки» падали целиком. Ошибку глотаем: токен из браузера просто не используется.
+function lsGet(key: string): string | null { try { return localStorage.getItem(key); } catch { return null; } }
+function lsRemove(key: string): void { try { localStorage.removeItem(key); } catch { /* хранилище недоступно */ } }
+
 function readTokenStrict(scope: WbScope): string | null {
-  const fromLS = localStorage.getItem(LS_PREFIX + scope);
+  const fromLS = lsGet(LS_PREFIX + scope);
   // 18.09.2026: Chrome подставил в эти поля сохранённый пароль сайта (автозаполнение) — токен WB короче 40 символов
   // быть не может: такое значение стираем, и сервер берёт WB_TOKEN из .env.
   if (fromLS && fromLS.trim().length >= 40) return fromLS;
-  if (fromLS) localStorage.removeItem(LS_PREFIX + scope);
+  if (fromLS) lsRemove(LS_PREFIX + scope);
   const envKey = ENV_KEYS[scope];
   const envVal = (import.meta.env as Record<string, string | undefined>)[envKey];
   return envVal || null;
@@ -74,8 +80,8 @@ export function getWbToken(scope: WbScope): string | null {
 }
 
 export function setWbToken(scope: WbScope, token: string | null) {
-  if (token && token.trim()) localStorage.setItem(LS_PREFIX + scope, token.trim());
-  else localStorage.removeItem(LS_PREFIX + scope);
+  if (token && token.trim()) safeSetItem(LS_PREFIX + scope, token.trim());
+  else lsRemove(LS_PREFIX + scope);
 }
 
 export function getAllWbTokens(): Record<WbScope, string | null> {
@@ -269,11 +275,13 @@ export function isCacheFresh(c: CachedResponse | null): boolean {
 }
 
 export function clearCache(scope?: WbScope) {
-  for (let i = localStorage.length - 1; i >= 0; i--) {
-    const k = localStorage.key(i);
-    if (!k || !k.startsWith(CACHE_PREFIX)) continue;
-    if (!scope || k.startsWith(CACHE_PREFIX + scope + ':')) localStorage.removeItem(k);
-  }
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(CACHE_PREFIX)) continue;
+      if (!scope || k.startsWith(CACHE_PREFIX + scope + ':')) localStorage.removeItem(k);
+    }
+  } catch { /* хранилище браузера недоступно — чистить нечего */ }
 }
 
 // wbFetch + кэширование. Если в кэше есть свежие данные (моложе ttlMs) и

@@ -176,16 +176,21 @@ function Inbox({ counts, onChanged }: { counts: { un: number; pend: number }; on
 
   useEffect(() => { try { localStorage.setItem(FILTERS_KEY, JSON.stringify(f)); } catch { /* приватный режим */ } }, [f]);
 
+  // Номер запроса: при быстром переключении фильтров старый ответ мог прийти
+  // позже нового и затереть его (прожарка 20.10.2026) — применяем только последний.
+  const seq = useRef(0);
   const load = async () => {
+    const my = ++seq.current;
     setLoading(true); setErr(null);
     try {
       const r = await reviewsApi.items({
         view, mp: f.mp, kind: f.kind, rating: f.rating, q: f.q.trim(),
         from: f.days ? Date.now() - Number(f.days) * 86400_000 : undefined, limit,
       });
+      if (my !== seq.current) return;
       setItems(r.items); setTotal(r.total); setSel(new Set());
-    } catch (e: any) { setErr(e?.message || 'Ошибка'); }
-    setLoading(false);
+    } catch (e: any) { if (my === seq.current) setErr(e?.message || 'Ошибка'); }
+    if (my === seq.current) setLoading(false);
   };
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [view, f, limit]);
 

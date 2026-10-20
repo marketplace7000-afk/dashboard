@@ -43,6 +43,8 @@ export type ApiOptions = {
   force?: boolean;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Дополнительные заголовки (например, x-wb-token для проверки токена). */
+  headers?: Record<string, string>;
 };
 
 /**
@@ -55,6 +57,14 @@ export function setUnauthorizedHandler(fn: () => void): void {
   onUnauthorized = fn;
 }
 
+/**
+ * Для модулей со своим fetch (отзывы, чаты, конкуренты, сборщики): на 401 тоже
+ * вернуть на экран входа. Раньше там показывалось «HTTP 401» или пустота.
+ */
+export function notifyUnauthorized(status: number): void {
+  if (status === 401) onUnauthorized?.();
+}
+
 async function request<T>(
   url: string,
   init: RequestInit,
@@ -64,6 +74,7 @@ async function request<T>(
 
   const headers: Record<string, string> = {
     ...(init.headers as Record<string, string> | undefined),
+    ...opts.headers,
   };
   if (init.body !== undefined && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
@@ -106,7 +117,8 @@ async function request<T>(
     let detail = text.slice(0, 200);
     try {
       const j = JSON.parse(text);
-      detail = j?.error ?? j?.detail ?? detail;
+      // reason — человеческий текст (например, отказ по правам раздела), он важнее кода.
+      detail = j?.reason ?? j?.error ?? j?.detail ?? detail;
     } catch {
       // Не JSON (HTML от nginx, пустое тело) — оставляем сырой текст. В журнал
       // не пишем: ошибка целиком уходит наверх в ApiError строкой ниже.
@@ -114,7 +126,14 @@ async function request<T>(
     throw new ApiError(`сервер ответил ${res.status}${detail ? `: ${detail}` : ''}`, res.status);
   }
 
-  const data = (await res.json().catch(() => null)) as T;
+  // Успешный код, но не JSON — обычно HTML-заглушка nginx, пока сервер
+  // перезапускается. Раньше это молча становилось null, и страница падала на
+  // «Cannot read properties of null» (прожарка 20.10.2026).
+  if (res.status === 204) return { data: null as T, ...meta };
+  const text = await res.text().catch(() => '');
+  let data: T;
+  try { data = JSON.parse(text) as T; }
+  catch { throw new ApiError('сервер вернул не данные — возможно, он перезапускается; попробуйте через минуту', res.status); }
   return { data, ...meta };
 }
 

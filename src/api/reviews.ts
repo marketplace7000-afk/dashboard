@@ -2,6 +2,7 @@
 import type {
   ReviewItem, ReviewView, ReviewsOverview, ReviewSettings, KbFolder, TgPair,
 } from '../../shared/reviews';
+import { notifyUnauthorized } from './http';
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api/reviews/${path}`, {
@@ -9,9 +10,12 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
     credentials: 'same-origin',
   });
+  notifyUnauthorized(r.status);   // сессия истекла — на экран входа, а не «HTTP 401»
   let j: any = null;
   try { j = await r.json(); } catch { /* пусто */ }
-  if (!r.ok || j?.ok === false) throw new Error(j?.error || `HTTP ${r.status}`);
+  // Успешный код, но не JSON (заглушка nginx при перезапуске) — понятная ошибка, а не null дальше по коду.
+  if (r.ok && j == null) throw new Error('сервер вернул не данные — возможно, он перезапускается; попробуйте через минуту');
+  if (!r.ok || j?.ok === false) throw new Error(j?.reason || j?.error || (r.status === 401 ? 'сессия истекла — нужно войти заново' : `сервер ответил ${r.status}`));
   return j as T;
 }
 const post = <T,>(path: string, body: unknown = {}) => call<T>(path, { method: 'POST', body: JSON.stringify(body) });

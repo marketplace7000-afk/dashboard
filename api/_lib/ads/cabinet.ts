@@ -226,6 +226,9 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
 const up = (s: unknown) => String(s ?? '').trim().toUpperCase();
 
 const WORD_STOP = new Set(['подар', 'набор', 'компл', 'новый', 'новин', 'качес', 'лучши', 'товар', 'black', 'white', 'черны', 'белый']);
+/** Кандидат в лидеры выдачи Ozon: сам товар, место в выдаче и число общих слов с нашим названием. */
+type Leader = { x: any; i: number; common: number };
+
 /** Значимые слова названия: от 4 букв, без цифр, по первым 5 буквам (грубая основа: «адаптер/адаптера»). */
 export function titleWords(s: string): Set<string> {
   const out = new Set<string>();
@@ -288,9 +291,9 @@ export function autoSuggest(mp: AdMp, data: any): number {
       const leaders = others
         .filter((x: any) => { const p = num(x.avgPrice); return !our || (p != null && p >= our / 2 && p <= our * 2); })
         .map((x: any, i: number) => ({ x, i, common: Math.min(3, [...titleWords(String(x.name ?? x.skuName ?? ''))].filter(w => ourWords.has(w)).length) }))
-        .filter(c => !ourWords.size || c.common > 0)
-        .sort((a, b) => b.common - a.common || a.i - b.i)
-        .slice(0, 5).map(c => c.x);
+        .filter((c: Leader) => !ourWords.size || c.common > 0)
+        .sort((a: Leader, b: Leader) => b.common - a.common || a.i - b.i)
+        .slice(0, 5).map((c: Leader) => c.x);
       n += suggestLinks('ozon', key, leaders.map((x: any) => ({ id: Number(x.sku), title: String(x.name ?? x.skuName ?? ''), brand: String(x.brand ?? ''), note: `лидер Ozon «${String(x.category3 ?? '')}», цена и название близки к нашим` })), 5, true);
     }
   }

@@ -32,8 +32,9 @@ const item = (sku: string, bid: number, s: Ads2Stat | null, noAds = false): Ads2
 const prod = (sku: string, o: Partial<Ads2Product> = {}): Ads2Product => ({
   key: sku, adSku: sku, article: `A-${sku}`, name: sku, photo: '', category: '', link: null,
   orders: 10, revenue: 50000, spend: 1000, drr: 2, advOrders: 5, advShare: 50, stock: 500, daysOfStock: 60,
+  stockFbo: null, stockFbs: null, outSince: null, spendSinceOut: 0,
   cardViews: null, carts: null, pdpToCart: null, cartToOrder: null, avgPos: null, price: 5000, marginPct: 30, marginRub: 1500,
-  campaigns: [], flag: null, issues: [], series: { orders: [], spend: [] }, ...o,
+  campaigns: [], flag: null, archived: false, issues: [], series: { orders: [], spend: [] }, ...o,
 });
 
 function overview(campaigns: Ads2Campaign[], products: Ads2Product[], drrPct = 4): Ads2Overview {

@@ -133,6 +133,8 @@ async function wbCards(): Promise<{ byNm: Map<string, Card & { article: string }
 async function ozonCatalog(): Promise<{ byOffer: Map<string, Card & { sku: string }>; ok: boolean }> {
   const byOffer = new Map<string, Card & { sku: string }>();
   const cached = await cacheGet<Record<string, Card & { sku: string }>>(OZ_CATALOG_KEY);
+  // Запасной (пусть и устаревший) каталог — до проверки свежести: isFresh сужает тип.
+  const staleMap = cached?.data;
   if (isFresh(cached)) {
     for (const [k, v] of Object.entries(cached.data)) byOffer.set(k, v);
     return { byOffer, ok: byOffer.size > 0 };
@@ -176,7 +178,7 @@ async function ozonCatalog(): Promise<{ byOffer: Map<string, Card & { sku: strin
     for (const [k, v] of Object.entries(map)) byOffer.set(k, v);
     return { byOffer, ok: byOffer.size > 0 };
   } catch {
-    if (cached?.data) for (const [k, v] of Object.entries(cached.data)) byOffer.set(k, v);
+    if (staleMap) for (const [k, v] of Object.entries(staleMap)) byOffer.set(k, v);
     return { byOffer, ok: byOffer.size > 0 };
   }
 }

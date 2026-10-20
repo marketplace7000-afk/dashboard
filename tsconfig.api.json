@@ -1,0 +1,20 @@
+{
+  // Проверка типов серверной части (api, server.ts, shared, scripts).
+  // Фронт проверяет tsconfig.json при сборке; бэкенд запускается через tsx,
+  // который типы не смотрит, поэтому без этой проверки ошибки доезжали до прода.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true
+  },
+  "include": ["api", "server.ts", "shared", "scripts"]
+}

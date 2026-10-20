@@ -75,7 +75,7 @@ let created = 0;
     if (body.campaigns.includes('23612241')) return new Response('{"error":"generation of this type of report is forbidden"}', { status: 400 });
     return new Response(JSON.stringify({ UUID: 'u1' }), { status: 200 });
   }
-  if (u.includes('/statistics/report')) return new Response(archive, { status: 200, headers: { 'content-type': 'application/octet-stream' } });
+  if (u.includes('/statistics/report')) return new Response(new Uint8Array(archive), { status: 200, headers: { 'content-type': 'application/octet-stream' } });
   if (u.includes('/api/client/statistics/')) return new Response(JSON.stringify({ state: 'OK' }), { status: 200 });
   // Сшивка sku → артикул продавца (как на проде: список, затем инфо с sources[].sku).
   if (u.includes('/v3/product/list')) return new Response(JSON.stringify({ result: { items: [{ product_id: 1 }, { product_id: 2 }] } }), { status: 200 });

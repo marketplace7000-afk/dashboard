@@ -141,7 +141,7 @@ export async function buildAdsInsight(platform: Platform, report: ManageReport):
   if (!data.length) { out.error = 'нет данных по товарам'; return out; }
   try {
     // Релей (Vercel) режет длинные ответы — держим ответ компактным и не ждём дольше 100 с.
-    const { text } = await withTimeout(callAnthropic({
+    const { text } = await withTimeout<{ text: string }>(callAnthropic({
       system: ROLE,
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 2600,

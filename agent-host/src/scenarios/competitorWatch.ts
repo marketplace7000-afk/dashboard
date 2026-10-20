@@ -237,28 +237,40 @@ const OZ_COLLECT = (companyId: string, ourCats: string[]) => `(async (CID, OUR) 
 })(${JSON.stringify(companyId)}, ${JSON.stringify(ourCats)})`;
 
 // «Товары на Ozon» по конкретным SKU — как поле «Название или SKU» на странице (20.10.2026).
-// Поле sku в запросе — одно число (int64): список через запятую кабинет обрезает до первого,
-// массив — 400. Поэтому по запросу на SKU; проверено: из 114 привязанных конкурентов
-// нашлись 109 (остальные не на витрине), 114 запросов ≈ 3 мин, без 429.
+// Несколько SKU через пробел страница шлёт как текст поиска (filter.name) — так и делаем,
+// пачками по 10: проверено, 92 конкурента → 84 найдено за 10 запросов. Поиск по тексту иногда
+// теряет карточку, поэтому ненайденные добираем по одной (filter.sku — одно число; список
+// через запятую или пробел в sku кабинет обрезает до первого, 100+ SKU в name → 404).
 const OZ_BY_SKU = (companyId: string, skus: number[]) => `(async (CID, SKUS) => {
   const HD = { 'Content-Type': 'application/json', 'x-o3-app-name': 'seller-ui', 'x-o3-company-id': CID, 'x-o3-language': 'ru' };
   const out = { weekly: [], monthly: [] }, errors = [];
   let stop = false;
-  for (const period of ['weekly', 'monthly']) {
-    for (const s of SKUS) {
-      if (stop) break;
-      const r = await fetch('https://api.seller.ozon.ru/api/site/seller-analytics/what_to_sell/data/v3', { method: 'POST', credentials: 'include', headers: HD,
-        body: JSON.stringify({ limit: '50', offset: '0', filter: { stock: 'any_stock', period: period, sku: String(s) }, sort: { key: 'sum_gmv_desc' } }) });
-      if (!r.ok) {
-        errors.push('товары Ozon по SKU ' + s + ': ' + r.status);
-        if (r.status === 429 || r.status === 403) stop = true;
-        continue;
-      }
-      let j = null; try { j = await r.json(); } catch (e) {}
-      const it = j && j.items && j.items.find(x => String(x.sku) === String(s));
-      if (it) out[period].push(it);
-      await new Promise(r => setTimeout(r, 1000 + Math.random() * 800));
+  const ask = async (filter) => {
+    const r = await fetch('https://api.seller.ozon.ru/api/site/seller-analytics/what_to_sell/data/v3', { method: 'POST', credentials: 'include', headers: HD,
+      body: JSON.stringify({ limit: '50', offset: '0', filter: filter, sort: { key: 'sum_gmv_desc' } }) });
+    await new Promise(r => setTimeout(r, 1000 + Math.random() * 800));
+    if (r.status === 404) return [];
+    if (!r.ok) {
+      errors.push('товары Ozon по SKU: ' + r.status);
+      if (r.status === 429 || r.status === 403) stop = true;
+      return [];
     }
+    let j = null; try { j = await r.json(); } catch (e) {}
+    return (j && j.items) || [];
+  };
+  for (const period of ['weekly', 'monthly']) {
+    const got = new Map();
+    for (let i = 0; i < SKUS.length && !stop; i += 10) {
+      const part = SKUS.slice(i, i + 10).map(String);
+      for (const x of await ask({ stock: 'any_stock', period: period, name: part.join(' ') })) if (part.indexOf(String(x.sku)) >= 0) got.set(String(x.sku), x);
+    }
+    for (const s of SKUS.map(String)) {
+      if (stop) break;
+      if (got.has(s)) continue;
+      const x = (await ask({ stock: 'any_stock', period: period, sku: s })).find(x => String(x.sku) === s);
+      if (x) got.set(s, x);
+    }
+    out[period] = [...got.values()];
   }
   return { bySku: out, errors: errors };
 })(${JSON.stringify(companyId)}, ${JSON.stringify(skus)})`;

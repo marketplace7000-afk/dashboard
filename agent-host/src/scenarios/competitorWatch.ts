@@ -261,10 +261,22 @@ const OZ_BY_SKU = (companyId: string, skus: number[]) => `(async (CID, SKUS) => 
   const HD = { 'Content-Type': 'application/json', 'x-o3-app-name': 'seller-ui', 'x-o3-company-id': CID, 'x-o3-language': 'ru' };
   const out = { weekly: [], monthly: [] }, errors = [];
   let stop = false;
+  // 20.10: один запрос из многих иногда обрывается («Failed to fetch») — раньше это роняло всё задание.
+  // Повторяем до 2 раз с паузой; не вышло — пропускаем этот запрос и идём дальше.
+  let netFails = 0;
   const ask = async (filter) => {
-    const r = await fetch('https://api.seller.ozon.ru/api/site/seller-analytics/what_to_sell/data/v3', { method: 'POST', credentials: 'include', headers: HD,
-      body: JSON.stringify({ limit: '50', offset: '0', filter: filter, sort: { key: 'sum_gmv_desc' } }) });
+    let r = null;
+    for (let t = 0; t < 3 && !r; t++) {
+      try {
+        r = await fetch('https://api.seller.ozon.ru/api/site/seller-analytics/what_to_sell/data/v3', { method: 'POST', credentials: 'include', headers: HD,
+          body: JSON.stringify({ limit: '50', offset: '0', filter: filter, sort: { key: 'sum_gmv_desc' } }) });
+      } catch (e) {
+        netFails++;
+        await new Promise(r => setTimeout(r, 4000 + t * 4000));
+      }
+    }
     await new Promise(r => setTimeout(r, 1000 + Math.random() * 800));
+    if (!r) { errors.push('товары Ozon по SKU: обрыв связи 3 раза подряд'); if (netFails > 15) stop = true; return []; }
     if (r.status === 404) return [];
     if (!r.ok) {
       errors.push('товары Ozon по SKU: ' + r.status);
@@ -288,7 +300,7 @@ const OZ_BY_SKU = (companyId: string, skus: number[]) => `(async (CID, SKUS) => 
     }
     out[period] = [...got.values()];
   }
-  return { bySku: out, errors: errors };
+  return { bySku: out, errors: errors, netFails: netFails };
 })(${JSON.stringify(companyId)}, ${JSON.stringify(skus)})`;
 
 /** Продажи, выручка, CTR, корзина, ДРР, акции по каждому привязанному конкуренту и нашему товару («Товары на Ozon»). */
@@ -296,7 +308,22 @@ async function ozonSales(task: AgentTask, page: Page, cid: string, data: any): P
   const skus = [...new Set([...(task.params.watch as number[] ?? []), ...(task.params.ours as number[] ?? [])].map(Number).filter(n => n > 0))].slice(0, 700);
   if (!skus.length) return;
   await api.progress(task.id, stage(1, `Продажи по артикулам: ${skus.length} шт., за 7 и 28 дней`), true);
-  const r: any = await page.evaluate(OZ_BY_SKU(cid, skus));
+  // Причина обрывов — из сети браузера (в самой странице fetch видит только «Failed to fetch»).
+  const why = new Map<string, number>();
+  const onFail = (rq: any) => { if (rq.url().includes('what_to_sell/data')) { const k = rq.failure()?.errorText ?? '?'; why.set(k, (why.get(k) ?? 0) + 1); } };
+  const onResp = (rs: any) => { if (rs.url().includes('what_to_sell/data') && rs.status() >= 400) { const k = `HTTP ${rs.status()}`; why.set(k, (why.get(k) ?? 0) + 1); } };
+  page.on('requestfailed', onFail);
+  page.on('response', onResp);
+  let r: any = null;
+  try {
+    r = await page.evaluate(OZ_BY_SKU(cid, skus));
+  } catch (e) {
+    await api.log(task.id, 'warn', `продажи по артикулам не сняты: ${(e as Error).message.slice(0, 160)} (страница ${page.url().slice(0, 80)})`);
+  } finally {
+    page.off('requestfailed', onFail);
+    page.off('response', onResp);
+  }
+  if (why.size) await api.log(task.id, 'warn', `«Товары на Ozon»: сбои запросов — ${[...why].map(([k, n]) => `${k} ×${n}`).join(', ')}${r?.netFails ? ` (повторов ${r.netFails})` : ''}`);
   data.bySku = r?.bySku ?? null;
   data.errors = [...(data.errors ?? []), ...((r?.errors ?? []) as string[]).slice(0, 5)];
   await api.progress(task.id, stage(1, `Продажи по артикулам: найдено ${data.bySku?.monthly?.length ?? 0} из ${skus.length}`, { items_done: data.bySku?.monthly?.length ?? 0, items_total: skus.length }), true);

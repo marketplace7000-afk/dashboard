@@ -7,29 +7,62 @@
  * в несуществующий хост, и у клиента «по ценам не прогрузились фотки»
  * (телемост 11.08, п. 10).
  *
- * Проверено 14.08.2026: хосты basket-01 … basket-32 отвечают по HTTP (404 на
- * корень = хост живой, просто корень пустой). То есть потолок 21 заведомо мал.
- *
- * Пороги vol до 3485 — таблица наблюдений. Дальше WB нарезает баскеты РОВНЫМ
- * шагом 216 (3485 → 3701 → 3917 → 4133 → 4349 → 4565…), поэтому верхнюю часть
- * считаем арифметикой, а не продолжаем таблицу руками: так формула не устареет
- * при следующем баскете. NB: сам шаг — эмпирика, официальной спецификации у WB
- * нет; если WB его изменит, фото снова поедут (см. wbImageUrlWithFallback).
+ * 20.10.2026: прежний «ровный шаг 216» выше vol 3485 оказался неверным — с vol ~4566
+ * WB режет баскеты по 312, 432, затем 768, и у 58 из 96 конкурентов WB фото вели в
+ * пустой хост. Теперь границы — официальная таблица самой витрины WB
+ * (cdn.wbbasket.ru/api/v3/upstreams → origin.mediabasket_route_map, снята 20.10).
+ * Сервер перечитывает её раз в 12 часов (refreshInBackground), так что новые баскеты
+ * подхватываются сами; за пределами таблицы продолжаем последним шагом.
+ * Зеркало для браузера — src/utils/wbBasket.ts (только таблица).
  */
 
-/** Верхние границы vol для баскетов 1..20 (наблюдения). */
-const VOL_BOUNDS = [
+/** Верхние границы vol для баскетов 1..65 (таблица WB на 20.10.2026). */
+let VOL_BOUNDS = [
   143, 287, 431, 719, 1007, 1061, 1115, 1169, 1313, 1601,
   1655, 1919, 2045, 2189, 2405, 2621, 2837, 3053, 3269, 3485,
+  3701, 3917, 4133, 4349, 4565, 4877, 5189, 5501, 5813, 6125,
+  6437, 6749, 7061, 7373, 7685, 7997, 8309, 8741, 9173, 9605,
+  10373, 11141, 11909, 12677, 13445, 14213, 14981, 15749, 16517, 17285,
+  18053, 18821, 19589, 20357, 21125, 21893, 22661, 23429, 24197, 24965,
+  25733, 26501, 27269, 28037, 28805,
 ];
-const STEP_AFTER = 216;      // шаг нарезки баскетов выше vol 3485
-const LAST_TABLE_BASKET = VOL_BOUNDS.length;          // 20
-const LAST_TABLE_VOL = VOL_BOUNDS[VOL_BOUNDS.length - 1]; // 3485
+
+const UPSTREAMS_URL = 'https://cdn.wbbasket.ru/api/v3/upstreams';
+const REFRESH_MS = 12 * 3600_000;
+let refreshedAt = 0;
+let refreshing = false;
+
+/** Перечитать таблицу баскетов у WB (не блокирует вызывающего; ошибки — остаёмся на прежней). */
+function refreshInBackground(): void {
+  if (refreshing || Date.now() - refreshedAt < REFRESH_MS || typeof fetch !== 'function') return;
+  refreshing = true;
+  refreshedAt = Date.now();
+  fetch(UPSTREAMS_URL, { signal: AbortSignal.timeout(15_000) })
+    .then(r => (r.ok ? r.json() : null))
+    .then((j: any) => {
+      const hosts: any[] = j?.origin?.mediabasket_route_map?.[0]?.hosts ?? [];
+      const bounds: number[] = [];
+      for (let i = 0; i < hosts.length; i++) {
+        const h = hosts[i];
+        // Берём только ровную последовательность basket-01, basket-02, … с растущими границами.
+        if (h?.host !== `basket-${String(i + 1).padStart(2, '0')}.wbbasket.ru`) break;
+        const to = Number(h.vol_range_to);
+        if (!Number.isFinite(to) || (bounds.length && to <= bounds[bounds.length - 1])) break;
+        bounds.push(to);
+      }
+      if (bounds.length >= VOL_BOUNDS.length) VOL_BOUNDS = bounds;
+    })
+    .catch(() => {})
+    .finally(() => { refreshing = false; });
+}
 
 export function wbBasketNumber(nm: number): number {
+  refreshInBackground();
   const vol = Math.floor(nm / 1e5);
   for (let i = 0; i < VOL_BOUNDS.length; i++) if (vol <= VOL_BOUNDS[i]) return i + 1;
-  return LAST_TABLE_BASKET + Math.ceil((vol - LAST_TABLE_VOL) / STEP_AFTER);
+  // Дальше таблицы — последним шагом WB (на 20.10 это 768).
+  const n = VOL_BOUNDS.length, step = VOL_BOUNDS[n - 1] - VOL_BOUNDS[n - 2];
+  return n + Math.ceil((vol - VOL_BOUNDS[n - 1]) / step);
 }
 
 export function wbBasketHost(nm: number): { host: string; vol: number; part: number; basket: number } {

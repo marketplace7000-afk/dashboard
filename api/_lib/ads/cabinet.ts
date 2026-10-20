@@ -405,10 +405,12 @@ export function parseOzon(data: any, ourSellerId: string): NonNullable<Ads2Compe
   });
   const categories = (data?.markets ?? []).map((m: any) => {
     const all: Ads2OzMarketItem[] = (m.items ?? []).map(toItem);
+    // Места 51–200 (агент с 20.10 присылает оттуда только наши и привязанные товары) — с настоящим местом.
+    const extra: Ads2OzMarketItem[] = (m.extra ?? []).map((x: any, i: number) => ({ ...toItem(x, i), rank: Number(x.rank) || 51 + i }));
     const b = m.benchmark ?? {};
     return {
       category3Id: String(m.category3Id), name: String(m.items?.[0]?.category3 ?? m.category3Id), updateDate: m.updateDate ?? null,
-      ours: all.filter(x => x.ours), top: all.slice(0, 10),
+      ours: [...all, ...extra].filter(x => x.ours), top: all.slice(0, 10),
       benchmark: { price: num(b.avgGmv), convSearch: num(b.convToCartSearch), convPdp: num(b.pdpToCartConversion), drr: num(b.drr) },
     };
   });
@@ -482,7 +484,7 @@ function metricsIndex(mp: AdMp, data: any): Map<string, Partial<Ads2WatchLink>> 
         orders: cur(it.orders), ordersDyn: dyn(it.orders), ordersDays: cur(it.orders) != null ? 7 : undefined, avgPos: cur(it.avgPosition), ctr: cur(it.ctr), openCard: cur(it.openCard), inAds: !!it.isAdvertised });
     }
   } else {
-    for (const mk of data?.markets ?? []) for (const x of mk.items ?? []) {
+    for (const mk of data?.markets ?? []) for (const x of [...(mk.items ?? []), ...(mk.extra ?? [])]) {
       put(String(x.sku), { title: x.name || undefined, brand: x.brand || undefined, seller: x.sellerName || undefined, photo: x.photo || undefined,
         price: num(x.avgPrice), gmv: num(x.gmvSum ?? x.soldSum), orders: num(x.soldCount), ordersDyn: num(x.salesDynamics),
         ordersDays: num(x.soldCount) != null ? 7 : undefined, drr: num(x.drr), convPdp: num(x.pdpToCartConversion ?? x.convToCartPdp),
@@ -526,7 +528,7 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
   if (mp === 'wb') for (const g of data?.report?.groups ?? []) for (const it of g.items ?? []) {
     if (it.vendorCode) fromSnap.set(up(it.vendorCode), { id: String(it.nmId ?? ''), name: String(it.name ?? ''), photo: String(it.mainPhoto ?? '') });
   }
-  else for (const mk of data?.markets ?? []) for (const x of mk.items ?? []) {
+  else for (const mk of data?.markets ?? []) for (const x of [...(mk.items ?? []), ...(mk.extra ?? [])]) {
     const ourSeller = String(process.env.OZON_CLIENT_ID || '').trim();
     if ((ourSeller && String(x.sellerId) === ourSeller) || x.blockedAsYourGood) fromSnap.set(up(x.article), { id: String(x.sku ?? ''), name: String(x.name ?? ''), photo: String(x.photo ?? '') });
   }

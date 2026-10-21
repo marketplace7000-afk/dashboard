@@ -140,6 +140,31 @@ export type RnpResponse = {
   sellerPrices?: Record<string, number>;
 };
 
+/** Товар в выжимке для главной: заказы за период против прошлого такого же. */
+export type RnpSummaryProduct = {
+  sku: string; article: string; name: string; photo: string;
+  cur: number; prev: number; curRub: number;
+  /** Последний известный остаток, шт. */
+  stock: number | null;
+  /** Заказов в день за последние 7 закрытых дней. */
+  perDay: number;
+};
+
+/** Выжимка РНП для главной: GET /api/rnp/summary?mp=wb|ozon&days=1|7|30. */
+export type RnpSummary = {
+  ok: true; mp: RnpMp; days: number;
+  /** Дни графика: период (за «Сегодня» — 14 дней), заканчивается сегодня. */
+  dates: string[];
+  amount: Array<number | null>; cnt: Array<number | null>; ads: Array<number | null>;
+  /** Такое же окно перед ним, выровнено по индексу с dates. */
+  prevAmount: Array<number | null>; prevCnt: Array<number | null>;
+  /** Рост и падение заказов по закрытым дням: [from, to] против такого же окна до него. */
+  movers: { from: string; to: string; up: RnpSummaryProduct[]; down: RnpSummaryProduct[] };
+  /** Остаток 0, а за последнюю неделю было хотя бы 3 заказа. */
+  outOfStock: RnpSummaryProduct[];
+  collectedAt: number | null;
+};
+
 /** То, что стоит в строке листа «Цены»: цена покупателя, маржа, ROI. */
 export type RnpPriceView = {
   price: number | null;

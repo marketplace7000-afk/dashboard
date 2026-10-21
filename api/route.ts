@@ -443,10 +443,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ─── /api/rnp — «Рука на пульсе»: метрики по дням и товарам (api/_lib/rnp.ts).
   //   GET  /api/rnp?mp=wb|ozon&from=YYYY-MM-DD&to=YYYY-MM-DD
   //   POST /api/rnp/collect?mp=wb|ozon — внеочередной сбор (фоном)
+  //   GET  /api/rnp/summary?mp=wb|ozon&days=1|7|30 — выжимка для главной
   if (section === 'rnp') {
     try {
       const rnp = await import('./_lib/rnp');
       const mp = String(req.query.mp ?? 'wb') === 'ozon' ? 'ozon' : 'wb';
+      if (parts[1] === 'summary') return res.status(200).json(rnp.getRnpSummary(mp, Number(req.query.days) || 7));
       if (parts[1] === 'collect') {
         const already = rnp.rnpCollecting();
         void rnp.collectRnp(mp).catch(() => {});

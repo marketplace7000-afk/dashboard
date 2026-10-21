@@ -211,7 +211,7 @@ export function App() {
         </div>
         <div className={`content ${view === 'rnp' ? 'content-wide' : view === 'prices' || view === 'ads' || view === 'competitors' || view === 'sklad' ? 'content-prices' : ''}`}>
           <ErrorBoundary key={view ?? 'none'} name={view ? TITLES[view] : ''}>
-          {view === 'dashboard' && <Dashboard onNav={navTo} />}
+          {view === 'dashboard' && <Dashboard onNav={navTo} can={k => allowed(k as Page)} />}
           {view === 'sklad' && <Sklad />}
           {view === 'prices' && <Prices />}
           {view === 'reviews' && <Reviews />}

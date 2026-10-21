@@ -38,6 +38,7 @@ const MODEL_PRICING: Record<string, { in: number; out: number }> = {
   'claude-sonnet-5':    { in: 2,  out: 10 },
   'claude-sonnet-4-6':  { in: 3,  out: 15 },
   'claude-sonnet-4-5':  { in: 3,  out: 15 },
+  'claude-haiku-5-5':   { in: 0.1, out: 0.5 },   // до 100K токенов во входе (дальше 0,5/2,5 — у нас таких нет)
   'claude-haiku-4-5':   { in: 1,  out: 5  },
 };
 /** Множители к входной цене: запись в кэш на 5 минут и чтение из кэша. */

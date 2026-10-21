@@ -15,9 +15,7 @@ import { logAiUsage, calcCost } from './aiUsage';
 const ANTHROPIC_DIRECT_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_PROXY_URL = (process.env.ANTHROPIC_PROXY_URL || '').trim();
 const ANTHROPIC_URL = ANTHROPIC_PROXY_URL || ANTHROPIC_DIRECT_URL;
-// На аккаунте проверены и работают: claude-sonnet-4-5, claude-sonnet-4-6,
-// claude-opus-4-6, claude-opus-4-7. По умолчанию используем 4-6 (новейший Sonnet,
-// в 5× дешевле Opus).
+// Модель по умолчанию — ANTHROPIC_DEFAULT_MODEL в .env сервера (ниже запасное значение).
 //
 // ⚠ Если в env лежит мусор типа "# claude-sonnet-4-6" (так Vercel записывает
 // значения с # как часть значения, а не комментарий) — Anthropic вернёт 404
@@ -26,12 +24,23 @@ function sanitizeModel(raw: string | undefined): string {
   if (!raw) return '';
   return raw.replace(/^#+\s*/, '').replace(/\s+/g, '').trim();
 }
-const DEFAULT_MODEL = sanitizeModel(process.env.ANTHROPIC_DEFAULT_MODEL) || 'claude-sonnet-4-6';
+// 21.10.2026: по решению владельца всё, кроме отзывов и чатов (реклама, конкуренты,
+// инсайты, советы, ИИ-чат), идёт на Opus 5.5; отзывы — на Haiku 5.5 (свои настройки раздела).
+const DEFAULT_MODEL = sanitizeModel(process.env.ANTHROPIC_DEFAULT_MODEL) || 'claude-opus-5-5';
+// Проверка ключа — самой дешёвой моделью: ей нужен один токен, качество не важно.
+const PING_MODEL = sanitizeModel(process.env.ANTHROPIC_PING_MODEL) || 'claude-haiku-5-5';
+/**
+ * У поколения 5 размышления включены всегда и расходуют тот же max_tokens, что и ответ.
+ * Короткий лимит (1100 у советов) обрезал бы JSON посреди строки. Платим только за
+ * реально сгенерированное, поэтому запас лимита ничего не стоит.
+ */
+const GEN5_MIN_MAX_TOKENS = 8000;
 
 
 /** Модели, которые ещё принимают temperature (поколение 4 и раньше). */
 export function supportsTemperature(model: string): boolean {
-  return !/claude-(sonnet|opus)-5|fable|mythos/i.test(model);
+  // Haiku 5.5 тоже отвечает 400 на нестандартную temperature.
+  return !/claude-(sonnet|opus|haiku)-5|fable|mythos/i.test(model);
 }
 
 /** Модели с параметром effort (поколение 5; Haiku 4.5 его не принимает). */
@@ -105,7 +114,7 @@ export async function callAnthropic(opts: AnthropicOptions): Promise<{ text: str
   const model = opts.model || DEFAULT_MODEL;
   const body = {
     model,
-    max_tokens: opts.max_tokens ?? 1024,
+    max_tokens: supportsEffort(model) ? Math.max(opts.max_tokens ?? 1024, GEN5_MIN_MAX_TOKENS) : (opts.max_tokens ?? 1024),
     // У моделей поколения 5 (Sonnet/Opus 5.x, Fable, Mythos) параметр temperature
     // снят: Anthropic отвечает 400 «temperature is deprecated for this model».
     ...(supportsTemperature(model) ? { temperature: opts.temperature ?? 0.4 } : {}),
@@ -133,9 +142,10 @@ export async function callAnthropic(opts: AnthropicOptions): Promise<{ text: str
   let text = await r.text();
   // Страховка: если модель не приняла effort или часовой кэш — повторяем без них,
   // чтобы экономия не обернулась остановкой черновиков.
-  if (r.status === 400 && /output_config|effort|ttl/i.test(text)) {
+  if (r.status === 400 && /output_config|effort|ttl|temperature/i.test(text)) {
     const plain: any = { ...body };
     delete plain.output_config;
+    delete plain.temperature;
     const noTtl = (blocks: any) => Array.isArray(blocks)
       ? blocks.map((b: any) => b?.cache_control ? { ...b, cache_control: { type: 'ephemeral' } } : b) : blocks;
     plain.system = noTtl(plain.system);
@@ -230,7 +240,7 @@ export async function pingAnthropic(force = false): Promise<AiKeyStatus> {
   if (pingInFlight) return pingInFlight;
 
   pingInFlight = (async (): Promise<AiKeyStatus> => {
-    const model = DEFAULT_MODEL;
+    const model = PING_MODEL;
     const apiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
     if (!apiKey) {
       return { state: 'not_configured', detail: 'Ключ Anthropic не задан на сервере (ANTHROPIC_API_KEY).', model, checkedAt: Date.now() };

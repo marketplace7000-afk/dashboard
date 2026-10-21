@@ -11,6 +11,7 @@ import { addUsage, spendThisMonth, getSettings, rlog } from './db';
 const PRICES: Record<string, { in: number; out: number; cacheRead: number }> = {
   'claude-sonnet-5-5': { in: 2, out: 10, cacheRead: 0.1 },
   'claude-sonnet-5':   { in: 2, out: 10, cacheRead: 0.2 },
+  'claude-haiku-5-5':  { in: 0.1, out: 0.5, cacheRead: 0.01 },
   'claude-haiku-4-5':  { in: 1, out: 5,  cacheRead: 0.1 },
   'claude-opus-5-5':   { in: 4, out: 20, cacheRead: 0.2 },
 };

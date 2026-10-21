@@ -84,8 +84,8 @@ export type ReviewSettings = {
 export const DEFAULT_REVIEW_SETTINGS: ReviewSettings = {
   autoPublish: { wb_reviews: false, wb_questions: false, ozon_reviews: false, ozon_questions: false },
   escalateRatingMax: 2,
-  draftModel: 'claude-sonnet-5-5',
-  indexModel: 'claude-haiku-4-5',
+  draftModel: 'claude-haiku-5-5',   // 21.10.2026: по решению владельца отзывы и вопросы — на Haiku 5.5
+  indexModel: 'claude-haiku-5-5',
   monthlyBudgetUsd: 8,
   keyBudgetUsd: 20,
   yandexDiskUrl: '',

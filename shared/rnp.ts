@@ -144,24 +144,23 @@ export type RnpResponse = {
 export type RnpSummaryProduct = {
   sku: string; article: string; name: string; photo: string;
   cur: number; prev: number; curRub: number;
-  /** Последний известный остаток, шт. */
-  stock: number | null;
-  /** Заказов в день за последние 7 закрытых дней. */
-  perDay: number;
 };
 
-/** Выжимка РНП для главной: GET /api/rnp/summary?mp=wb|ozon&days=1|7|30. */
+/** Выжимка РНП для главной: GET /api/rnp/summary?mp=wb|ozon&from=YYYY-MM-DD&to=YYYY-MM-DD. */
 export type RnpSummary = {
-  ok: true; mp: RnpMp; days: number;
-  /** Дни графика: период (за «Сегодня» — 14 дней), заканчивается сегодня. */
+  ok: true; mp: RnpMp; from: string; to: string;
   dates: string[];
-  amount: Array<number | null>; cnt: Array<number | null>; ads: Array<number | null>;
-  /** Такое же окно перед ним, выровнено по индексу с dates. */
-  prevAmount: Array<number | null>; prevCnt: Array<number | null>;
+  /** Заказы, ₽ по цене продавца — до СПП (Ozon — до соинвеста). */
+  amount: Array<number | null>;
+  /** Заказы, ₽ после СПП / соинвеста — сколько заплатил покупатель. */
+  after: Array<number | null>;
+  cnt: Array<number | null>; ads: Array<number | null>;
+  /** Такое же окно перед периодом, выровнено по индексу с dates. */
+  prevAmount: Array<number | null>; prevAfter: Array<number | null>; prevCnt: Array<number | null>;
   /** Рост и падение заказов по закрытым дням: [from, to] против такого же окна до него. */
   movers: { from: string; to: string; up: RnpSummaryProduct[]; down: RnpSummaryProduct[] };
-  /** Остаток 0, а за последнюю неделю было хотя бы 3 заказа. */
-  outOfStock: RnpSummaryProduct[];
+  /** С какой даты в базе есть заказы — раньше выбирать в календаре нечего. */
+  firstDate: string | null;
   collectedAt: number | null;
 };
 

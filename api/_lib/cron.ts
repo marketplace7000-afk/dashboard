@@ -689,6 +689,12 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
         const { collectRnp } = await import('./rnp');
         await collectRnp().catch(e => console.warn('[warm-extras] РНП не собрана:', (e as Error)?.message));
 
+        // История финансов по дням для главной (выбор периода в календаре).
+        try {
+          const { collectFinHistory } = await import('./finHistory');
+          console.warn('[warm-extras] финистория:', await collectFinHistory());
+        } catch (e) { console.warn('[warm-extras] финистория не собрана:', (e as Error)?.message); }
+
         // «Реклама 2.0», этап 2: автопилот-советник пересчитывает предложения по свежей РНП.
         try {
           const { runAutopilot } = await import('./ads/autopilot');

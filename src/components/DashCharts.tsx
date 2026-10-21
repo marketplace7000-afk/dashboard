@@ -129,7 +129,10 @@ export function ProgressBar({ pct, color, left, right }: { pct: number; color: s
   );
 }
 
-export type DayRow = { label: string; date: string; wb: number | null; oz: number | null; prev: number | null };
+export type DayRow = { label: string; date: string; wb: number | null; oz: number | null; prev: number | null; today?: boolean };
+
+/** Размер подписей на осях: главная набрана крупно (замечание владельца 21.10 — «шрифт вдвое больше»). */
+const TICK = 22;
 
 /**
  * Большой график «Заказы по дням»: WB и Ozon — заливка друг над другом,
@@ -138,11 +141,12 @@ export type DayRow = { label: string; date: string; wb: number | null; oz: numbe
 export function OrdersChart({ rows, showWb, showOz, prevName }: { rows: DayRow[]; showWb: boolean; showOz: boolean; prevName: string }) {
   const id = useId().replace(/:/g, '');
   const names = { wb: 'Wildberries', oz: 'Ozon', prev: prevName };
-  const every = rows.length > 16 ? Math.ceil(rows.length / 8) : rows.length > 8 ? 2 : 1;
+  // Крупные подписи: не больше ~7 дат по оси, иначе налезают друг на друга.
+  const every = Math.max(1, Math.ceil(rows.length / 7));
   return (
     <div className="db-big">
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={rows} margin={{ top: 8, right: 20, bottom: 0, left: 0 }}>
+        <ComposedChart data={rows} margin={{ top: 8, right: 36, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id={`wb${id}`} x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor="var(--db-wb)" stopOpacity={0.42} />
@@ -155,9 +159,9 @@ export function OrdersChart({ rows, showWb, showOz, prevName }: { rows: DayRow[]
           </defs>
           <CartesianGrid vertical={false} stroke="var(--db-line)" strokeDasharray="3 5" />
           <XAxis dataKey="label" axisLine={false} tickLine={false} interval={every - 1}
-            tick={{ fill: 'var(--db-muted)', fontSize: 13 }} dy={6} />
-          <YAxis axisLine={false} tickLine={false} width={72} tickFormatter={v => fmtAxis(Number(v))}
-            tick={{ fill: 'var(--db-muted)', fontSize: 13 }} />
+            tick={{ fill: 'var(--db-muted)', fontSize: TICK }} dy={10} height={44} />
+          <YAxis axisLine={false} tickLine={false} width={124} tickFormatter={v => fmtAxis(Number(v))}
+            tick={{ fill: 'var(--db-muted)', fontSize: TICK }} />
           <Tooltip cursor={{ stroke: 'var(--db-line)', strokeWidth: 1 }}
             content={<ChartTip names={names} format={v => fmtRub(v)} title={(_l, p) => p?.date ? `${fmtDay(p.date)}${p.today ? ' · сегодня, день не закрыт' : ''}` : _l} />} />
           {showWb && <Area dataKey="wb" stackId="mp" type="monotone" stroke="var(--db-wb)" strokeWidth={2.5} fill={`url(#wb${id})`} dot={false} connectNulls isAnimationActive />}

@@ -92,7 +92,7 @@ const numS = (v: any): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
-function normalizeV1Row(r: WbFinanceRowV1): WbFinanceRow {
+export function normalizeWbFinanceRow(r: WbFinanceRowV1): WbFinanceRow {
   return {
     realizationreport_id: r.reportId ?? 0,
     date_from: r.dateFrom ?? '', date_to: r.dateTo ?? '', create_dt: r.createDate ?? '',
@@ -150,7 +150,7 @@ export async function wbReportDetail(dateFrom: string, dateTo: string): Promise<
     method: 'POST',
     body: JSON.stringify({ dateFrom, dateTo, limit: 100000, rrdId: 0, period: 'weekly' }),
   });
-  return Array.isArray(rows) ? rows.map(normalizeV1Row) : [];
+  return Array.isArray(rows) ? rows.map(normalizeWbFinanceRow) : [];
 }
 
 /**

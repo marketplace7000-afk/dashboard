@@ -1147,65 +1147,80 @@ export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise
 }
 
 /**
- * Выжимка РНП для главной (21.10.2026): итоги по дням и товары, которые сильнее
- * всего выросли, упали или закончились. Полный getRnp за 60 дней — это ~1,4 МБ по
- * Ozon (цены, маржа, все метрики); главной нужны четыре метрики, поэтому читаем
- * таблицу напрямую и отдаём килобайты.
+ * Выжимка РНП для главной за любой период (21.10.2026): заказы по дням до и после
+ * СПП, реклама и товары, которые сильнее всего выросли или упали. Полный getRnp за
+ * 60 дней — ~1,4 МБ по Ozon; главной нужны несколько метрик, поэтому читаем таблицу
+ * напрямую и отдаём килобайты.
+ *
+ * «До СПП» — ordered_amount: у WB это цена со скидкой продавца, у Ozon — «Заказано на
+ * сумму» из аналитики; сверено 21.10 с ценой продавца по отправлениям (spp_base):
+ * у WB совпадает до рубля, у Ozon расходится на единицы процентов. «После СПП» —
+ * та же сумма за вычетом доли скидки площадки дня (spp_disc / spp_base).
  */
-export function getRnpSummary(mp: RnpMp, daysIn: number): RnpSummary {
-  const days = [1, 7, 30].includes(daysIn) ? daysIn : 7;
+export function getRnpSummary(mp: RnpMp, fromIn: string, toIn: string): RnpSummary {
   const today = mskDate(0);
-  // За один день график из одного столбика ничего не скажет — показываем две недели.
-  const chartDays = days === 1 ? 14 : days;
+  const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+  let to = isDate(toIn) && toIn <= today ? toIn : today;
+  let from = isDate(fromIn) ? fromIn : addDays(to, -6);
+  if (from > to) [from, to] = [to, from];
+  if ((Date.parse(to) - Date.parse(from)) / DAY_MS >= MAX_DAYS) from = addDays(to, -(MAX_DAYS - 1));
   const dates: string[] = [];
-  for (let i = chartDays - 1; i >= 0; i--) dates.push(addDays(today, -i));
-  const prevDates = dates.map(d => addDays(d, -chartDays));
+  for (let x = from; x <= to; x = addDays(x, 1)) dates.push(x);
+  const len = dates.length;
+  const prevDates = dates.map(x => addDays(x, -len));
   // Товары сравниваем по закрытым дням: неполное «сегодня» против полного дня занижало бы рост.
-  const moverDays = days === 1 ? 7 : days;
-  const curTo = addDays(today, -1), curFrom = addDays(curTo, -(moverDays - 1));
-  const prevTo = addDays(curFrom, -1), prevFrom = addDays(prevTo, -(moverDays - 1));
+  const curTo = to === today && from < today ? addDays(today, -1) : to;
+  const moverLen = (Date.parse(curTo) - Date.parse(from)) / DAY_MS + 1;
+  const prevTo = addDays(from, -1), prevFrom = addDays(prevTo, -(moverLen - 1));
 
+  const empty = () => dates.map(() => null as number | null);
   const res: RnpSummary = {
-    ok: true, mp, days, dates,
-    amount: dates.map(() => null), cnt: dates.map(() => null), ads: dates.map(() => null),
-    prevAmount: dates.map(() => null), prevCnt: dates.map(() => null),
-    movers: { from: curFrom, to: curTo, up: [], down: [] }, outOfStock: [], collectedAt: null,
+    ok: true, mp, from, to, dates,
+    amount: empty(), after: empty(), cnt: empty(), ads: empty(),
+    prevAmount: empty(), prevAfter: empty(), prevCnt: empty(),
+    movers: { from, to: curTo, up: [], down: [] }, firstDate: null, collectedAt: null,
   };
   const d = getDb();
   if (!d) return res;
 
-  const since = [prevDates[0], prevFrom, addDays(today, -7)].sort()[0];
+  const since = [prevDates[0], prevFrom].sort()[0];
   const rows = d.prepare(`SELECT date, sku, metric, value FROM rnp_fact WHERE mp = ? AND date >= ? AND date <= ?
-    AND metric IN ('ordered_amount', 'ordered_cnt', 'adv_expenses', 'stocks')`).all(mp, since, today) as Array<{ date: string; sku: string; metric: string; value: number }>;
+    AND metric IN ('ordered_amount', 'ordered_cnt', 'adv_expenses', 'spp_base', 'spp_disc')`).all(mp, since, to) as Array<{ date: string; sku: string; metric: string; value: number }>;
 
   const idx = new Map(dates.map((x, i) => [x, i]));
   const pidx = new Map(prevDates.map((x, i) => [x, i]));
   const add = (arr: Array<number | null>, i: number, v: number) => { arr[i] = (arr[i] ?? 0) + v; };
+  const sppBase = new Map<string, number>(), sppDisc = new Map<string, number>();
   const cur = new Map<string, { cnt: number; rub: number }>();
   const prev = new Map<string, number>();
-  const last7 = new Map<string, number>();
-  const stock = new Map<string, { date: string; v: number }>();
-  const weekFrom = addDays(today, -7);
   for (const r of rows) {
     const v = Number(r.value) || 0;
     const i = idx.get(r.date), p = pidx.get(r.date);
     if (r.metric === 'ordered_amount') {
       if (i !== undefined) add(res.amount, i, v);
       if (p !== undefined) add(res.prevAmount, p, v);
-      if (r.date >= curFrom && r.date <= curTo) { const c = cur.get(r.sku) ?? { cnt: 0, rub: 0 }; c.rub += v; cur.set(r.sku, c); }
+      if (r.date >= from && r.date <= curTo) { const c = cur.get(r.sku) ?? { cnt: 0, rub: 0 }; c.rub += v; cur.set(r.sku, c); }
     } else if (r.metric === 'ordered_cnt') {
       if (i !== undefined) add(res.cnt, i, v);
       if (p !== undefined) add(res.prevCnt, p, v);
-      if (r.date >= curFrom && r.date <= curTo) { const c = cur.get(r.sku) ?? { cnt: 0, rub: 0 }; c.cnt += v; cur.set(r.sku, c); }
+      if (r.date >= from && r.date <= curTo) { const c = cur.get(r.sku) ?? { cnt: 0, rub: 0 }; c.cnt += v; cur.set(r.sku, c); }
       if (r.date >= prevFrom && r.date <= prevTo) prev.set(r.sku, (prev.get(r.sku) ?? 0) + v);
-      if (r.date >= weekFrom && r.date < today) last7.set(r.sku, (last7.get(r.sku) ?? 0) + v);
     } else if (r.metric === 'adv_expenses') {
       if (i !== undefined) add(res.ads, i, v);
-    } else if (r.metric === 'stocks') {
-      const s = stock.get(r.sku);
-      if (!s || r.date >= s.date) stock.set(r.sku, { date: r.date, v });
+    } else if (r.metric === 'spp_base') {
+      sppBase.set(r.date, (sppBase.get(r.date) ?? 0) + v);
+    } else if (r.metric === 'spp_disc') {
+      sppDisc.set(r.date, (sppDisc.get(r.date) ?? 0) + v);
     }
   }
+  // После СПП: доля скидки площадки за день. Нет базы за день — не знаем, оставляем пусто.
+  const afterOf = (date: string, amount: number | null) => {
+    const base = sppBase.get(date);
+    if (amount === null || !base) return null;
+    return amount * (1 - Math.min(1, (sppDisc.get(date) ?? 0) / base));
+  };
+  dates.forEach((x, i) => { res.after[i] = afterOf(x, res.amount[i]); });
+  prevDates.forEach((x, i) => { res.prevAfter[i] = afterOf(x, res.prevAmount[i]); });
 
   const items = new Map((d.prepare('SELECT sku, article, name, photo FROM rnp_item WHERE mp = ?').all(mp) as any[]).map(it => [String(it.sku), it]));
   const product = (sku: string): RnpSummaryProduct => {
@@ -1213,18 +1228,13 @@ export function getRnpSummary(mp: RnpMp, daysIn: number): RnpSummary {
     return {
       sku, article: it?.article || sku, name: it?.name || '', photo: it?.photo || '',
       cur: cur.get(sku)?.cnt ?? 0, prev: prev.get(sku) ?? 0, curRub: Math.round(cur.get(sku)?.rub ?? 0),
-      stock: stock.get(sku)?.v ?? null, perDay: Math.round(((last7.get(sku) ?? 0) / 7) * 10) / 10,
     };
   };
   const all = [...new Set([...cur.keys(), ...prev.keys()])].map(product);
   // Порог в 3 заказа отсекает шум: «1 → 2 заказа» — это +100 %, но не новость.
-  res.movers.up = all.filter(p => p.cur > p.prev && p.cur >= 3).sort((a, b) => (b.cur - b.prev) - (a.cur - a.prev)).slice(0, 5);
-  res.movers.down = all.filter(p => p.cur < p.prev && p.prev >= 3).sort((a, b) => (a.cur - a.prev) - (b.cur - b.prev)).slice(0, 5);
-  res.outOfStock = [...stock.entries()]
-    .filter(([sku, s]) => s.v <= 0 && (last7.get(sku) ?? 0) >= 3)
-    .map(([sku]) => product(sku))
-    .sort((a, b) => b.perDay - a.perDay)
-    .slice(0, 10);
+  res.movers.up = all.filter(p => p.cur > p.prev && p.cur >= 3).sort((a, b) => (b.cur - b.prev) - (a.cur - a.prev)).slice(0, 10);
+  res.movers.down = all.filter(p => p.cur < p.prev && p.prev >= 3).sort((a, b) => (a.cur - a.prev) - (b.cur - b.prev)).slice(0, 10);
+  res.firstDate = (d.prepare(`SELECT MIN(date) AS m FROM rnp_fact WHERE mp = ? AND metric = 'ordered_amount'`).get(mp) as { m?: string } | undefined)?.m ?? null;
   const at = metaGet(`collected:${mp}:sales`);
   res.collectedAt = at ? Number(at) : null;
   return res;

@@ -443,12 +443,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ─── /api/rnp — «Рука на пульсе»: метрики по дням и товарам (api/_lib/rnp.ts).
   //   GET  /api/rnp?mp=wb|ozon&from=YYYY-MM-DD&to=YYYY-MM-DD
   //   POST /api/rnp/collect?mp=wb|ozon — внеочередной сбор (фоном)
-  //   GET  /api/rnp/summary?mp=wb|ozon&days=1|7|30 — выжимка для главной
+  //   GET  /api/rnp/summary?mp=wb|ozon&from=YYYY-MM-DD&to=YYYY-MM-DD — выжимка для главной
   if (section === 'rnp') {
     try {
       const rnp = await import('./_lib/rnp');
       const mp = String(req.query.mp ?? 'wb') === 'ozon' ? 'ozon' : 'wb';
-      if (parts[1] === 'summary') return res.status(200).json(rnp.getRnpSummary(mp, Number(req.query.days) || 7));
+      if (parts[1] === 'summary') return res.status(200).json(rnp.getRnpSummary(mp, String(req.query.from ?? ''), String(req.query.to ?? '')));
       if (parts[1] === 'collect') {
         const already = rnp.rnpCollecting();
         void rnp.collectRnp(mp).catch(() => {});
@@ -510,6 +510,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json({ ok: true, settings: r.setSettings(body?.settings ?? {}) });
       }
       return res.status(200).json({ ok: true, ...(await r.buildSuggestions()) });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
+    }
+  }
+
+  // ─── /api/fin-history ── расходы по площадкам за любой период (21.10.2026) ──
+  //   GET /api/fin-history?from=YYYY-MM-DD&to=YYYY-MM-DD — из накопленной истории (_lib/finHistory)
+  if (section === 'fin-history') {
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    const from = String(req.query.from ?? '');
+    const to = String(req.query.to ?? '');
+    if (!re.test(from) || !re.test(to) || from > to) return res.status(400).json({ ok: false, error: 'bad_dates' });
+    try {
+      const { getFinRange } = await import('./_lib/finHistory');
+      const [wb, ozon] = await Promise.all([getFinRange('wb', from, to), getFinRange('ozon', from, to)]);
+      return res.status(200).json({ ok: true, from, to, wb, ozon });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
     }

@@ -7,6 +7,7 @@
  * показывать — по таким цифрам принимают решения о закупке.
  */
 import { apiGet, apiPost } from './http';
+import type { AiArea } from '../../shared/aiModels';
 
 export type Origin =
   | 'reference' | 'marketplace' | 'tariffs' | 'client-table'
@@ -38,6 +39,8 @@ export type EconReport = {
 export type AppSettings = {
   wbFulfilment: Fulfilment;
   ozonFulfilment: Fulfilment;
+  /** Модели Claude по разделам; сохраняются частично — только переданные разделы. */
+  aiModels?: Partial<Record<AiArea, string>>;
   updatedAt: number;
 };
 

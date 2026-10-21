@@ -678,10 +678,8 @@ function SettingsTab({ ov, onSaved }: { ov: ReviewsOverview; onSaved: (s: Review
           <input className="input" type="number" min={0} max={5} value={s.escalateRatingMax} onChange={num('escalateRatingMax')} /></div>
         <div className="field"><label className="field-label">Черновики после каждого сбора</label>
           <Switch checked={s.autoDraft} onChange={v => setS({ ...s, autoDraft: v })}>Готовить автоматически</Switch></div>
-        <div className="field"><label className="field-label">Модель черновиков</label>
-          <input className="input" value={s.draftModel} onChange={e => setS({ ...s, draftModel: e.target.value })} /></div>
-        <div className="field"><label className="field-label">Модель чтения PDF и фото</label>
-          <input className="input" value={s.indexModel} onChange={e => setS({ ...s, indexModel: e.target.value })} /></div>
+        <div className="field"><label className="field-label">Модели ИИ</label>
+          <div className="rv-hint">Выбираются в «Настройках» → «Модели ИИ по разделам»: отдельно для отзывов, чатов и базы знаний.</div></div>
       </div>
       <div className="rv-inline"><button className="btn btn-primary" onClick={save}>Сохранить настройки</button>{state && <span className="rv-hint">{state}</span>}</div>
     </section>

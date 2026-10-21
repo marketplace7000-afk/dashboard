@@ -6,6 +6,7 @@
  */
 
 import { logAiUsage, calcCost } from './aiUsage';
+import { modelFor, areaForAgent } from './aiModels';
 
 // Anthropic гео-блокирует РФ-IP (403 "Request not allowed"). На московском
 // сервере вызываем не напрямую, а через релей на не-РФ хосте (наш Vercel):
@@ -24,8 +25,8 @@ function sanitizeModel(raw: string | undefined): string {
   if (!raw) return '';
   return raw.replace(/^#+\s*/, '').replace(/\s+/g, '').trim();
 }
-// 21.10.2026: по решению владельца всё, кроме отзывов и чатов (реклама, конкуренты,
-// инсайты, советы, ИИ-чат), идёт на Opus 5.5; отзывы — на Haiku 5.5 (свои настройки раздела).
+// Запасная модель для вызовов без раздела. Обычно модель выбирается по разделу —
+// «Настройки» → «Модели ИИ» (api/_lib/aiModels.ts).
 const DEFAULT_MODEL = sanitizeModel(process.env.ANTHROPIC_DEFAULT_MODEL) || 'claude-opus-5-5';
 // Проверка ключа — самой дешёвой моделью: ей нужен один токен, качество не важно.
 const PING_MODEL = sanitizeModel(process.env.ANTHROPIC_PING_MODEL) || 'claude-haiku-5-5';
@@ -111,7 +112,8 @@ export async function callAnthropic(opts: AnthropicOptions): Promise<{ text: str
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new AnthropicError(503, 'ANTHROPIC_API_KEY not configured');
 
-  const model = opts.model || DEFAULT_MODEL;
+  // Модель раздела по выбору владельца; явная модель в вызове — только у служебных случаев.
+  const model = opts.model || modelFor(areaForAgent(opts.agent)) || DEFAULT_MODEL;
   const body = {
     model,
     max_tokens: supportsEffort(model) ? Math.max(opts.max_tokens ?? 1024, GEN5_MIN_MAX_TOKENS) : (opts.max_tokens ?? 1024),

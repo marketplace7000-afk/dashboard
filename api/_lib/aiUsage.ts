@@ -27,6 +27,7 @@ import { noteSwallowed } from './log';
  * и старше. Реальные с Opus 4.5 это 5/25, то есть расход по Opus завышался втрое.
  */
 const MODEL_PRICING: Record<string, { in: number; out: number }> = {
+  'claude-fable-5-1':   { in: 10, out: 50 },
   'claude-fable-5':     { in: 10, out: 50 },
   'claude-opus-5':      { in: 5,  out: 25 },
   'claude-opus-4-8':    { in: 5,  out: 25 },

@@ -5,6 +5,7 @@ import { getOzonPerfCreds, setOzonPerfCreds, ozonPerfFetch } from '../api/ozonAd
 import { getGlobalSettings, saveGlobalSettings, defaultSettings, GlobalSettings } from '../utils/procurementLogic';
 import { fetchAppSettings, saveAppSettings, type AppSettings } from '../api/productEcon';
 import { apiGet, errText } from '../api/http';
+import { AI_AREAS, AI_MODEL_CHOICES, DEFAULT_AI_MODELS, type AiArea } from '../../shared/aiModels';
 
 const WB_SCOPES: WbScope[] = ['stats', 'prices', 'analytics', 'promotion', 'supplies'];
 
@@ -425,6 +426,76 @@ function FulfilmentCard() {
   );
 }
 
+/**
+ * Модели ИИ по разделам (21.10.2026): владелец сам выбирает, какая модель Claude
+ * работает в каком разделе. Список — shared/aiModels.ts, выбор действует сразу.
+ */
+function AiModelsCard() {
+  const [st, setSt] = useState<AppSettings | null>(null);
+  const [savingArea, setSavingArea] = useState<AiArea | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [savedArea, setSavedArea] = useState<AiArea | null>(null);
+
+  useEffect(() => { fetchAppSettings().then(setSt).catch(e => setError(errText(e))); }, []);
+
+  const current = (a: AiArea) => st?.aiModels?.[a] || DEFAULT_AI_MODELS[a];
+  const pick = async (a: AiArea, model: string) => {
+    setSavingArea(a); setError(null); setSavedArea(null);
+    try {
+      setSt(await saveAppSettings({ aiModels: { [a]: model } }));
+      setSavedArea(a);
+    } catch (e) { setError(errText(e)); }
+    finally { setSavingArea(null); }
+  };
+  const price = (id: string) => {
+    const c = AI_MODEL_CHOICES.find(x => x.id === id);
+    return c ? `${c.priceIn} / ${c.priceOut}` : '';
+  };
+
+  return (
+    <div className="card">
+      <div className="flex-between" style={{ marginBottom: 10 }}>
+        <h2 style={{ margin: 0 }}>Модели ИИ по разделам</h2>
+        <span className="chip"><InfoIcon size={11} weight="bold" /> действует сразу</span>
+      </div>
+      <div className="muted" style={{ fontSize: 15.5, lineHeight: 1.6, marginBottom: 12 }}>
+        Какая модель Claude работает в каждом разделе. Дешевле — Haiku, глубже и дороже — Opus и Fable.
+        Цена — в долларах за миллион токенов: «вход / выход» (примерно 750 тысяч слов текста).
+        Расход по разделам виден в «Сборщиках» → «Расход на нейросеть».
+      </div>
+      <div className="grid" style={{ gap: 12 }}>
+        {AI_AREAS.map(a => (
+          <div key={a.key} className="grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 300px)', gap: 12, alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: 16.5, fontWeight: 600 }}>
+                {a.label}
+                {a.idle && <span className="chip" style={{ marginLeft: 8 }}>пока без ИИ</span>}
+                {savedArea === a.key && <span className="chip good" style={{ marginLeft: 8 }}>сохранено</span>}
+              </div>
+              <div className="muted" style={{ fontSize: 15 }}>{a.hint}</div>
+            </div>
+            <div>
+              <select className="input" value={current(a.key)} disabled={!st || savingArea !== null}
+                onChange={e => void pick(a.key, e.target.value)} aria-label={`Модель: ${a.label}`}>
+                {AI_MODEL_CHOICES.map(c => <option key={c.id} value={c.id}>{c.label} — ${c.priceIn} / ${c.priceOut}</option>)}
+              </select>
+              <div className="muted" style={{ fontSize: 15, marginTop: 4 }}>
+                {AI_MODEL_CHOICES.find(c => c.id === current(a.key))?.note ?? ''}
+                {current(a.key) === DEFAULT_AI_MODELS[a.key] ? '' : ` · по умолчанию ${AI_MODEL_CHOICES.find(c => c.id === DEFAULT_AI_MODELS[a.key])?.label} (${price(DEFAULT_AI_MODELS[a.key])})`}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {error && (
+        <div className="row gap-8" style={{ marginTop: 10, fontSize: 15.5, color: 'var(--bad)' }}>
+          <WarningIcon size={13} weight="bold" /> {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Settings() {
   return (
     <div className="grid" style={{ gap: 20 }}>
@@ -433,6 +504,7 @@ export function Settings() {
       <CollectorStatusCard />
       <ProcurementSettingsCard />
       <FulfilmentCard />
+      <AiModelsCard />
 
       <div className="card">
         <div className="flex-between" style={{ marginBottom: 10 }}>

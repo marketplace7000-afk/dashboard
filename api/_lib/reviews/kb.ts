@@ -17,6 +17,7 @@ import { getDb, safeJson, getSettings, rlog } from './db';
 import { unzipAll } from '../zip';
 import { askClaude } from './claude';
 import type { KbFolder, TgPair, ReviewItem } from '../../../shared/reviews';
+import { modelFor } from '../aiModels';
 
 // ─── Telegram ──────────────────────────────────────────────────────────────
 const PII = [
@@ -411,13 +412,13 @@ export function indexYandexDisk(): Promise<any> {
             rec.v = PDF_VERSION;
             if (ENG.test(f.name + f.path) && hasRuInstr) { rec.status = 'skipped'; rec.note = 'есть русская инструкция'; }
             else {
-              const r = await pdfKnowledge(await ydDownloadUrl(s.yandexDiskUrl, f.path), f.name, s.indexModel);
+              const r = await pdfKnowledge(await ydDownloadUrl(s.yandexDiskUrl, f.path), f.name, modelFor('knowledge'));
               rec.text = r.text; rec.via = r.via; rec.status = 'done';
               if (!r.text) { rec.status = 'skipped'; rec.note = 'полезного текста нет'; }
             }
           } else if (IMG_EXT.test(f.name)) {
             if (!IMG_USEFUL.test(f.name + ' ' + f.path)) { rec.status = 'skipped'; rec.note = 'обычное фото'; }
-            else { rec.text = await imageKnowledge(await ydDownloadUrl(s.yandexDiskUrl, f.path), f.name, s.indexModel); rec.status = 'done'; }
+            else { rec.text = await imageKnowledge(await ydDownloadUrl(s.yandexDiskUrl, f.path), f.name, modelFor('knowledge')); rec.status = 'done'; }
           } else { rec.status = 'skipped'; rec.note = 'неизвестный тип'; }
         } catch (e) {
           if (e instanceof SkipFile) { rec.status = 'skipped'; rec.note = e.message; outFiles.push(rec); progress.done++; continue; }

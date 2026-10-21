@@ -14,6 +14,7 @@ const PRICES: Record<string, { in: number; out: number; cacheRead: number }> = {
   'claude-haiku-5-5':  { in: 0.1, out: 0.5, cacheRead: 0.01 },
   'claude-haiku-4-5':  { in: 1, out: 5,  cacheRead: 0.1 },
   'claude-opus-5-5':   { in: 4, out: 20, cacheRead: 0.2 },
+  'claude-fable-5-1':  { in: 10, out: 50, cacheRead: 0.25 },
 };
 const FALLBACK = { in: 10, out: 50, cacheRead: 1 };
 

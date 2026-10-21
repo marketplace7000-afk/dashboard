@@ -12,6 +12,7 @@
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { noteSwallowed } from './log';
+import { cleanAiModels, type AiArea } from '../../shared/aiModels';
 
 /**
  * Схема работы со складом. От неё зависят комиссия и логистика: у FBO и FBS они
@@ -28,6 +29,8 @@ export type AppSettings = {
   wbFulfilment: Fulfilment;
   /** Схема по умолчанию для Ozon. */
   ozonFulfilment: Fulfilment;
+  /** Модель Claude по разделам («Настройки» → «Модели ИИ»); пусто — умолчания из shared/aiModels.ts. */
+  aiModels?: Partial<Record<AiArea, string>>;
   updatedAt: number;
 };
 
@@ -57,6 +60,8 @@ export function getSettings(): AppSettings {
 }
 
 export function setSettings(patch: Partial<AppSettings>): AppSettings {
+  // Модели — только из списка: незнакомое имя дало бы 404 на каждом вызове Claude.
+  if (patch.aiModels !== undefined) patch = { ...patch, aiModels: { ...getSettings().aiModels, ...cleanAiModels(patch.aiModels) } };
   const next: AppSettings = { ...getSettings(), ...patch, updatedAt: Date.now() };
   cache = next;
   try {

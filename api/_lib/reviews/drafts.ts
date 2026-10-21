@@ -12,6 +12,7 @@ import { productKnowledge, productCard, similarPastAnswers, similarTgPairs, rece
 import { getStyleProfile } from './sources';
 import { publishAnswer } from './publish';
 import { directionOf, type ReviewItem } from '../../../shared/reviews';
+import { modelFor } from '../aiModels';
 
 export const SYSTEM_PROMPT = `Ты — сотрудник поддержки интернет-магазина автотоваров и электроники «avto-vibe» (Wildberries и Ozon). Пишешь ответ магазина на отзыв или вопрос покупателя на карточке товара. Ответ публичный: его читает не только автор, но и все, кто выбирает этот товар.
 
@@ -114,7 +115,7 @@ async function buildThanksBank(it: ReviewItem, old: string[]): Promise<ThanksBan
     `\nНапиши ${BANK_SIZE} ответов.`,
   ].filter(Boolean).join('\n');
   const res = await askClaude('draft-bank', {
-    model: s.draftModel, max_tokens: 3000,
+    model: modelFor('reviews'), max_tokens: 3000,
     system: [
       { type: 'text', text: BANK_PROMPT },
       { type: 'text', text: `# Профиль стиля магазина\n${style?.text || '(профиль ещё не составлен)'}` },
@@ -132,7 +133,7 @@ async function buildThanksBank(it: ReviewItem, old: string[]): Promise<ThanksBan
     rlog('warn', `Банк благодарностей не собран (${it.offerId}, ${it.rating}★)`, { got: variants.length, stop: res.stop });
     return null;
   }
-  return { productName: it.productName || '', variants, next: 0, model: s.draftModel, cost: res.cost, at: Date.now() };
+  return { productName: it.productName || '', variants, next: 0, model: modelFor('reviews'), cost: res.cost, at: Date.now() };
 }
 
 /** Следующая благодарность из банка товара; null — банк не подходит/не собрался, тогда обычный черновик. */
@@ -201,7 +202,7 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
 
   const styleBlock = `# Профиль стиля магазина (выжимка из наших реальных ответов)\n${style?.text || '(профиль ещё не составлен — ориентируйся на прошлые ответы ниже)'}`;
   // Отзыв без текста (не попавший в банк) — короткий ответ, хватает модели подешевле.
-  const model = isEmptyReview ? s.indexModel : s.draftModel;
+  const model = modelFor('reviews');
 
   let res;
   try {

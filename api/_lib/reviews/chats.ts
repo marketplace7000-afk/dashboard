@@ -14,6 +14,7 @@ import { codeEscalation, extractJson, FORBIDDEN } from './drafts';
 import {
   chatDb, chatMessages, getThread, patchThread, rowToThread, replySignOf, addMessages, type ChatThread,
 } from './chatStore';
+import { modelFor } from '../aiModels';
 
 /** Лимит площадки на одно сообщение чата (WB — по документации buyer-chat-api; у Ozon держим так же). */
 export const CHAT_MAX = 1000;
@@ -141,7 +142,7 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
   try {
     res = await askClaude('chat-draft', {
       // В чате бывают разборы неисправностей по шагам — размышления средние, а не минимальные.
-      model: s.draftModel, max_tokens: 2500, temperature: 0.5, effort: 'medium',
+      model: modelFor('chats'), max_tokens: 2500, temperature: 0.5, effort: 'medium',
       system: [
         { type: 'text', text: CHAT_PROMPT },
         { type: 'text', text: styleBlock, cache_control: { type: 'ephemeral', ttl: '1h' } },
@@ -164,7 +165,7 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
   if (answer.length > CHAT_MAX) {
     try {
       const fix = await askClaude('chat-shorten', {
-        model: s.indexModel, max_tokens: 1500, temperature: 0.2,
+        model: modelFor('chats'), max_tokens: 1500, temperature: 0.2,
         messages: [{ role: 'user', content: `Это сообщение покупателю в чат маркетплейса, оно длиннее лимита в ${CHAT_MAX} символов (сейчас ${answer.length}). Перепиши его не длиннее ${CHAT_TARGET} символов: сохрани тон, факты и порядок шагов, убери повторы и лишние слова. Если все шаги не помещаются — оставь первые, самые важные, и закончи просьбой написать результат, остальное мы отправим следующим сообщением. Мысль не обрывай. Верни только новый текст сообщения, без пояснений.\n\n${answer}` }],
       });
       cost += fix.cost;
@@ -182,7 +183,7 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
   ].filter(Boolean) as string[];
   const reason = reasons.length ? [...new Set(reasons)].join('; ') : null;
   patchThread(mp, chatId, {
-    draft_answer: answer, draft_model: s.draftModel, draft_cost: cost, draft_for: lastBuyer?.id || null,
+    draft_answer: answer, draft_model: modelFor('chats'), draft_cost: cost, draft_for: lastBuyer?.id || null,
     confidence: ['high', 'medium', 'low'].includes(j.confidence) ? j.confidence : 'low',
     escalation_reason: reason, status: reason ? 'escalated' : 'drafted', draft_attempts: 0,
     sources_used: JSON.stringify(Array.isArray(j.sources_used) ? j.sources_used.slice(0, 12) : []),

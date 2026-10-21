@@ -100,7 +100,10 @@ async function main() {
 
   console.log('Сверка с «Отгрузкой» таблицы');
   d.prepare(`UPDATE mp_orders SET ordered_at = ? WHERE 1=1`).run(Date.now() - 3600_000);
-  const row = (n: number, sku: string, qty: number, ref: string, from: string) => ({ row: n, date: 46313, sku, qty, dest: 'WB', ref, from });
+  // Дата строки — сегодня (серийный номер Excel: дни от 30.12.1899). Было жёстко 46313
+  // (20.10.2026), и с 21.10 строка выпадала из окна сверки — тест падал от календаря.
+  const today = Math.floor((Date.now() + 3 * 3600_000) / 86_400_000) + 25569;
+  const row = (n: number, sku: string, qty: number, ref: string, from: string) => ({ row: n, date: today, sku, qty, dest: 'WB', ref, from });
   const rep = cmp.compareOrders([
     row(20, 'HDMI-WIRELESS-G146', 1, '1001', 'ФФ Подольск'),       // отменён до передачи, но строка осталась
     row(21, 'HDMI-WIRELESS-G146', 1, '0100-0001-1', 'ФФ Краснодар'), // товар ушёл из отправления при делении

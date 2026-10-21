@@ -16,6 +16,7 @@ import { getDb, kvGet, kvSet, kvUpdatedAt, rlog, getSettings } from './db';
 import { stripPii } from './kb';
 import { askClaude } from './claude';
 import { chatDb, addMessages, chatMessages, setThreadMeta, getThread, wbOfferByNm } from './chatStore';
+import { modelFor } from '../aiModels';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const errText = (e: unknown) => String((e as Error)?.message ?? e).slice(0, 200);
@@ -509,7 +510,7 @@ export async function buildStyleProfile(): Promise<StyleProfile> {
     : `${STYLE_PROMPT}\n\n${lines.join('\n')}`;
   const { text, usage, stop } = await askClaude('style', {
     // Разбор раз в неделю: средних размышлений хватает, высокие оплачивались бы как лишний ответ.
-    model: s.draftModel, max_tokens: 8000, effort: 'medium',
+    model: modelFor('reviews'), max_tokens: 8000, effort: 'medium',
     messages: [{ role: 'user', content }],
   });
   const prof: StyleProfile = { text: text.trim(), at: Date.now(), basedOn: answeredCount(), fresh, version: (prev?.version ?? 1) + (prev ? 1 : 0) };

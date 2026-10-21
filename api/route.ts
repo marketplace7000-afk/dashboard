@@ -524,8 +524,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!re.test(from) || !re.test(to) || from > to) return res.status(400).json({ ok: false, error: 'bad_dates' });
     try {
       const { getFinRange } = await import('./_lib/finHistory');
-      const [wb, ozon] = await Promise.all([getFinRange('wb', from, to), getFinRange('ozon', from, to)]);
-      return res.status(200).json({ ok: true, from, to, wb, ozon });
+      return res.status(200).json({ ok: true, from, to, wb: getFinRange('wb', from, to), ozon: getFinRange('ozon', from, to) });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
     }

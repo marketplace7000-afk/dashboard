@@ -113,8 +113,8 @@ async function main() {
   check('рубли с запятой, дубли дня складываются', ozs.map(r => [r.date, r.views, r.clicks, r.spend, r.carts, r.orders, r.revenue]), [['2026-10-13', 1010, 41, 328.5, 6, 2, 5980]]);
 
   console.log('Воронка WB по дням (sales-funnel/products/history)');
-  check('переходы и корзины по дням', parseWbFunnelHistory([{ product: { nmId: 923646381 }, history: [{ date: '2026-10-13', openCount: 120, cartCount: 14 }] }]),
-    [{ nm: '923646381', date: '2026-10-13', open: 120, cart: 14 }]);
+  check('переходы, корзины и заказы по дням', parseWbFunnelHistory([{ product: { nmId: 923646381 }, history: [{ date: '2026-10-13', openCount: 120, cartCount: 14, orderCount: 3, orderSum: 21500 }] }]),
+    [{ nm: '923646381', date: '2026-10-13', open: 120, cart: 14, orders: 3, orderSum: 21500 }]);
 
   console.log('Хранилище');
   store._useAdsDbForTests(':memory:');

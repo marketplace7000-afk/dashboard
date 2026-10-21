@@ -34,6 +34,7 @@ import { mskDate } from './mskDate';
 import { fetchWithRetry } from './fetchRetry';
 import { listOzonFbsPostings } from './ozonFbsList';
 import { getUiState } from './uiState';
+import { resolveCost, getCosts } from './costs';
 import type { RnpMp, RnpItem, RnpResponse, RnpSummary, RnpSummaryProduct } from '../../shared/rnp';
 
 let DatabaseSync: any = null;
@@ -515,22 +516,73 @@ async function collectWbPositions(): Promise<string> {
  * Пишем по товарам, а не «стереть день целиком»: если часть запросов упала,
  * воронка остальных товаров за эти дни не пропадёт.
  */
-const WB_FUNNEL_METRICS = ['session_view_pdp', 'hits_tocart'];
+// wbf_order_* — заказы из той же воронки (22.10.2026): «Заказали на сумму» и штуки, как
+// в аналитике кабинета. Заказы из supplier/orders (ordered_*) недосчитывают часть заказов:
+// за 15–21.10 там 2 489 225 ₽ и 298 шт, в воронке и кабинете — 2 830 246 ₽ и 348 шт.
+const WB_FUNNEL_METRICS = ['session_view_pdp', 'hits_tocart', 'wbf_order_cnt', 'wbf_order_sum'];
 const WB_FUNNEL_MAX_NMS = 400;
 
-export function parseWbFunnelHistory(json: unknown): Array<{ nm: string; date: string; open: number; cart: number }> {
+export type WbFunnelDay = { nm: string; date: string; open: number; cart: number; orders: number; orderSum: number };
+
+export function parseWbFunnelHistory(json: unknown): WbFunnelDay[] {
   const arr: any[] = Array.isArray(json) ? json : Array.isArray((json as any)?.data) ? (json as any).data : [];
-  const out: Array<{ nm: string; date: string; open: number; cart: number }> = [];
+  const out: WbFunnelDay[] = [];
   for (const p of arr) {
     const nm = String(p?.product?.nmId ?? p?.nmId ?? '');
     if (!nm) continue;
     for (const h of p?.history ?? []) {
       const date = String(h?.date ?? '').slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-      out.push({ nm, date, open: num(h?.openCount), cart: num(h?.cartCount) });
+      out.push({ nm, date, open: num(h?.openCount), cart: num(h?.cartCount), orders: num(h?.orderCount), orderSum: num(h?.orderSum) });
     }
   }
   return out;
+}
+
+/**
+ * Разовая догрузка заказов воронки за дни старше недели (история воронки по дням
+ * отдаёт только последнюю неделю). Сводный метод sales-funnel/products с периодом
+ * в один день отдаёт то же «Заказали на сумму» по товарам; по 12 дней за проход,
+ * пауза 21 с — лимит шлюза 3 запроса в минуту.
+ */
+const WBF_BACKFILL_FROM = '2026-09-12';
+export async function backfillWbFunnelOrders(): Promise<string> {
+  const d = getDb();
+  if (!d) return 'заказы воронки WB: базы нет';
+  const token = (process.env.WB_TOKEN_ANALYTICS || process.env.WB_TOKEN || '').trim();
+  if (!token) return 'заказы воронки WB: нет ключа';
+  const days: string[] = [];
+  for (let x = WBF_BACKFILL_FROM; x <= mskDate(7) && days.length < 12; x = addDays(x, 1)) if (metaGet(`wbf:day:${x}`) !== '1') days.push(x);
+  if (!days.length) return 'заказы воронки WB: история догружена';
+  const del = d.prepare(`DELETE FROM rnp_fact WHERE mp = 'wb' AND date = ? AND metric IN ('wbf_order_cnt', 'wbf_order_sum')`);
+  const ins = d.prepare('INSERT OR REPLACE INTO rnp_fact (mp, date, sku, metric, value) VALUES (?, ?, ?, ?, ?)');
+  let done = 0, lastErr = '';
+  for (const day of days) {
+    if (done) await sleep(21_000);
+    const r = await fetchWithRetry('https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products', {
+      method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selectedPeriod: { start: day, end: day }, limit: 1000, offset: 0 }),
+    }, { maxRetries: 2, backoff429Ms: 21_000, timeoutMs: 60_000 }).catch(e => ({ ok: false, status: 0, text: async () => String((e as Error).message) }) as any);
+    if (!r.ok) { lastErr = `${r.status} ${(await r.text().catch(() => '')).slice(0, 120)}`; break; }
+    const j = await r.json().catch(() => null);
+    const list: any[] = j?.data?.products ?? [];
+    if (!j) { lastErr = 'ответ не JSON'; break; }
+    d.exec('BEGIN');
+    try {
+      del.run(day);
+      for (const p of list) {
+        const nm = String(p?.product?.nmId ?? '');
+        const s = p?.statistic?.selected ?? {};
+        if (!nm || !(num(s.orderCount) > 0)) continue;
+        ins.run('wb', day, nm, 'wbf_order_cnt', num(s.orderCount));
+        ins.run('wb', day, nm, 'wbf_order_sum', num(s.orderSum));
+      }
+      d.exec('COMMIT');
+    } catch (e) { d.exec('ROLLBACK'); throw e; }
+    metaSet(`wbf:day:${day}`, '1');
+    done++;
+  }
+  return `заказы воронки WB: догружено дней ${done} из ${days.length}${lastErr ? ` (${lastErr})` : ''}`;
 }
 
 async function collectWbFunnel(): Promise<string> {
@@ -573,7 +625,9 @@ async function collectWbFunnel(): Promise<string> {
         if (h.date < start || h.date > end) continue;
         ins.run('wb', h.date, h.nm, 'session_view_pdp', h.open);
         ins.run('wb', h.date, h.nm, 'hits_tocart', h.cart);
-        rows += 2;
+        ins.run('wb', h.date, h.nm, 'wbf_order_cnt', h.orders);
+        ins.run('wb', h.date, h.nm, 'wbf_order_sum', h.orderSum);
+        rows += 4;
       }
       d.exec('COMMIT');
     } catch (e) { d.exec('ROLLBACK'); throw e; }
@@ -975,6 +1029,7 @@ export function collectRnp(only?: RnpMp): Promise<string[]> {
       await step('остатки WB', () => collectWbStock());
       await step('позиции WB', () => collectWbPositions());
       await step('воронка WB', () => collectWbFunnel());
+      await step('заказы воронки WB', () => backfillWbFunnelOrders());
       await step('каталог WB', async () => { await wbCatalog(items); await fillSheetCategories(items); upsertItems('wb', [...items.values()]); return `каталог WB: ${items.size} товаров`; });
       await step('цены WB', () => collectPrices('wb'));
       await step('рейтинг WB', () => collectRatings('wb'));
@@ -1152,10 +1207,14 @@ export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise
  * 60 дней — ~1,4 МБ по Ozon; главной нужны несколько метрик, поэтому читаем таблицу
  * напрямую и отдаём килобайты.
  *
- * «До СПП» — ordered_amount: у WB это цена со скидкой продавца, у Ozon — «Заказано на
- * сумму» из аналитики; сверено 21.10 с ценой продавца по отправлениям (spp_base):
- * у WB совпадает до рубля, у Ozon расходится на единицы процентов. «После СПП» —
- * та же сумма за вычетом доли скидки площадки дня (spp_disc / spp_base).
+ * «До СПП» — «Заказали на сумму» по цене продавца: у WB из воронки (wbf_order_*, как в
+ * аналитике кабинета; дни без воронки — по supplier/orders), у Ozon — «Заказано на сумму»
+ * из аналитики. «После СПП» — та же сумма за вычетом доли скидки площадки дня
+ * (spp_disc / spp_base).
+ *
+ * Считаются только настоящие товары — те, чья себестоимость заведена в таблице «Склад».
+ * Остальное (товары для выкупов: светильники, сифоны и т.п.) владелец просил не
+ * учитывать ни в одном анализе (22.10.2026).
  */
 export function getRnpSummary(mp: RnpMp, fromIn: string, toIn: string): RnpSummary {
   const today = mskDate(0);
@@ -1179,13 +1238,33 @@ export function getRnpSummary(mp: RnpMp, fromIn: string, toIn: string): RnpSumma
     amount: empty(), after: empty(), cnt: empty(), ads: empty(),
     prevAmount: empty(), prevAfter: empty(), prevCnt: empty(),
     movers: { from, to: curTo, up: [], down: [] }, firstDate: null, collectedAt: null,
+    excluded: { skus: [], amount: 0 },
   };
   const d = getDb();
   if (!d) return res;
 
   const since = [prevDates[0], prevFrom].sort()[0];
   const rows = d.prepare(`SELECT date, sku, metric, value FROM rnp_fact WHERE mp = ? AND date >= ? AND date <= ?
-    AND metric IN ('ordered_amount', 'ordered_cnt', 'adv_expenses', 'spp_base', 'spp_disc')`).all(mp, since, to) as Array<{ date: string; sku: string; metric: string; value: number }>;
+    AND metric IN ('ordered_amount', 'ordered_cnt', 'wbf_order_sum', 'wbf_order_cnt', 'adv_expenses', 'spp_base', 'spp_disc')`).all(mp, since, to) as Array<{ date: string; sku: string; metric: string; value: number }>;
+  const items = new Map((d.prepare('SELECT sku, article, name, photo FROM rnp_item WHERE mp = ?').all(mp) as any[]).map(it => [String(it.sku), it]));
+
+  // Настоящий товар — себестоимость заведена в «Складе». Решение кэшируем: артикулов сотни, строк — тысячи.
+  const costs = getCosts();
+  const realCache = new Map<string, boolean>();
+  const isReal = (sku: string) => {
+    let v = realCache.get(sku);
+    if (v === undefined) { v = !!resolveCost(String(items.get(sku)?.article || sku), costs); realCache.set(sku, v); }
+    return v;
+  };
+  // WB: дни, за которые есть заказы воронки, считаем по ней; остальные — по supplier/orders.
+  const funnelDays = new Set(rows.filter(r => r.metric === 'wbf_order_sum').map(r => r.date));
+  const metricOf = (r: { date: string; metric: string }): string | null => {
+    if (mp !== 'wb') return r.metric;
+    if (r.metric === 'wbf_order_sum') return 'ordered_amount';
+    if (r.metric === 'wbf_order_cnt') return 'ordered_cnt';
+    if ((r.metric === 'ordered_amount' || r.metric === 'ordered_cnt') && funnelDays.has(r.date)) return null;
+    return r.metric;
+  };
 
   const idx = new Map(dates.map((x, i) => [x, i]));
   const pidx = new Map(prevDates.map((x, i) => [x, i]));
@@ -1193,8 +1272,16 @@ export function getRnpSummary(mp: RnpMp, fromIn: string, toIn: string): RnpSumma
   const sppBase = new Map<string, number>(), sppDisc = new Map<string, number>();
   const cur = new Map<string, { cnt: number; rub: number }>();
   const prev = new Map<string, number>();
-  for (const r of rows) {
+  const excluded = new Map<string, number>();
+  for (const r0 of rows) {
+    const metric = metricOf(r0);
+    if (!metric) continue;
+    const r = { ...r0, metric };
     const v = Number(r.value) || 0;
+    if (!isReal(r.sku)) {
+      if (metric === 'ordered_amount' && r.date >= from && v > 0) excluded.set(r.sku, (excluded.get(r.sku) ?? 0) + v);
+      continue;
+    }
     const i = idx.get(r.date), p = pidx.get(r.date);
     if (r.metric === 'ordered_amount') {
       if (i !== undefined) add(res.amount, i, v);
@@ -1221,8 +1308,11 @@ export function getRnpSummary(mp: RnpMp, fromIn: string, toIn: string): RnpSumma
   };
   dates.forEach((x, i) => { res.after[i] = afterOf(x, res.amount[i]); });
   prevDates.forEach((x, i) => { res.prevAfter[i] = afterOf(x, res.prevAmount[i]); });
+  res.excluded = {
+    skus: [...excluded.keys()].map(s => String(items.get(s)?.article || s)).sort(),
+    amount: Math.round([...excluded.values()].reduce((s, v) => s + v, 0)),
+  };
 
-  const items = new Map((d.prepare('SELECT sku, article, name, photo FROM rnp_item WHERE mp = ?').all(mp) as any[]).map(it => [String(it.sku), it]));
   const product = (sku: string): RnpSummaryProduct => {
     const it = items.get(sku);
     return {

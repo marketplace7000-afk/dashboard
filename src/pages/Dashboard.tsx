@@ -29,8 +29,10 @@ type Mp = 'wb' | 'ozon';
 /** Расходы площадки за период из /api/fin-history (api/_lib/finHistory.ts). */
 type Fin = {
   days: number; total: number; coveredTo: string | null;
-  gross: number; net: number; commission: number; logistics: number; storage: number; other: number; adsFin: number; units: number;
-  cogs: number; missing: string[];
+  /** Выручка после возвратов по цене продавца (до СПП) — одинаково у WB и Ozon. */
+  rev: number; commission: number; logistics: number; storage: number; other: number; adsFin: number; units: number;
+  cogs: number;
+  excluded: { skus: string[]; rev: number };
 };
 
 const PRESET_LABEL: Record<Preset, string> = { day: 'Сегодня', week: '7 дней', month: '30 дней', custom: 'Свой период' };
@@ -89,7 +91,7 @@ function Delta({ cur, prev, invert, suffix }: { cur: number; prev: number; inver
   const Ico = up ? TrendUpIcon : TrendDownIcon;
   return (
     <span className="db-d">
-      <span className={good ? 'db-good' : 'db-bad'}><Ico size={26} weight="bold" /> {pct1(Math.abs(p))}</span> {suffix}
+      <span className={good ? 'db-good' : 'db-bad'}><Ico size={16} weight="bold" /> {pct1(Math.abs(p))}</span> {suffix}
     </span>
   );
 }
@@ -206,31 +208,32 @@ export function Dashboard({ onNav, can = () => true }: { onNav: Nav; can?: (k: s
     const col = (mp: Mp) => {
       const f = fin.data![mp];
       const ads = (totals.by[mp]?.ads ?? 0) + f.adsFin;
-      const left = f.net - f.commission - f.logistics - f.storage - ads - Math.max(0, f.other) - f.cogs;
-      return { f, ads, left, cogsOk: f.missing.length === 0 };
+      const left = f.rev - f.commission - f.logistics - f.storage - ads - f.other - f.cogs;
+      return { f, ads, left };
     };
     const cols = { wb: col('wb'), ozon: col('ozon') };
-    const rows: { label: string; get: (c: ReturnType<typeof col>) => number; color: string; sign: 1 | -1 }[] = [
-      { label: 'Выручка после возвратов, до СПП', get: c => c.f.net, color: '', sign: 1 },
-      { label: 'Комиссия площадки', get: c => c.f.commission, color: 'var(--db-c1)', sign: -1 },
-      { label: 'Логистика', get: c => c.f.logistics, color: 'var(--db-c3)', sign: -1 },
-      { label: 'Реклама', get: c => c.ads, color: 'var(--db-c2)', sign: -1 },
-      { label: 'Хранение', get: c => c.f.storage, color: 'var(--db-c4)', sign: -1 },
-      { label: 'Прочее и штрафы', get: c => Math.max(0, c.f.other), color: 'var(--db-c6)', sign: -1 },
-      { label: 'Себестоимость', get: c => c.f.cogs, color: 'var(--db-c5)', sign: -1 },
-      { label: 'Остаётся вам', get: c => c.left, color: 'var(--db-good)', sign: 1 },
+    // kind: 'rev' — выручка, 'cost' — расход (минус; отрицательный расход — доход, плюс), 'left' — остаток.
+    const rows: { label: string; get: (c: ReturnType<typeof col>) => number; color: string; kind: 'rev' | 'cost' | 'left' }[] = [
+      { label: 'Выручка после возвратов, до СПП', get: c => c.f.rev, color: '', kind: 'rev' },
+      { label: 'Комиссия и эквайринг', get: c => c.f.commission, color: 'var(--db-c1)', kind: 'cost' },
+      { label: 'Логистика', get: c => c.f.logistics, color: 'var(--db-c3)', kind: 'cost' },
+      { label: 'Реклама', get: c => c.ads, color: 'var(--db-c2)', kind: 'cost' },
+      { label: 'Хранение', get: c => c.f.storage, color: 'var(--db-c4)', kind: 'cost' },
+      { label: 'Штрафы, приёмка и прочее', get: c => c.f.other, color: 'var(--db-c6)', kind: 'cost' },
+      { label: 'Себестоимость', get: c => c.f.cogs, color: 'var(--db-c5)', kind: 'cost' },
+      { label: 'Прибыль', get: c => c.left, color: 'var(--db-good)', kind: 'left' },
     ];
     const tot = (r: typeof rows[number]) => mps.reduce((s, mp) => s + r.get(cols[mp]), 0);
-    const net = mps.reduce((s, mp) => s + cols[mp].f.net, 0);
+    const net = mps.reduce((s, mp) => s + cols[mp].f.rev, 0);
     const left = mps.reduce((s, mp) => s + cols[mp].left, 0);
-    const missing = mps.reduce((s, mp) => s + cols[mp].f.missing.length, 0);
+    const excluded = mps.reduce((s, mp) => s + cols[mp].f.excluded.skus.length, 0);
     // Неполная история — пропуски внутри периода; хвост после последнего отчёта площадки говорится отдельно.
     const partial = mps.filter(mp => {
       const f = cols[mp].f;
       const end = f.coveredTo && f.coveredTo < to ? f.coveredTo : to;
       return end >= from && f.days < (Date.parse(end) - Date.parse(from)) / 86_400_000 + 1;
     });
-    return { cols, rows, tot, net, left, missing, partial };
+    return { cols, rows, tot, net, left, excluded, partial };
   }, [fin.data, totals, mps.join(), from, to]);
 
   const movers = useMemo(() => {
@@ -241,6 +244,18 @@ export function Dashboard({ onNav, can = () => true }: { onNav: Nav; can?: (k: s
     const mv = (rnp.wb ?? rnp.ozon)?.movers;
     return { up: all('up'), down: all('down'), range: mv ? fmtRange(mv.from, mv.to) : '' };
   }, [rnp, mps.join()]);
+
+  // Товары для выкупов (без себестоимости в «Складе») — сколько и на какую сумму не учтено.
+  const excluded = useMemo(() => {
+    const skus = new Set<string>();
+    let amount = 0;
+    for (const mp of mps) {
+      for (const s of rnp[mp]?.excluded.skus ?? []) skus.add(`${mp}:${s}`);
+      for (const s of fin.data?.[mp]?.excluded.skus ?? []) skus.add(`${mp}:${s}`);
+      amount += rnp[mp]?.excluded.amount ?? 0;
+    }
+    return { count: skus.size, amount, list: [...skus].map(s => s.split(':').slice(1).join(':')).join(', ') };
+  }, [rnp, fin.data, mps.join()]);
 
   const drr = totals.before > 0 && totals.any ? totals.ads / totals.before * 100 : null;
   const avg = totals.cnt > 0 ? totals.amount / totals.cnt : 0;
@@ -286,7 +301,7 @@ export function Dashboard({ onNav, can = () => true }: { onNav: Nav; can?: (k: s
             {collectedAt && ` · данные на ${new Date(collectedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`}
           </span>
           <button type="button" className="db-go" onClick={() => setTick(t => t + 1)} title="Перечитать данные с сервера">
-            {rnp.loading ? <SpinnerIcon size={24} className="spin" /> : <ArrowsClockwiseIcon size={24} weight="bold" />} Обновить
+            {rnp.loading ? <SpinnerIcon size={16} className="spin" /> : <ArrowsClockwiseIcon size={16} weight="bold" />} Обновить
           </button>
         </div>
       </header>
@@ -307,20 +322,14 @@ export function Dashboard({ onNav, can = () => true }: { onNav: Nav; can?: (k: s
           <MiniArea points={daily?.cnt ?? []} color="var(--db-c2)" name="Заказов" format={v => `${Math.round(v)} шт`} />
         </div>
         <div className="db-card db-tile">
-          {money && money.missing === 0 ? (<>
-            <div className="db-tile-t">Прибыль</div>
-            <div className={`db-tile-v ${money.left < 0 ? 'db-bad' : ''}`}>{fmtRub(money.left)}</div>
-            <span className="db-d">{money.net > 0 ? `${pct1(money.left / money.net * 100)} от выручки после возвратов` : ''}</span>
-            {money.net > 0 && <ProgressBar pct={money.left / money.net * 100} color="var(--db-good)"
-              left={<>прибыль {fmtShort(money.left)} ₽</>} right={<>выручка {fmtShort(money.net)} ₽</>} />}
-          </>) : (<>
-            <div className="db-tile-t">Выручка после возвратов · до СПП</div>
-            <div className="db-tile-v">{money ? fmtRub(money.net) : fin.state === 'loading' ? '…' : '—'}</div>
-            <span className="db-d">
-              {!money ? (fin.state === 'loading' ? 'считаем расходы…' : 'история расходов недоступна')
-                : `прибыль не считаем: нет себестоимости у ${money.missing} товаров`}
-            </span>
-          </>)}
+          <div className="db-tile-t">Прибыль</div>
+          <div className={`db-tile-v ${money && money.left < 0 ? 'db-bad' : ''}`}>{money && money.net > 0 ? fmtRub(money.left) : fin.state === 'loading' ? '…' : '—'}</div>
+          <span className="db-d">
+            {money && money.net > 0 ? `${pct1(money.left / money.net * 100)} от выручки до СПП`
+              : fin.state === 'loading' ? 'считаем расходы…' : 'за период нет финотчёта'}
+          </span>
+          {money && money.net > 0 && <ProgressBar pct={money.left / money.net * 100} color="var(--db-good)"
+            left={<>прибыль {fmtShort(money.left)} ₽</>} right={<>выручка {fmtShort(money.net)} ₽</>} />}
         </div>
         <div className="db-card db-tile">
           <div className="db-tile-t">ДРР — реклама ÷ заказы до СПП</div>
@@ -338,7 +347,10 @@ export function Dashboard({ onNav, can = () => true }: { onNav: Nav; can?: (k: s
           {mps.includes('ozon') && <span><i className="db-mark" style={{ background: 'var(--db-oz)' }} />Ozon</span>}
           <span><i className="db-mark db-mark-dash" />прошлый период</span>
         </div>}>
-        <div className="db-note db-note-top">Обе площадки в одном формате: {PRICE_HINT[price]}.{short && ' Выбран короткий период — на графике две недели до его конца.'}</div>
+        <div className="db-note db-note-top">
+          Обе площадки в одном формате: {PRICE_HINT[price]}. WB — как «Заказали на сумму» в аналитике кабинета.
+          {short && ' Выбран короткий период — на графике две недели до его конца.'}
+        </div>
         {daily ? (<>
           <OrdersChart rows={daily.rows} showWb={mps.includes('wb')} showOz={mps.includes('ozon')} prevName="Прошлый период" />
           <div className="db-metrics">
@@ -361,18 +373,19 @@ export function Dashboard({ onNav, can = () => true }: { onNav: Nav; can?: (k: s
                 <th className="r">Из 100 ₽</th>
               </tr></thead>
               <tbody>
-                {money.rows.map((r, i) => {
+                {money.rows.map(r => {
+                  // Расход — со знаком минус; отрицательный расход (доплаты, компенсации) — доход, с плюсом.
+                  const cell = (v: number) => r.kind !== 'cost' ? fmtRub(v) : v > 0 ? `−${fmtRub(v)}` : v < 0 ? `+${fmtRub(-v)}` : fmtRub(0);
                   const t = money.tot(r);
-                  const last = i === money.rows.length - 1;
                   return (
-                    <tr key={r.label} className={i === 0 || last ? 'db-tbl-strong' : ''}>
+                    <tr key={r.label} className={r.kind !== 'cost' ? 'db-tbl-strong' : ''}>
                       <td>{r.color && <i className="db-mark" style={{ background: r.color }} />}{r.label}</td>
                       {mps.map(mp => {
                         const v = r.get(money.cols[mp]);
-                        return <td key={mp} className={`r ${last && v < 0 ? 'db-bad' : ''}`}>{r.sign < 0 && v > 0 ? '−' : ''}{fmtRub(v)}</td>;
+                        return <td key={mp} className={`r ${r.kind === 'left' && v < 0 ? 'db-bad' : ''}`}>{cell(v)}</td>;
                       })}
-                      {mps.length > 1 && <td className={`r ${last && t < 0 ? 'db-bad' : ''}`}>{r.sign < 0 && t > 0 ? '−' : ''}{fmtRub(t)}</td>}
-                      <td className="r">{i === 0 ? '100 ₽' : `${Math.round(t / money.net * 100)} ₽`}</td>
+                      {mps.length > 1 && <td className={`r ${r.kind === 'left' && t < 0 ? 'db-bad' : ''}`}>{cell(t)}</td>}
+                      <td className="r">{r.kind === 'rev' ? '100 ₽' : `${Math.round(t / money.net * 100)} ₽`}</td>
                     </tr>
                   );
                 })}
@@ -380,10 +393,10 @@ export function Dashboard({ onNav, can = () => true }: { onNav: Nav; can?: (k: s
             </table>
           </div>
           <div className="db-note">
-            Реклама — расход кампаний из РНП{mps.includes('ozon') ? ' плюс промо-начисления Ozon' : ''}.
+            Выручка у обеих площадок — по цене продавца до СПП; комиссия — всё, что площадка удержала с этой цены, кроме логистики.
+            Реклама — расход кампаний из РНП{mps.includes('ozon') ? ' плюс начисления Ozon за продвижение' : ''}.
             {mps.map(mp => money.cols[mp].f.coveredTo && money.cols[mp].f.coveredTo! < to ? ` Финотчёт ${MP_NAME[mp]} есть по ${fmtFull(money.cols[mp].f.coveredTo!)}.` : '').join('')}
             {money.partial.length ? ` История расходов ${money.partial.map(mp => MP_NAME[mp]).join(' и ')} за этот период неполная.` : ''}
-            {money.missing > 0 ? ` Себестоимость не учтена у ${money.missing} товаров — заполните её в таблице «Склад».` : ''}
           </div>
         </>) : <div className="db-empty">{fin.state === 'loading' ? 'Считаем расходы…' : 'За этот период финансовых данных нет.'}</div>}
       </Card>
@@ -413,14 +426,24 @@ export function Dashboard({ onNav, can = () => true }: { onNav: Nav; can?: (k: s
         </div>
       </Card>
 
-      <Card title="Растут" extra={<span className="db-sub">заказы, шт: {movers.range} против такого же срока до этого</span>}>
-        {movers.up.length ? movers.up.map(({ p, mp }, i) => <ProductRow key={mp + p.sku} p={p} mp={mp} n={i + 1} />)
-          : <div className="db-empty">{rnp.loading ? 'Загружаем…' : 'Заметного роста нет.'}</div>}
-      </Card>
-      <Card title="Падают" extra={can('rnp') ? <button type="button" className="db-go" onClick={() => onNav('rnp')}>Причины в РНП</button> : undefined}>
-        {movers.down.length ? movers.down.map(({ p, mp }, i) => <ProductRow key={mp + p.sku} p={p} mp={mp} n={i + 1} />)
-          : <div className="db-empty">{rnp.loading ? 'Загружаем…' : 'Заметного падения нет.'}</div>}
-      </Card>
+      <div className="db-row-2">
+        <Card title="Растут" extra={<span className="db-sub">заказы, шт: {movers.range} к такому же сроку до этого</span>}>
+          {movers.up.length ? movers.up.map(({ p, mp }, i) => <ProductRow key={mp + p.sku} p={p} mp={mp} n={i + 1} />)
+            : <div className="db-empty">{rnp.loading ? 'Загружаем…' : 'Заметного роста нет.'}</div>}
+        </Card>
+        <Card title="Падают" extra={can('rnp') ? <button type="button" className="db-go" onClick={() => onNav('rnp')}>Причины в РНП</button> : undefined}>
+          {movers.down.length ? movers.down.map(({ p, mp }, i) => <ProductRow key={mp + p.sku} p={p} mp={mp} n={i + 1} />)
+            : <div className="db-empty">{rnp.loading ? 'Загружаем…' : 'Заметного падения нет.'}</div>}
+        </Card>
+      </div>
+
+      {excluded.count > 0 && (
+        <div className="db-note db-excl" title={excluded.list}>
+          Не учтены товары для выкупов — артикулы без себестоимости в таблице «Склад»: {excluded.count} шт.
+          {excluded.amount > 0 && ` Их заказы за период — ${fmtRub(excluded.amount)}.`}
+          {' '}Чтобы товар попал в расчёты, заведите его себестоимость в «Складе».
+        </div>
+      )}
     </div>
   );
 }

@@ -1665,7 +1665,6 @@ code {
 .ad2 .card h2 { font-size: 19.5px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 /* Раздел «Конкуренты» (15.10.2026) */
-.cmp-mps { flex-wrap: wrap; }
 .cmp-card { display: grid; gap: 12px; padding: 16px 18px; }
 .cmp-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; }
 .cmp-head h2 { margin: 0; }
@@ -1715,7 +1714,6 @@ code {
 .cmp-gone-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .cmp-gone-row { display: flex; gap: 8px; align-items: flex-start; color: var(--bad); background: rgba(220,38,38,.07); border-radius: 10px; padding: 10px 12px; font-size: 17px; line-height: 1.45; }
 .cmp-gone-row svg { margin-top: 2px; }
-.cmp-unit { font-size: 15.5px; font-weight: 400; }
 .cmp-yn { text-align: center; }
 .cmp-btns { white-space: nowrap; margin-top: 6px; }
 .cmp-btns .btn + .btn { margin-left: 6px; }
@@ -2091,3 +2089,114 @@ code {
   .db-donut-c b { font-size: 20px; }
 }
 @media (prefers-reduced-motion: reduce) { .db-progress-fill { animation: none; } }
+
+/* ═══ Стиль А — общий слой для разделов (класс .sa на корне раздела), 22.10.2026 ═══
+   Разделы переводятся на стиль А по одному: корню раздела добавляют .sa, и общие
+   детали (карточки, кнопки, метки, переключатели, поля, таблицы «Рекламы») внутри
+   него получают цвета, шрифт и шкалу главной. Остальные разделы не меняются.
+   Цвета — те же, что у .db; базовые токены (--bg, --accent…) переопределены внутри
+   .sa, поэтому старые правила сами берут новые цвета. Шкала, как на главной:
+   мелкая подпись 15, подпись 17, текст 19, заголовки 21/25, крупная цифра 40. */
+.sa {
+  --bg: #ffffff; --bg-2: #f2f4f7; --bg-3: #e9edf2; --border: #e0e4ea; --text: #121820; --muted: #5e6b7a;
+  --accent: #1f5fd1; --accent-2: #1a50b8; --accent-soft: #e3ecfb; --good: #15803d; --warn: #b45309; --bad: #c62828; --chip: #eef1f5;
+  --sa-small: 15px; --sa-cap: 17px; --sa-body: 19px; --sa-em: 21px; --sa-h2: 25px; --sa-big: 40px;
+  --sa-r-s: 7px; --sa-r-m: 12px;
+  --sa-shadow: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 1px rgba(16, 24, 40, .03);
+  font-family: "Golos Text", "Segoe UI", system-ui, sans-serif;
+  font-size: var(--sa-cap); line-height: 1.45; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.sa button, .sa input, .sa select { font-family: inherit; }
+.sa .muted { color: var(--muted); }
+
+/* Карточки — белые, тонкая рамка, лёгкая тень (как на главной) */
+.sa .card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m); box-shadow: var(--sa-shadow); padding: 20px 22px; }
+.sa .card h2 { font-size: var(--sa-h2); font-weight: 600; line-height: 1.2; margin: 0 0 12px; }
+.sa .card-title { font-size: var(--sa-cap); color: var(--muted); font-weight: 400; }
+
+/* Кнопки, поля, метки */
+.sa .btn { border-radius: var(--sa-r-s); border-color: var(--border); background: var(--bg-2); font-size: var(--sa-cap); padding: 8px 14px; gap: 7px; }
+.sa .btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.sa .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sa .btn-primary:hover:not(:disabled) { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+.sa .btn-sm { font-size: var(--sa-small); padding: 5px 11px; }
+.sa .btn:disabled { opacity: .55; cursor: default; }
+.sa .btn:focus-visible, .sa .period-btn:focus-visible, .sa .mp-tab:focus-visible, .sa .ad2-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sa .input, .sa .select { border-radius: var(--sa-r-s); border-color: var(--border); font-size: var(--sa-cap); }
+.sa .chip { border-radius: 999px; font-size: var(--sa-small); font-weight: 500; padding: 2px 10px; }
+
+/* Переключатели — сегменты, как «Сегодня / 7 дней» на главной */
+.sa .period-switch, .sa .ad2-tabs, .sa .sa-seg { display: inline-flex; flex-wrap: wrap; gap: 0; padding: 0; background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-s); overflow: hidden; }
+.sa .period-btn, .sa .ad2-tab, .sa .sa-seg button { border: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--muted); font-size: var(--sa-cap); font-weight: 400; padding: 8px 16px; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; cursor: pointer; }
+.sa .period-btn + .period-btn, .sa .ad2-tab + .ad2-tab, .sa .sa-seg button + button { border-left: 1px solid var(--border); }
+.sa .period-btn:hover, .sa .ad2-tab:hover, .sa .sa-seg button:hover { background: var(--bg-2); color: var(--text); }
+.sa .period-btn.active, .sa .ad2-tab.active, .sa .sa-seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 500; box-shadow: none; }
+.sa .sa-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+.sa .sa-dot.wb { background: #b5179e; }
+.sa .sa-dot.ozon { background: #005bff; }
+.sa .ad2-cnt { font-size: var(--sa-small); color: inherit; opacity: .7; }
+.sa .ad2-badge { background: var(--bad); color: #fff; font-size: 13px; padding: 1px 7px; }
+
+/* Таблицы «Рекламы» внутри раздела */
+.sa .ad2-scroll { border-radius: var(--sa-r-s); box-shadow: inset 0 0 0 1px var(--border); background: var(--bg); }
+.sa .ad2-table { font-size: var(--sa-cap); }
+.sa .ad2-table th { background: var(--bg); font-size: var(--sa-small); font-weight: 500; color: var(--muted); padding: 10px 12px; border-bottom: 2px solid var(--border); }
+.sa .ad2-table td { padding: 11px 12px; border-bottom: 1px solid var(--border); }
+.sa .ad2-table tbody tr:hover td { background: var(--bg-2); }
+.sa .ad2-row-ours td { background: var(--accent-soft); }
+.sa .ad2-dyn { font-size: var(--sa-small); }
+.sa .ad2-chipsm { font-size: 14px; }
+.sa .ad2-prod-t { font-size: var(--sa-cap); }
+.sa .ad2-prod-t .muted { font-size: var(--sa-small); }
+.sa .ad2-prod img, .sa .ad2-noimg { border-radius: var(--sa-r-s); }
+.sa .ad2-filters .period-btn { font-size: var(--sa-cap); padding: 8px 16px; }
+.sa .ad2-search { flex: 1 1 340px; max-width: 460px; }
+.sa .ad2-search .input { font-size: var(--sa-cap); }
+.sa .ad2-kpis { gap: 16px; }
+.sa .ad2-kpi { gap: 6px; }
+.sa .ad2-kpi .card-title { font-size: var(--sa-cap); }
+.sa .ad2-kpi-v { font-size: var(--sa-big); font-weight: 600; line-height: 1.15; letter-spacing: -0.01em; }
+.sa .ad2-kpi-sub { font-size: var(--sa-small); }
+.sa .ad2-tablecard { padding: 20px 22px; gap: 14px; }
+.sa .ad2-toast { font-family: "Golos Text", "Segoe UI", system-ui, sans-serif; font-size: var(--sa-cap); border-radius: var(--sa-r-m); }
+.sa .ad2-cmpset, .sa .ad2-cmpnm { border-color: var(--border); border-radius: var(--sa-r-s); }
+.sa .ad2-cmpnm { font-size: var(--sa-small); }
+.sa .rnp-alert, .sa .rnp-note { border-radius: var(--sa-r-s); }
+
+/* Шапка раздела: площадка и листы одной строкой */
+.sa-head { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; }
+@media (max-width: 640px) {
+  .sa { --sa-small: 14px; --sa-cap: 15px; --sa-body: 17px; --sa-em: 18px; --sa-h2: 21px; --sa-big: 32px; }
+  .sa .card, .sa .ad2-tablecard { padding: 16px; }
+}
+
+/* «Конкуренты» в стиле А */
+.sa .cmp-card { padding: 20px 22px; gap: 14px; }
+.sa .cmp-head h2 { font-size: var(--sa-h2); display: inline-flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.sa .cmp-lead { font-size: var(--sa-small); line-height: 1.55; color: var(--muted); }
+.sa .cmp-refresh { padding: 12px 14px; border-radius: var(--sa-r-s); background: var(--bg-2); }
+.sa .cmp-refresh-t { font-size: var(--sa-small); }
+.sa .cmp-fresh { font-size: var(--sa-cap); }
+.sa .cmp-fresh b { font-size: var(--sa-cap); }
+.sa .cmp-check { font-size: var(--sa-cap); }
+.sa .cmp-prod { background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m); box-shadow: var(--sa-shadow); padding: 18px 22px; gap: 14px; }
+.sa .cmp-prod-id img, .sa .cmp-prod-id .ad2-noimg { width: 52px; height: 68px; border-radius: var(--sa-r-s); }
+.sa .cmp-art { font-size: var(--sa-em); font-weight: 600; letter-spacing: 0; }
+.sa .cmp-name { font-size: var(--sa-small); }
+.sa .cmp-add { border-radius: var(--sa-r-s); padding: 12px 14px; }
+.sa .cmp-add .input { font-size: var(--sa-cap); }
+.sa .cmp-table td, .sa .cmp-table th { padding-left: 9px; padding-right: 9px; }
+.sa .cmp-table .cmp-col-prod { min-width: 280px; max-width: 360px; }
+.sa .cmp-table .cmp-decide { background: var(--bg); min-width: 170px; }
+.sa .cmp-our td, .sa .cmp-our td.cmp-decide { background: var(--accent-soft); }
+.sa .cmp-our td { font-weight: 500; }
+.sa .cmp-chip-our { background: var(--accent); color: #fff; }
+.sa .cmp-sub { font-size: 14px; }
+.sa .cmp-note { font-size: var(--sa-small); }
+.sa .cmp-empty { font-size: var(--sa-cap); }
+.sa .cmp-of { font-size: var(--sa-cap); }
+.sa .cmp-gone-card { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 6%, var(--bg)); }
+.sa .cmp-gone-t { font-size: var(--sa-em); font-weight: 600; }
+.sa .cmp-gone-p, .sa .cmp-gone-row { font-size: var(--sa-small); }
+.sa .cmp-gone-row { border-radius: var(--sa-r-s); }

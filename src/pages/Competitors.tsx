@@ -16,6 +16,9 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import {
   ArrowsClockwiseIcon, MagnifyingGlassIcon, PlusIcon, WarningIcon, WarningOctagonIcon, CheckCircleIcon, XIcon,
 } from '@phosphor-icons/react';
+import '@fontsource/golos-text/400.css';
+import '@fontsource/golos-text/500.css';
+import '@fontsource/golos-text/600.css';
 import { apiGet, apiPost, errText } from '../api/http';
 import type { Ads2Mp, Ads2Competitors, Ads2WatchLink, Ads2WatchProduct } from '../../shared/ads2';
 import { nf0, nf1, rub, num, pct, ddmm, kRub, when, whenRel, ProductCell, PosDyn, PctDyn, MiniLines } from './ads2ui';
@@ -113,11 +116,10 @@ function CmpCells({ l, mp, our, passAt, per = 7 }: { l: Ads2WatchLink; mp: Ads2M
   const ads = mp === 'ozon' ? oz : l;
   const diff = l !== our && l.price != null && our?.price ? Math.round((l.price / our.price - 1) * 100) : null;
   const day = l.price != null && l.price1d ? Math.round((l.price / l.price1d - 1) * 100) : null;
-  const ordSuffix = mp === 'wb' && l.orders != null && l.ordersDays === 7 ? <span className="muted cmp-unit"> за 7 дн</span>
-    : mp === 'wb' && l.orders != null && l.ordersDays === 30 ? <span className="muted cmp-unit"> за 30 дн</span> : null;
-  // Данные из «Сравнения карточек» WB — от даты набора (держатся до следующего сравнения).
-  const compNote = mp === 'wb' && l.compDate && l.ordersDays === 30
-    ? <div className="cmp-sub muted" title="Заказы за 30 дней, реклама и акции — из «Сравнения карточек» WB; обновятся при следующем сравнении">сравнение от {l.compDate.slice(8, 10)}.{l.compDate.slice(5, 7)}</div> : null;
+  // В ячейке заказов WB — только число и динамика (просьба владельца 22.10: без «за 30 дн»
+  // и «сравнение от …»). Период и дата сравнения карточек — в подсказке при наведении.
+  const ordTitle = mp !== 'wb' || l.orders == null ? undefined
+    : [`Заказы за ${l.ordersDays ?? 30} дней`, l.compDate && l.ordersDays === 30 ? `из «Сравнения карточек» WB от ${l.compDate.slice(8, 10)}.${l.compDate.slice(5, 7)}` : 'из «Поисковых запросов» WB'].join(', ');
   // Цена не из последнего прохода (карточку в этот раз не отдали) — честно пишем, от когда она.
   const stale = l.price != null && passAt != null && (l.priceAt == null || l.priceAt < passAt - 30 * 60_000);
   return (
@@ -132,7 +134,7 @@ function CmpCells({ l, mp, our, passAt, per = 7 }: { l: Ads2WatchLink; mp: Ads2M
       <td className="ad2-num">{num(l.feedbacks)}</td>
       {mp === 'wb' ? <>
         <td className="ad2-num">{pct(l.ctr)}</td>
-        <td className="ad2-num">{num(l.orders)}{ordSuffix} <PctDyn v={l.ordersDyn} />{compNote}</td>
+        <td className="ad2-num" title={ordTitle}>{num(l.orders)} <PctDyn v={l.ordersDyn} /></td>
         <td className="ad2-num">{num(l.avgPos)}</td>
       </> : <>
         <td className="ad2-num">{pct(oz.ctr ?? null)}</td>
@@ -352,8 +354,10 @@ function MarketSheet({ d, mp }: { d: Ads2Competitors; mp: Ads2Mp }) {
           <h2>Позиции наших карточек в поиске WB</h2>
           {head}
           <div className="ad2-filters">
-            <button className={`period-btn ${!onlyBad ? 'active' : ''}`} onClick={() => setOnlyBad(false)}>Все <span className="ad2-cnt">{w.items.length}</span></button>
-            <button className={`period-btn ${onlyBad ? 'active' : ''}`} onClick={() => setOnlyBad(true)}>Есть что исправить <span className="ad2-cnt">{w.items.filter(i => i.bad.length).length}</span></button>
+            <div className="period-switch" role="group" aria-label="Какие карточки">
+              <button className={`period-btn ${!onlyBad ? 'active' : ''}`} onClick={() => setOnlyBad(false)}>Все <span className="ad2-cnt">{w.items.length}</span></button>
+              <button className={`period-btn ${onlyBad ? 'active' : ''}`} onClick={() => setOnlyBad(true)}>Есть что исправить <span className="ad2-cnt">{w.items.filter(i => i.bad.length).length}</span></button>
+            </div>
           </div>
           <div className="ad2-scroll">
             <table className="ad2-table">
@@ -451,7 +455,7 @@ function MarketSheet({ d, mp }: { d: Ads2Competitors; mp: Ads2Mp }) {
 // ─── Страница ───────────────────────────────────────────────────────────────
 // Лист «Советник по продажам» переехал в РНП → «Советник» (выпуски в течение дня, 15.10.2026).
 
-function Board({ mp }: { mp: Ads2Mp }) {
+function Board({ mp, mpSwitch }: { mp: Ads2Mp; mpSwitch: React.ReactNode }) {
   const [sheet, setSheet] = useState<Sheet>(() => { try { const s = localStorage.getItem('cmp:sheet') as Sheet; return SHEETS.some(([k]) => k === s) ? s : 'watch'; } catch { return 'watch'; } });
   const [d, setD] = useState<Ads2Competitors | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -465,7 +469,8 @@ function Board({ mp }: { mp: Ads2Mp }) {
   const pending = useMemo(() => d?.watch.reduce((s, p) => s + p.links.filter(l => l.status === 'suggested').length, 0) ?? 0, [d]);
   return (
     <div className="grid ad2 cmp" style={{ gap: 16 }}>
-      <section className="card ad2-head">
+      <div className="sa-head">
+        {mpSwitch}
         <div className="ad2-tabs" role="tablist">
           {SHEETS.map(([k, l]) => (
             <button key={k} role="tab" aria-selected={sheet === k} className={`ad2-tab ${sheet === k ? 'active' : ''}`} onClick={() => go(k)}>
@@ -473,7 +478,7 @@ function Board({ mp }: { mp: Ads2Mp }) {
             </button>
           ))}
         </div>
-      </section>
+      </div>
       {err && <div className="rnp-alert">Конкуренты не загрузились: {err}</div>}
       {!d && !err && <div className="card muted">Загружаю…</div>}
       {d && sheet === 'watch' && <WatchSheet d={d} mp={mp} onData={onData} setToast={setToast} />}
@@ -486,17 +491,19 @@ function Board({ mp }: { mp: Ads2Mp }) {
 export function Competitors() {
   const [mp, setMp] = useState<Ads2Mp>(() => { try { return localStorage.getItem('cmp:mp') === 'ozon' ? 'ozon' : localStorage.getItem('cmp:mp') === 'wb' ? 'wb' : (localStorage.getItem('ads2:mp') === 'ozon' ? 'ozon' : 'wb'); } catch { return 'wb'; } });
   const choose = (m: Ads2Mp) => { setMp(m); try { localStorage.setItem('cmp:mp', m); } catch { /* не критично */ } };
+  // Стиль А (22.10.2026): класс .sa включает общий слой стиля — см. блок «Стиль А» в styles.css.
+  const mpSwitch = (
+    <div className="sa-seg" role="group" aria-label="Площадка">
+      {(['wb', 'ozon'] as Ads2Mp[]).map(m => (
+        <button key={m} className={mp === m ? 'on' : ''} onClick={() => choose(m)}>
+          <i className={`sa-dot ${m}`} /> {m === 'wb' ? 'Wildberries' : 'Ozon'}
+        </button>
+      ))}
+    </div>
+  );
   return (
-    <div className="grid" style={{ gap: 16 }}>
-      <div className="row gap-8 cmp-mps">
-        <button className={`mp-tab ${mp === 'wb' ? 'active' : ''}`} onClick={() => choose('wb')}>
-          <span className="mp-tab-dot" style={{ background: '#cb11ab' }} /> Wildberries
-        </button>
-        <button className={`mp-tab ${mp === 'ozon' ? 'active' : ''}`} onClick={() => choose('ozon')}>
-          <span className="mp-tab-dot" style={{ background: '#005bff' }} /> Ozon
-        </button>
-      </div>
-      <Fragment key={mp}><Board mp={mp} /></Fragment>
+    <div className="sa">
+      <Fragment key={mp}><Board mp={mp} mpSwitch={mpSwitch} /></Fragment>
     </div>
   );
 }

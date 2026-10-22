@@ -1642,6 +1642,10 @@ code {
 .ad2 .chip { font-size: 16px; }
 .ad2-head .period-btn { font-size: 17.5px; padding: 7px 12px; }
 .ad2-head .btn-sm { font-size: 16.5px; }
+/* Период «Рекламы» (22.10.2026): свои даты и подпись выбранного периода */
+.ad2-dates { display: inline-flex; gap: 8px; align-items: center; font-size: 16.5px; color: var(--muted); }
+.ad2-dates input { font: inherit; color: var(--text); padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.ad2-range { font-size: 16.5px; color: var(--muted); white-space: nowrap; }
 .ad2 .card h2 { font-size: 19.5px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 /* Раздел «Конкуренты» (15.10.2026) */

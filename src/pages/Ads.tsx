@@ -29,16 +29,47 @@ import { Products, ProductDrawer } from './ads/Products';
 import { Campaigns } from './ads/Campaigns';
 import { Autopilot } from './ads/Autopilot';
 import { Journal } from './ads/Journal';
+import { mskDate } from '../utils/mskDate';
+
+/**
+ * Период (22.10.2026, просьба владельца): кроме 7/14/30 дней — «сегодня», «вчера»,
+ * «позавчера» и свои даты. Сервер считает заказы, клики, корзины и расход за
+ * любые дни по хранилищу «кампания × товар × день».
+ */
+type Preset = 'today' | 'yesterday' | 'before' | '7' | '14' | '30' | 'custom';
+const PRESETS: Array<[Preset, string]> = [
+  ['today', 'Сегодня'], ['yesterday', 'Вчера'], ['before', 'Позавчера'], ['7', '7 дн'], ['14', '14 дн'], ['30', '30 дн'], ['custom', 'Свои даты'],
+];
+function presetRange(p: Exclude<Preset, 'custom'>): { from: string; to: string } {
+  if (p === 'today') return { from: mskDate(0), to: mskDate(0) };
+  if (p === 'yesterday') return { from: mskDate(1), to: mskDate(1) };
+  if (p === 'before') return { from: mskDate(2), to: mskDate(2) };
+  return { from: mskDate(Number(p) - 1), to: mskDate(0) };
+}
+const readLs = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+const writeLs = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* не критично */ } };
 
 type Tab = 'overview' | 'products' | 'campaigns' | 'autopilot' | 'log';
 const TABS: Array<[Tab, string]> = [['overview', 'Обзор'], ['products', 'Товары'], ['campaigns', 'Кампании'], ['autopilot', 'Автопилот'], ['log', 'Журнал']];
+
+const ddmmyy = (iso: string) => iso.split('-').reverse().join('.');
 
 // ─── Страница ───────────────────────────────────────────────────────────────
 
 function Board({ mp }: { mp: Ads2Mp }) {
   // 15.10: «Конкуренты» переехали в свой раздел — сохранённая вкладка 'competitors' открывает «Обзор».
   const [tab, setTab] = useState<Tab>(() => { try { const t = localStorage.getItem('ads2:tab') as Tab; return TABS.some(([k]) => k === t) ? t : 'overview'; } catch { return 'overview'; } });
-  const [days, setDays] = useState<number>(() => { try { return Number(localStorage.getItem('ads2:days')) || 14; } catch { return 14; } });
+  const [preset, setPreset] = useState<Preset>(() => {
+    const v = readLs('ads2:preset') ?? readLs('ads2:days'); // ads2:days — сохранённый выбор до 22.10
+    return PRESETS.some(([k]) => k === v) ? v as Preset : '14';
+  });
+  const [custom, setCustom] = useState(() => {
+    try { const c = JSON.parse(readLs('ads2:custom') ?? ''); if (c?.from && c?.to) return c as { from: string; to: string }; } catch { /* нет сохранённого */ }
+    return presetRange('7');
+  });
+  const { from, to } = preset === 'custom' ? custom : presetRange(preset);
+  const pick = (p: Preset) => { setPreset(p); writeLs('ads2:preset', p); };
+  const setDates = (c: { from: string; to: string }) => { setCustom(c); writeLs('ads2:custom', JSON.stringify(c)); };
   const [data, setData] = useState<Ads2Overview | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,10 +83,10 @@ function Board({ mp }: { mp: Ads2Mp }) {
   const load = useCallback(async () => {
     const my = ++seq.current;
     setLoading(true);
-    try { const r = await apiGet<Ads2Overview>(`/api/ads2/overview?mp=${mp}&days=${days}`); if (my === seq.current) { setData(r.data); setErr(null); } }
+    try { const r = await apiGet<Ads2Overview>(`/api/ads2/overview?mp=${mp}&from=${from}&to=${to}`); if (my === seq.current) { setData(r.data); setErr(null); } }
     catch (e) { if (my === seq.current) setErr(errText(e)); }
     finally { if (my === seq.current) setLoading(false); }
-  }, [mp, days]);
+  }, [mp, from, to]);
   useEffect(() => { void load(); }, [load]);
   const { ask, ui, setToast } = useActions(load);
 
@@ -85,10 +116,17 @@ function Board({ mp }: { mp: Ads2Mp }) {
         </div>
         <span className="rnp-spacer" />
         <div className="period-switch" role="group" aria-label="Период">
-          {[7, 14, 30].map(n => (
-            <button key={n} className={`period-btn ${days === n ? 'active' : ''}`} onClick={() => { setDays(n); try { localStorage.setItem('ads2:days', String(n)); } catch { /* не критично */ } }}>{n} дн</button>
+          {PRESETS.map(([k, l]) => (
+            <button key={k} className={`period-btn ${preset === k ? 'active' : ''}`} onClick={() => pick(k)}>{l}</button>
           ))}
         </div>
+        {preset === 'custom' && (
+          <div className="ad2-dates">
+            <label>с <input type="date" value={custom.from} max={custom.to} onChange={e => e.target.value && setDates({ ...custom, from: e.target.value })} /></label>
+            <label>по <input type="date" value={custom.to} min={custom.from} max={mskDate(0)} onChange={e => e.target.value && setDates({ ...custom, to: e.target.value })} /></label>
+          </div>
+        )}
+        <span className="ad2-range">{from === to ? ddmmyy(to) : `${ddmmyy(from)} – ${ddmmyy(to)}`}{to === mskDate(0) ? ' · сегодня ещё идёт' : ''}</span>
         <span className="muted ad2-small" title={data?.lastSync?.result.join('\n') ?? ''}>
           {loading ? 'загружаю…' : data?.lastSync ? `кампании на ${new Date(data.lastSync.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
         </span>
@@ -102,7 +140,7 @@ function Board({ mp }: { mp: Ads2Mp }) {
       {!data && !err && <div className="card muted">Загружаю…</div>}
 
       {data && (
-        <Fragment key={`${mp}-${days}`}>
+        <Fragment key={`${mp}-${from}-${to}`}>
           {tab === 'overview' && <Overview d={data} openProduct={setProductKey} />}
           {tab === 'products' && <Products d={data} openProduct={setProductKey} onChanged={load} setToast={setToast} />}
           {tab === 'campaigns' && <Campaigns d={data} ask={ask} openId={openCamp} setOpenId={setOpenCamp} />}

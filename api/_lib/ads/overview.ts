@@ -12,7 +12,7 @@
  */
 import { getRnp } from '../rnp';
 import { mskDate } from '../mskDate';
-import { listCampaigns, listItems, campaignStats, listFlags, type CampaignStat } from './store';
+import { listCampaigns, listItems, campaignStats, listFlags, statSummary, type CampaignStat } from './store';
 import { lastAdsSync } from './sync';
 import {
   ADS_BUDGET_SHARE, NO_ADS_REASON_LABEL,
@@ -68,22 +68,32 @@ function lastIdx(rnp: RnpResponse, key: string, metric: string, idxs: number[]):
   return null;
 }
 
-export async function getAdsOverview(mp: Ads2Mp, days = 14): Promise<Ads2Overview> {
+const ISO = /^d{4}-d{2}-d{2}$/;
+
+/**
+ * Сводка за период. По умолчанию — последние `days` дней по сегодня; с 22.10.2026
+ * можно передать любой период `span` (вчера, позавчера, свои даты) — месяц,
+ * прогноз и «сегодня» в бюджете всё равно считаются от текущего дня.
+ */
+export async function getAdsOverview(mp: Ads2Mp, days = 14, span?: { from?: string; to?: string }): Promise<Ads2Overview> {
   const notes: string[] = [];
-  const to = mskDate(0);
-  const from = addDays(to, -(Math.min(Math.max(days, 1), 90) - 1));
-  const monthStart = to.slice(0, 8) + '01';
-  const ma7From = addDays(to, -7);
+  const today = mskDate(0);
+  let to = span?.to && ISO.test(span.to) && span.to <= today ? span.to : today;
+  let from = span?.from && ISO.test(span.from) ? span.from : addDays(to, -(Math.min(Math.max(days, 1), 90) - 1));
+  if (from > to) [from, to] = [to, from];
+  if (from < addDays(to, -179)) from = addDays(to, -179);
+  const monthStart = today.slice(0, 8) + '01';
+  const ma7From = addDays(today, -7);
   const loadFrom = [from, monthStart, ma7From].sort()[0];
-  const rnp = await getRnp(mp, loadFrom, to);
+  const rnp = await getRnp(mp, loadFrom, today);
   notes.push(...rnp.notes);
 
   const idxOf = new Map(rnp.dates.map((d, i) => [d, i]));
   const range = (a: string, b: string) => rnp.dates.map((d, i) => (d >= a && d <= b ? i : -1)).filter(i => i >= 0);
   const period = range(from, to);
   const dates = period.map(i => rnp.dates[i]);
-  const last7 = range(addDays(to, -7), addDays(to, -1));        // 7 полных дней до сегодня
-  const month = range(monthStart, to);
+  const last7 = range(addDays(today, -7), addDays(today, -1));  // 7 полных дней до сегодня
+  const month = range(monthStart, today);
   const keys = Object.keys(rnp.facts);
 
   // ── Бюджет ────────────────────────────────────────────────────────────────
@@ -97,10 +107,10 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14): Promise<Ads2Overvie
   const pSpend = sumDays(period, 'adv_expenses');
   const avg7Orders = last7.length ? sumDays(last7, 'ordered_amount') / last7.length : 0;
   const avg7Spend = last7.length ? sumDays(last7, 'adv_expenses') / last7.length : 0;
-  const todayI = idxOf.get(to);
-  const dayOfMonth = Number(to.slice(8, 10));
-  const daysInMonth = new Date(Date.UTC(Number(to.slice(0, 4)), Number(to.slice(5, 7)), 0)).getUTCDate();
-  const monthDone = month.filter(i => rnp.dates[i] < to);       // без сегодняшнего неполного дня
+  const todayI = idxOf.get(today);
+  const dayOfMonth = Number(today.slice(8, 10));
+  const daysInMonth = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0)).getUTCDate();
+  const monthDone = month.filter(i => rnp.dates[i] < today);    // без сегодняшнего неполного дня
   const mOrdersDone = sumDays(monthDone, 'ordered_amount');
   const mSpendDone = sumDays(monthDone, 'adv_expenses');
   const left = daysInMonth - (dayOfMonth - 1);
@@ -109,7 +119,7 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14): Promise<Ads2Overvie
     sharePct: ADS_BUDGET_SHARE * 100,
     orders: r2(pOrders), spend: r2(pSpend), budget: r2(pOrders * ADS_BUDGET_SHARE), drrPct: pct(pSpend, pOrders),
     month: {
-      label: MONTHS[Number(to.slice(5, 7)) - 1], daysPassed: dayOfMonth - 1, daysInMonth,
+      label: MONTHS[Number(today.slice(5, 7)) - 1], daysPassed: dayOfMonth - 1, daysInMonth,
       orders: r2(sumDays(month, 'ordered_amount')), spend: r2(sumDays(month, 'adv_expenses')),
       budget: r2(sumDays(month, 'ordered_amount') * ADS_BUDGET_SHARE),
       forecastOrders: r2(mOrdersDone + avg7Orders * left),
@@ -258,6 +268,10 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14): Promise<Ads2Overvie
   }
   products.sort((a, b) => b.revenue - a.revenue || b.spend - a.spend);
 
+  // Статистика «кампания × товар» у Ozon копится с 13.10.2026 (метод отдаёт только вчера и сегодня):
+  // за более ранние дни «Кампании» покажут не всё, а «Товары» — полностью (из отчётов РНП).
+  const statFrom = statSummary().find(x => x.mp === mp)?.from;
+  if (statFrom && from < statFrom) notes.push(`Статистика по кампаниям ${mp === 'wb' ? 'WB' : 'Ozon'} есть с ${statFrom.split('-').reverse().join('.')} — за более ранние дни во вкладке «Кампании» цифры неполные; «Товары» и «Обзор» — полные.`);
   if (!campaigns.length) notes.push('Кампаний в базе ещё нет — сбор идёт в цепочке обновлений сервера раз в 2 часа.');
   return {
     ok: true, mp, from, to, dates, budget, days: daysOut, campaigns, products,

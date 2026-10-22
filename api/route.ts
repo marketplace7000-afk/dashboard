@@ -288,7 +288,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (what === 'overview') {
         const mp = req.query.mp === 'ozon' ? 'ozon' : 'wb';
         const { getAdsOverview } = await import('./_lib/ads/overview');
-        return res.status(200).json(await getAdsOverview(mp, Number(req.query.days) || 14));
+        const q = (k: string) => (typeof req.query[k] === 'string' ? req.query[k] as string : undefined);
+        return res.status(200).json(await getAdsOverview(mp, Number(req.query.days) || 14, { from: q('from'), to: q('to') }));
       }
       if (what === 'action' && req.method === 'POST') {
         const b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});

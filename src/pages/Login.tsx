@@ -91,7 +91,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
 
   if (authEnabled === null) {
     return (
-      <div className="login-wrap">
+      <div className="login-wrap sa">
         <div className="login-card" style={{ textAlign: 'center', padding: 48 }}>
           <SpinnerIcon size={28} weight="bold" className="spin" style={{ color: 'var(--accent)' }} />
         </div>
@@ -100,9 +100,9 @@ export function Login({ onLogin }: { onLogin: () => void }) {
   }
 
   return (
-    <div className="login-wrap">
+    <div className="login-wrap sa">
       <form className="login-card" onSubmit={submit}>
-        <div className="brand" style={{ padding: 0, marginBottom: 18, fontSize: 24.5 }}>
+        <div className="brand" style={{ padding: 0, marginBottom: 18, fontSize: 23 }}>
           <span>Avto Vibe</span>
         </div>
         <h2>Вход в кабинет</h2>
@@ -137,7 +137,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         {error && (
           <div style={{
             background: 'rgba(220,38,38,.08)', color: 'var(--bad)',
-            padding: '8px 12px', borderRadius: 8, fontSize: 15.5, marginBottom: 12,
+            padding: '8px 12px', borderRadius: 8, fontSize: 15, marginBottom: 12,
             display: 'flex', gap: 8, alignItems: 'center',
           }}>
             <WarningIcon size={14} weight="bold" /> {error}
@@ -154,7 +154,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           {loading ? 'Проверка…' : 'Войти'}
         </button>
 
-        <div style={{ marginTop: 14, fontSize: 15.5, color: 'var(--muted)', textAlign: 'center' }}>
+        <div style={{ marginTop: 14, fontSize: 15, color: 'var(--muted)', textAlign: 'center' }}>
           Кабинет продавца: <b style={{ color: 'var(--text)' }}>ИП Алешко</b> · WB&nbsp;+&nbsp;Ozon
         </div>
       </form>

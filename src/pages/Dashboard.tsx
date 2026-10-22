@@ -8,9 +8,6 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { TrendUpIcon, TrendDownIcon, SpinnerIcon, ArrowsClockwiseIcon } from '@phosphor-icons/react';
-import '@fontsource/golos-text/400.css';
-import '@fontsource/golos-text/500.css';
-import '@fontsource/golos-text/600.css';
 import { apiGet } from '../api/http';
 import { mskDate } from '../utils/mskDate';
 import { noteSwallowed } from '../utils/log';

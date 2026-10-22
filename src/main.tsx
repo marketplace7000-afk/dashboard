@@ -1,6 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
+// Шрифт стиля А — на весь кабинет, хранится у нас (не с Google).
+import '@fontsource/golos-text/400.css';
+import '@fontsource/golos-text/500.css';
+import '@fontsource/golos-text/600.css';
 import './styles.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
 

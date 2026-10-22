@@ -92,7 +92,7 @@ function WbTokensCard() {
           <span className="dot" /> {filled}/5 заполнено
         </span>
       </div>
-      <div className="muted" style={{ fontSize: 15.5, marginBottom: 14 }}>
+      <div className="muted" style={{ fontSize: 15, marginBottom: 14 }}>
         Токен с нужными категориями WB API. На проде серверный <code>WB_TOKEN</code> в <code>.env</code> —
         он используется фоновым сборщиком. Поля ниже хранятся в localStorage браузера (для теста разных аккаунтов).
         Совет: заведите <b>отдельный</b> токен для платформы, чтобы не делить квоту с другими интеграциями.
@@ -106,7 +106,7 @@ function WbTokensCard() {
           return (
             <div key={scope} className="grid" style={{ gridTemplateColumns: '160px 1fr auto auto', gap: 10, alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 500 }}>{SCOPE_LABEL[scope]}</div>
+                <div style={{ fontSize: 17, fontWeight: 500 }}>{SCOPE_LABEL[scope]}</div>
                 {st === 'ok' && <span className="chip good" style={{ marginTop: 2 }}><CheckIcon size={10} weight="bold" /> ок</span>}
                 {st === 'error' && <span className="chip bad" style={{ marginTop: 2 }} title={msg}><WarningIcon size={10} weight="bold" /> не принят</span>}
                 {st === 'checking' && <span className="chip" style={{ marginTop: 2 }}>проверка…</span>}
@@ -118,7 +118,7 @@ function WbTokensCard() {
                 value={tok}
                 onChange={e => update(scope, e.target.value)}
                 placeholder="eyJhbGciOi…"
-                style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 15.5, WebkitTextSecurity: visible[scope] ? 'none' : 'disc' } as any}
+                style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 15, WebkitTextSecurity: visible[scope] ? 'none' : 'disc' } as any}
               />
               <button className="btn btn-sm" onClick={() => setVisible(v => ({ ...v, [scope]: !v[scope] }))}>
                 {visible[scope] ? 'скрыть' : 'показать'}
@@ -213,7 +213,7 @@ function OzonPerfCard() {
           {status === 'ok' ? 'OAuth ок' : status === 'error' ? 'ошибка' : status === 'checking' ? 'проверка…' : filled ? 'не проверен' : 'не задан'}
         </span>
       </div>
-      <div className="muted" style={{ fontSize: 15.5, marginBottom: 14 }}>
+      <div className="muted" style={{ fontSize: 15, marginBottom: 14 }}>
         Отдельные креды от Seller API. Кабинет Ozon → Реклама → API → Создать клиента.
         Нужны только для модуля «Реклама» Ozon; остальное работает без них.
       </div>
@@ -226,7 +226,7 @@ function OzonPerfCard() {
             onChange={e => setClientId(e.target.value)}
             autoComplete="off"
             placeholder="12345678-1234567890123@advertising.performance.ozon.ru"
-            style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15.5 }}
+            style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15 }}
           />
         </div>
         <div className="field" style={{ margin: 0 }}>
@@ -239,7 +239,7 @@ function OzonPerfCard() {
               value={clientSecret}
               onChange={e => setClientSecret(e.target.value)}
               placeholder="••••••••••••"
-              style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15.5, flex: 1, WebkitTextSecurity: showSecret ? 'none' : 'disc' } as any}
+              style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 15, flex: 1, WebkitTextSecurity: showSecret ? 'none' : 'disc' } as any}
             />
             <button className="btn btn-sm" onClick={() => setShowSecret(v => !v)}>{showSecret ? 'скрыть' : 'показать'}</button>
           </div>
@@ -256,7 +256,7 @@ function OzonPerfCard() {
         </button>
       </div>
       {msg && (
-        <div className="muted" style={{ fontSize: 15.5, marginTop: 10, color: status === 'error' ? 'var(--bad)' : status === 'ok' ? 'var(--good)' : 'var(--muted)', wordBreak: 'break-word' }}>
+        <div className="muted" style={{ fontSize: 15, marginTop: 10, color: status === 'error' ? 'var(--bad)' : status === 'ok' ? 'var(--good)' : 'var(--muted)', wordBreak: 'break-word' }}>
           {msg}
         </div>
       )}
@@ -298,18 +298,18 @@ function CollectorStatusCard() {
         </h2>
         <span className="chip">cron · каждый час</span>
       </div>
-      <div className="muted" style={{ fontSize: 15.5, marginBottom: 12 }}>
+      <div className="muted" style={{ fontSize: 15, marginBottom: 12 }}>
         Браузер не ходит в WB/Ozon — данные тянет фоновый сборщик на сервере и кладёт в кэш.
         Здесь видно, когда каждый источник обновлялся последний раз.
       </div>
-      {err && <div className="muted" style={{ fontSize: 16 }}>Не удалось получить статус сборщика.</div>}
+      {err && <div className="muted" style={{ fontSize: 17 }}>Не удалось получить статус сборщика.</div>}
       {!err && (
         <div className="grid" style={{ gap: 6 }}>
           {ROWS.map(r => {
             const m = ns?.[r.key];
             const when = ago(m?.lastRefreshAt);
             return (
-              <div key={r.key} className="flex-between" style={{ fontSize: 16, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+              <div key={r.key} className="flex-between" style={{ fontSize: 17, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                 <span>{r.label}</span>
                 {when
                   ? <span className="chip good"><span className="dot" /> {when}</span>
@@ -333,7 +333,7 @@ function ProcurementSettingsCard() {
   return (
     <div className="card">
       <h2 style={{ marginTop: 0 }}>Параметры прогноза закупок</h2>
-      <div className="muted" style={{ fontSize: 15.5, marginBottom: 14 }}>
+      <div className="muted" style={{ fontSize: 15, marginBottom: 14 }}>
         Используются в модуле «Прогноз закупок» и «Распределение» для расчёта «на сколько хватит»,
         даты «заказать до» и рекомендованного объёма закупки. Хранятся в браузере.
       </div>
@@ -388,7 +388,7 @@ function FulfilmentCard() {
 
   const row = (label: string, key: 'wbFulfilment' | 'ozonFulfilment') => (
     <div className="row gap-8" style={{ alignItems: 'center' }}>
-      <span style={{ minWidth: 120, fontSize: 16 }}>{label}</span>
+      <span style={{ minWidth: 120, fontSize: 17 }}>{label}</span>
       {(['fbs', 'fbo'] as const).map(v => (
         <button
           key={v}
@@ -408,7 +408,7 @@ function FulfilmentCard() {
         <h2 style={{ margin: 0 }}>Схема работы</h2>
         {saved && <span className="chip good">сохранено</span>}
       </div>
-      <div className="muted" style={{ fontSize: 15.5, lineHeight: 1.6, marginBottom: 12 }}>
+      <div className="muted" style={{ fontSize: 15, lineHeight: 1.6, marginBottom: 12 }}>
         От неё зависят комиссия и логистика в расчёте прибыли: у продажи со склада площадки (FBO)
         и со своего склада (FBS) ставки разные. Переключение применяется сразу — таблицы цен
         пересчитаются на новых ставках.
@@ -418,7 +418,7 @@ function FulfilmentCard() {
         {row('Ozon', 'ozonFulfilment')}
       </div>
       {error && (
-        <div className="row gap-8" style={{ marginTop: 10, fontSize: 15.5, color: 'var(--bad)' }}>
+        <div className="row gap-8" style={{ marginTop: 10, fontSize: 15, color: 'var(--bad)' }}>
           <WarningIcon size={13} weight="bold" /> {error}
         </div>
       )}
@@ -458,7 +458,7 @@ function AiModelsCard() {
         <h2 style={{ margin: 0 }}>Модели ИИ по разделам</h2>
         <span className="chip"><InfoIcon size={11} weight="bold" /> действует сразу</span>
       </div>
-      <div className="muted" style={{ fontSize: 15.5, lineHeight: 1.6, marginBottom: 12 }}>
+      <div className="muted" style={{ fontSize: 15, lineHeight: 1.6, marginBottom: 12 }}>
         Какая модель Claude работает в каждом разделе. Дешевле — Haiku, глубже и дороже — Opus и Fable.
         Цена — в долларах за миллион токенов: «вход / выход» (примерно 750 тысяч слов текста).
         Расход по разделам виден в «Сборщиках» → «Расход на нейросеть».
@@ -467,7 +467,7 @@ function AiModelsCard() {
         {AI_AREAS.map(a => (
           <div key={a.key} className="grid" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 300px)', gap: 12, alignItems: 'center' }}>
             <div>
-              <div style={{ fontSize: 16.5, fontWeight: 600 }}>
+              <div style={{ fontSize: 17, fontWeight: 600 }}>
                 {a.label}
                 {a.idle && <span className="chip" style={{ marginLeft: 8 }}>пока без ИИ</span>}
                 {savedArea === a.key && <span className="chip good" style={{ marginLeft: 8 }}>сохранено</span>}
@@ -488,7 +488,7 @@ function AiModelsCard() {
         ))}
       </div>
       {error && (
-        <div className="row gap-8" style={{ marginTop: 10, fontSize: 15.5, color: 'var(--bad)' }}>
+        <div className="row gap-8" style={{ marginTop: 10, fontSize: 15, color: 'var(--bad)' }}>
           <WarningIcon size={13} weight="bold" /> {error}
         </div>
       )}
@@ -511,7 +511,7 @@ export function Settings() {
           <h2 style={{ margin: 0 }}>Серверные ключи (в <code>.env</code> на сервере)</h2>
           <span className="chip"><InfoIcon size={11} weight="bold" /> не в браузере</span>
         </div>
-        <div className="muted" style={{ fontSize: 15.5, lineHeight: 1.6 }}>
+        <div className="muted" style={{ fontSize: 15, lineHeight: 1.6 }}>
           Эти ключи задаются на сервере (<code>/opt/autovibe/.env</code>), не из браузера — так безопаснее:
           <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.8 }}>
             <li><code>WB_TOKEN</code> — рабочий токен WB для фонового сборщика</li>

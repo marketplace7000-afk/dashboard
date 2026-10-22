@@ -144,7 +144,9 @@ export function App() {
   };
 
   return (
-    <div className={`app ${!sidebarOpen ? 'sidebar-collapsed' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''}`}>
+    // .sa — стиль А на весь кабинет (22.10.2026): каркас и все разделы получают шрифт,
+    // цвета и шкалу главной (блок «Стиль А — общий слой» в styles.css).
+    <div className={`app sa ${!sidebarOpen ? 'sidebar-collapsed' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''}`}>
       <div className="mobile-nav-overlay" onClick={() => setMobileNavOpen(false)} />
       <aside className="sidebar">
         <div className="brand">

@@ -176,4 +176,6 @@ export type RnpPriceView = {
   marginRub: number | null;
   roi: number | null;
   roiStatus: 'ok' | 'warn' | 'danger' | 'stop' | 'none' | null;
+  /** 22.10.2026: реклама в расчёте маржи (₽ на шт), цена-база маржи и выкуп, % — для экономики рекламы. */
+  adsRub?: number | null; base?: number | null; buyout?: number | null;
 };

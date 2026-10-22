@@ -1580,6 +1580,16 @@ code {
 .ad2-prop-title { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .ad2-prop-what { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
 .ad2-prop-reason { margin: 0; line-height: 1.45; color: var(--muted); }
+/* Поля рекомендации и вывод замера (22.10.2026) */
+.ad2-prop-det { margin-top: 8px; font-size: 16px; }
+.ad2-prop-det summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--accent-2); }
+.ad2-prop-det ul { margin: 4px 0 8px; padding-left: 20px; line-height: 1.45; }
+.ad2-prop-det dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 6px 0 0; }
+.ad2-prop-det dt { color: var(--muted); }
+.ad2-prop-det dd { margin: 0; }
+.ad2-det-h { margin-top: 8px; font-weight: 600; }
+.ad2-verdict { margin-top: 4px; font-weight: 600; }
+.ad2-good { color: var(--good); }
 .ad2-prop-btns { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
 .ad2-dyn { font-size: 16px; font-weight: 600; margin-left: 3px; }
 .ad2-dyn.good { color: var(--good); }

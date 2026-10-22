@@ -53,7 +53,7 @@ export type Ads2Campaign = {
 
 export type Ads2IssueCode =
   | 'stock_critical' | 'stock_low' | 'drr_high' | 'spend_no_orders' | 'card_to_cart' | 'cart_to_order'
-  | 'low_margin' | 'no_ads_opportunity' | 'flagged_but_running';
+  | 'low_margin' | 'no_ads_opportunity' | 'flagged_but_running' | 'too_early' | 'unprofitable' | 'data_check';
 
 export type Ads2Issue = { code: Ads2IssueCode; level: 'critical' | 'warn' | 'info'; text: string };
 
@@ -75,6 +75,12 @@ export type Ads2Product = {
   /** Реклама товара за период по всем кампаниям — из статистики кабинета (показы, клики, корзины, заказы). */
   ad: Ads2Stat | null;
   price: number | null; marginPct: number | null; marginRub: number | null;
+  /**
+   * Экономика рекламы (22.10.2026, разбор менеджера): маржа до рекламы на штуку и
+   * допустимая цена рекламного заказа = (маржа до рекламы − плановая прибыль) × выкуп.
+   * null — нет себестоимости или цены, считать нечем.
+   */
+  econ: Ads2Econ | null;
   campaigns: { id: string; name: string; status: string }[];
   flag: { reason: string; note: string | null } | null;
   /** В архиве «Рекламы» (самовыкуп, дубли): скрыт с экранов, автопилот не трогает. */
@@ -82,6 +88,21 @@ export type Ads2Product = {
   issues: Ads2Issue[];
   /** По дням периода. */
   series: { orders: Array<number | null>; spend: Array<number | null> };
+};
+
+export type Ads2Econ = {
+  /** Маржа на штуку без рекламы, ₽. */
+  marginBeforeAds: number;
+  /** Плановая прибыль, % от цены (план месяца из «Цены» → «Репрайсер»). */
+  planPct: number;
+  buyoutPct: number;
+  /** Сколько можно отдать рекламе за один заказ, ₽ (≤ 0 — товар без запаса на рекламу). */
+  allowedCpo: number;
+  /** То же в процентах от цены — допустимый ДРР товара. */
+  allowedDrr: number | null;
+  /** Прибыль товара за период после всей рекламы: все заказы × выкуп × маржа до рекламы − расход. */
+  profit: number;
+  how: string;
 };
 
 export type Ads2Overview = {
@@ -317,7 +338,18 @@ export type Ads2AutopilotMode = 'off' | 'confirm';
 /** task — задача команде (карточка/цена), new_campaign — кандидат на кампанию: без команды площадке. */
 export type Ads2ProposalKind = 'bid' | 'pause' | 'daily_limit' | 'weekly_budget' | 'task' | 'new_campaign';
 
-export type Ads2EffectSide = { spend: number; orders: number; drr: number | null; perDay: number } | null;
+export type Ads2EffectSide = { spend: number; orders: number; drr: number | null; perDay: number; ordersPerDay: number } | null;
+
+/**
+ * Обязательные поля рекомендации (22.10.2026, разбор менеджера): что проверено,
+ * чего не хватает, уверенность, альтернатива, риск, срок замера и условие отката.
+ */
+export type Ads2ProposalDetails = {
+  confidence: 'high' | 'medium' | 'low';
+  checks: string[]; missing: string[];
+  alternative: string | null; risk: string | null;
+  controlDays: number; rollback: string | null;
+};
 
 export type Ads2Proposal = {
   id: number; createdAt: number; mp: Ads2Mp;
@@ -331,8 +363,9 @@ export type Ads2Proposal = {
   status: 'pending' | 'applied' | 'rejected' | 'failed' | 'expired' | 'superseded';
   decidedAt: number | null; decidedBy: string | null; note: string | null;
   result: { message?: string; error?: string } | null;
-  /** Замер: 3 дня до решения и до 3 дней после. */
-  effect: { days: number; before: Ads2EffectSide; after: Ads2EffectSide } | null;
+  details: Ads2ProposalDetails | null;
+  /** Замер: 3 дня до решения и до 3 дней после; вывод — стало лучше, хуже (откатить) или без разницы. */
+  effect: { days: number; before: Ads2EffectSide; after: Ads2EffectSide; verdict: 'better' | 'worse' | 'neutral' | null; verdictText: string | null } | null;
 };
 
 export type Ads2AutopilotState = {

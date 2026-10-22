@@ -46,6 +46,13 @@ export type MarginRow = {
   spp: number;
   cost: number | null;
   marginPct: number | null; marginRub: number | null; roi: number | null; roiStatus: RoiStatus | null;
+  /**
+   * 22.10.2026: реклама, уже вычтенная из marginRub (ДРР листа × цена), цена, от
+   * которой считается маржа, и выкуп, %. Нужны «Рекламе»: допустимая цена заказа
+   * считается от маржи ДО рекламы, иначе реклама вычитается дважды (лимит 14 ₽ у
+   * MANIC-STICK в разборе менеджера).
+   */
+  adsRub?: number | null; base?: number | null; buyout?: number | null;
   /** Вход калькулятора — для пересчёта при другой цене (пол цены, «что если»). */
   input: WbCalcInput | OzonCalcInput | null;
 };
@@ -106,9 +113,13 @@ function showcasePrice(sc: { price: number; greyPrice?: number; at: number } | u
   return { price: sc.price, source: 'showcase-mem' };
 }
 
-const finish = (row: MarginRow, calc: { margin: number; profit: number; roi: number } | null): MarginRow => {
+const finish = (row: MarginRow, calc: { margin: number; profit: number; roi: number; breakdown?: { ads: number } } | null): MarginRow => {
   if (!calc) return row;
   row.marginPct = Math.round(calc.margin); row.marginRub = Math.round(calc.profit); row.roi = Math.round(calc.roi);
+  const inp = row.input as { retail?: number; price?: number; buyout?: number } | null;
+  row.adsRub = calc.breakdown ? Math.round(calc.breakdown.ads) : null;
+  row.base = inp?.retail ?? inp?.price ?? null;
+  row.buyout = inp?.buyout ?? null;
   row.roiStatus = row.cost && row.cost > 0 ? roiStatus(row.roi, row.cost).status : null;
   return row;
 };

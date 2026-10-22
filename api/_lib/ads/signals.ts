@@ -83,10 +83,12 @@ type Draft = {
 /** Код «узкого места» рекламы → сигнал. */
 const ISSUE_MAP: Record<string, { role: Ads2SignalRole; title: string; action: string }> = {
   flagged_but_running: { role: 'ads', title: 'Реклама идёт у товара «Не рекламировать»', action: 'Остановить кампанию: «Реклама» → «Кампании»' },
-  stock_critical: { role: 'supply', title: 'Нет остатка, а реклама идёт', action: 'Поставка; рекламу на паузу до прихода товара (предложение — в «Автопилоте»)' },
+  stock_critical: { role: 'supply', title: 'Нет остатка, а реклама идёт', action: 'Поставка; товар исключить из кампании до прихода (задача — в «Автопилоте»)' },
   stock_low: { role: 'supply', title: 'Остатка меньше 7 дней', action: 'Запланировать поставку; ставки не повышать' },
-  spend_no_orders: { role: 'ads', title: 'Расход без заказов', action: 'Снизить ставку или поставить на паузу — предложение есть в «Автопилоте»' },
-  drr_high: { role: 'ads', title: 'ДРР вдвое выше нормы', action: 'Снизить ставку («Автопилот»); проверить, не кончился ли остаток и не выросла ли цена' },
+  spend_no_orders: { role: 'ads', title: 'Расход без заказов', action: 'Ноль заказов уже значим: проверить карточку и запросы; предложение — в «Автопилоте»' },
+  drr_high: { role: 'ads', title: 'ДРР выше допустимого для товара', action: 'Ставка по расчёту из маржи — в «Автопилоте»; проверить остаток, цену и слабое звено воронки' },
+  unprofitable: { role: 'price', title: 'Рекламе не из чего платить', action: 'Маржа до рекламы ниже плана прибыли: пересмотреть цену или себестоимость («Цены»)' },
+  data_check: { role: 'ads', title: 'Проверить данные рекламы', action: 'Цена заказа несоразмерна марже — проверить себестоимость, цену и привязку заказа до решений' },
   card_to_cart: { role: 'content', title: 'Карточка не убеждает', action: 'Фото, цена против конкурентов, первые отзывы; рекламу не наращивать, пока конверсия не вернётся' },
   cart_to_order: { role: 'content', title: 'Бросают корзину', action: 'Проверить срок доставки, наличие на складах и цену в корзине (СПП, акции)' },
   low_margin: { role: 'price', title: 'Маржа ниже 10%', action: 'Проверить цену и себестоимость на листе «Цены»; рекламе почти не из чего платить' },
@@ -133,7 +135,7 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
       let money: number | null = null;
       if (i.code === 'flagged_but_running' || i.code === 'spend_no_orders') money = p.spend;
       else if (i.code === 'stock_critical') money = p.stock === 0 ? p.spendSinceOut : null;
-      else if (i.code === 'drr_high') money = Math.max(0, p.spend - p.revenue * target / 100);
+      else if (i.code === 'drr_high') money = Math.max(0, p.spend - p.revenue * (p.econ?.allowedDrr ?? target) / 100);
       const title = i.code === 'stock_critical' && p.stock !== 0 ? 'Остатка меньше 3 дней, а реклама идёт' : m.title;
       drafts.push({ sku: p.key, code: i.code, level: i.level, role: m.role, title, text: i.text, action: m.action, rub: money == null || money <= 0 ? null : Math.round(money), prod: prodOf(p) });
     }

@@ -1229,7 +1229,7 @@ export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise
     const m = await getMargins(mp);
     if (m.withMargin) {
       res.prices = {};
-      for (const [art, r] of Object.entries(m.items)) res.prices[art] = { price: r.buyer, marginPct: r.marginPct, marginRub: r.marginRub, roi: r.roi, roiStatus: r.roiStatus };
+      for (const [art, r] of Object.entries(m.items)) res.prices[art] = { price: r.buyer, marginPct: r.marginPct, marginRub: r.marginRub, roi: r.roi, roiStatus: r.roiStatus, adsRub: r.adsRub ?? null, base: r.base ?? null, buyout: r.buyout ?? null };
       res.pricesAt = m.at;
       served = true;
     }

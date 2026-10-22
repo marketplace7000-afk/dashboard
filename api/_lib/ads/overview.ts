@@ -14,6 +14,8 @@ import { getRnp } from '../rnp';
 import { mskDate } from '../mskDate';
 import { listCampaigns, listItems, campaignStats, listFlags, statSummary, type CampaignStat } from './store';
 import { lastAdsSync } from './sync';
+import { productEcon, zeroOrdersChance, clicksForSignal, BASE_CR, P0_MAX, ANOMALY_X } from './econ';
+import { marginThresholds } from '../repricer';
 import {
   ADS_BUDGET_SHARE, NO_ADS_REASON_LABEL,
   type Ads2Mp, type Ads2Overview, type Ads2Campaign, type Ads2Product, type Ads2Stat, type Ads2Issue, type Ads2Day,
@@ -33,7 +35,7 @@ function median(xs: number[]): number | null {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-function toStat(s: Omit<CampaignStat, 'campaign_id' | 'sku' | 'days'> | null): Ads2Stat | null {
+export function toStat(s: Omit<CampaignStat, 'campaign_id' | 'sku' | 'days'> | null): Ads2Stat | null {
   if (!s) return null;
   return {
     views: s.views, clicks: s.clicks, spend: r2(s.spend), carts: s.carts, orders: s.orders, revenue: r2(s.revenue),
@@ -73,7 +75,7 @@ function lastIdx(rnp: RnpResponse, key: string, metric: string, idxs: number[]):
   return null;
 }
 
-const ISO = /^d{4}-d{2}-d{2}$/;
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Сводка за период. По умолчанию — последние `days` дней по сегодня; с 22.10.2026
@@ -139,6 +141,8 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14, span?: { from?: stri
   const keyByAdSku = new Map<string, string>();
   for (const it of rnp.items) keyByAdSku.set(mp === 'wb' ? it.sku : (it.extId ?? ''), it.sku);
   const flags = new Map(listFlags().filter(f => f.mp === mp).map(f => [f.sku, f]));
+  // Плановая прибыль — план маржи месяца из «Цены» → «Репрайсер»; не задан — 15 %.
+  const planPct = (() => { try { return marginThresholds(mp).plan || 15; } catch { return 15; } })();
 
   // ── Кампании ──────────────────────────────────────────────────────────────
   const statsBySku = campaignStats(mp, from, to, true);
@@ -234,6 +238,8 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14, span?: { from?: stri
       ad: adSku ? toStat(adBySku.get(adSku) ?? null) : null,
       price: pv?.price ?? rnp.sellerPrices?.[up(ri?.article ?? key)] ?? null,
       marginPct: pv?.marginPct ?? null, marginRub: pv?.marginRub ?? null,
+      econ: productEcon({ marginRub: pv?.marginRub ?? null, adsRub: pv?.adsRub, base: pv?.base, price: pv?.price ?? null, buyout: pv?.buyout,
+        planPct, orders, revenue, spend }),
       campaigns: adSku ? campsBySku.get(adSku) ?? [] : [],
       flag: flag?.no_ads ? { reason: flag.reason ?? 'other', note: flag.note } : null,
       archived: !!flag?.archived,
@@ -249,6 +255,8 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14, span?: { from?: stri
   const work = products.filter(p => !p.archived); // архив (самовыкуп, дубли) не портит медианы
   const medPdp = median(work.filter(p => (p.cardViews ?? 0) >= 100 && p.pdpToCart != null).map(p => p.pdpToCart!));
   const medCart = median(work.filter(p => (p.carts ?? 0) >= 20 && p.cartToOrder != null).map(p => p.cartToOrder!));
+  // Обычная конверсия клика рекламы в заказ на площадке — от неё судим, значим ли «ноль заказов».
+  const adCrMedian = median(work.filter(p => (p.ad?.clicks ?? 0) >= 100 && (p.ad?.orders ?? 0) >= 1).map(p => p.ad!.orders / p.ad!.clicks));
   const target = ADS_BUDGET_SHARE * 100;
   for (const p of products) {
     const is: Ads2Issue[] = [];
@@ -262,8 +270,26 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14, span?: { from?: stri
     }
     else if (p.daysOfStock != null && p.daysOfStock < 3 && p.spend > 0) is.push({ code: 'stock_critical', level: 'critical', text: `Остатка на ${p.daysOfStock} дн (${num0(p.stock)} шт: FBO ${p.stockFbo ?? 0}, FBS ${p.stockFbs ?? 0}) — реклама разгонит спрос, которого нечем закрыть` });
     else if (p.daysOfStock != null && p.daysOfStock < 7 && p.spend > 0) is.push({ code: 'stock_low', level: 'warn', text: `Остатка на ${p.daysOfStock} дн (${num0(p.stock)} шт) — не повышать ставки до поставки` });
-    if (p.spend >= 500 && p.orders === 0) is.push({ code: 'spend_no_orders', level: 'critical', text: `Расход ${Math.round(p.spend)} ₽ без единого заказа` });
-    else if (p.drr != null && p.drr > target * 2 && p.spend >= 300) is.push({ code: 'drr_high', level: 'warn', text: `ДРР ${p.drr}% — больше чем вдвое выше нормы ${target}%` });
+    // 22.10.2026 (разбор менеджера): «ноль заказов» — сигнал, только если при обычной конверсии он маловероятен;
+    // высокий ДРР — только против допустимого ДРР товара из его маржи, а не против общих 5 %.
+    const clicks = p.ad?.clicks ?? 0;
+    const cr0 = adCrMedian ?? BASE_CR;
+    if (p.spend >= 500 && p.orders === 0) {
+      const p0 = zeroOrdersChance(clicks, cr0);
+      if (clicks > 0 && p0 > P0_MAX) is.push({ code: 'too_early', level: 'info', text: `Расход ${Math.round(p.spend)} ₽, ${clicks} кликов без заказов — при обычной конверсии ${r2(cr0 * 100)}% такой ноль бывает в ${Math.round(p0 * 100)}% случаев; вывод делать рано (нужно ~${clicksForSignal(cr0)} кликов)` });
+      else is.push({ code: 'spend_no_orders', level: 'critical', text: `Расход ${Math.round(p.spend)} ₽${clicks ? `, ${clicks} кликов` : ''} без единого заказа товара — ни из рекламы, ни без неё` });
+    }
+    if (p.econ && p.econ.allowedCpo <= 0 && p.spend > 0) {
+      is.push({ code: 'unprofitable', level: 'warn', text: `Маржа до рекламы ${Math.round(p.econ.marginBeforeAds)} ₽ не покрывает план прибыли ${p.econ.planPct}% — рекламе не из чего платить; сначала цена или себестоимость` });
+    } else if (p.econ?.allowedDrr != null && p.drr != null && p.spend >= 300 && p.drr > p.econ.allowedDrr * 1.2) {
+      is.push({ code: 'drr_high', level: 'warn', text: `ДРР ${p.drr}% выше допустимого для этого товара ${p.econ.allowedDrr}% (${p.econ.how}); прибыль за период ${Math.round(p.econ.profit)} ₽` });
+    } else if (!p.econ && p.drr != null && p.drr > target * 2 && p.spend >= 300) {
+      is.push({ code: 'drr_high', level: 'warn', text: `ДРР ${p.drr}% вдвое выше ориентира ${target}%, но маржа товара неизвестна — снижать рекламу только после расчёта экономики` });
+    }
+    const adCpo = p.ad && p.ad.orders > 0 ? p.ad.spend / p.ad.orders : null;
+    if (p.econ && p.econ.allowedCpo > 0 && adCpo != null && adCpo > p.econ.allowedCpo * ANOMALY_X) {
+      is.push({ code: 'data_check', level: 'warn', text: `Рекламный заказ ${Math.round(adCpo)} ₽ — в ${Math.round(adCpo / p.econ.allowedCpo)} раз дороже допустимого ${Math.round(p.econ.allowedCpo)} ₽: похоже на ошибку данных (себестоимость, цена, привязка заказа) — проверить до решений` });
+    }
     if (medPdp != null && (p.cardViews ?? 0) >= 100 && p.pdpToCart != null && p.pdpToCart < medPdp * 0.6) {
       is.push({ code: 'card_to_cart', level: 'warn', text: `В корзину кладут ${p.pdpToCart}% против ${r2(medPdp)}% в среднем — карточка не убеждает (фото, цена, отзывы); реклама тут не поможет` });
     }

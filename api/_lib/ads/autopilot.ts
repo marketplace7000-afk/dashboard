@@ -61,10 +61,23 @@ export type AutopilotCtx = {
   skuCr: Map<string, number>;
   /** Медианы рекламной воронки площадки за 28 дней, %. */
   bench: FunnelBench;
+  /**
+   * 22.10.2026 (замечание менеджера Ozon): оценка рекламного расхода подтверждённых конкурентов
+   * товара в неделю = выручка за 7 дней × их ДРР («Товары на Ozon»). Это ОЦЕНКА, не факт кабинета.
+   */
+  compSpend: Map<string, { weekly: number; drr: number | null; n: number; list: string[] }>;
 };
+
+/**
+ * Минимальная ставка площадки, ₽. Ozon «Оплата за клик»: ниже 10 ₽ кабинет ставку не принимает
+ * («От 10 ₽», замечание менеджера 22.10.2026). Для WB минимум зависит от категории — не знаем, null.
+ */
+export function minBid(c: Ads2Campaign): number | null {
+  return c.mp === 'ozon' && c.payment === 'cpc' ? 10 : null;
+}
 export const EMPTY_CTX: AutopilotCtx = {
   marginFloorPct: 15, comps: new Map(), benchDrr: new Map(), stat28: new Map(), skuCr: new Map(),
-  bench: { ctr: null, cartRate: null, cartToOrder: null, cr: null },
+  bench: { ctr: null, cartRate: null, cartToOrder: null, cr: null }, compSpend: new Map(),
 };
 const SETTLE_MS = 24 * 3600_000;
 /** Открытое предложение, которое давно не подтверждалось пересчётом, не показываем. */
@@ -280,7 +293,7 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
 
     // 3. Товары кампании.
     /** Ozon без ручной ставки: снижения копим и решаем по кампании целиком (не режем бюджет ради одного товара). */
-    const budgetDown: { sku: string; article: string; spend: number; factor: number; why: string; rule: string; level: Draft['level'] }[] = [];
+    const budgetDown: { sku: string; article: string; spend: number; factor: number; why: string; rule: string; level: Draft['level']; atFloor?: boolean }[] = [];
     c.items.forEach((it, i) => {
       const p = prods[i];
       if (it.noAds) {
@@ -433,9 +446,13 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
       if (rule === 'over_budget' && s?.drr != null) overBudgetDrr.set(`${campFp}|${it.sku}`, s.drr);
       const details = det({ checks, missing, confidence, alternative, risk, rollback });
 
-      if (!slots.length) {
-        // Ставку менять нельзя (стратегия Ozon, кампания за заказ) — снижения копим, решаем по кампании ниже.
-        if (mp === 'ozon' && dir === 'down') budgetDown.push({ sku: it.sku, article: p?.article ?? it.article ?? it.sku, spend: s?.spend ?? 0, factor, why, rule, level });
+      // Ставка уже на минимуме площадки (Ozon: 10 ₽ за клик) — снижать её нечем, сдерживаем недельным бюджетом.
+      const floor = minBid(c);
+      const atFloor = dir === 'down' && floor != null && slots.length > 0 && slots.every(sl => sl.bid <= floor + 0.01);
+      if (!slots.length || atFloor) {
+        // Ставку менять нельзя (стратегия Ozon, кампания за заказ, минимум) — снижения копим, решаем по кампании ниже.
+        if (mp === 'ozon' && dir === 'down') budgetDown.push({ sku: it.sku, article: p?.article ?? it.article ?? it.sku, spend: s?.spend ?? 0, factor,
+          why: atFloor ? `${why.replace('Ставку снижаем пропорционально разрыву', 'Снижать надо пропорционально разрыву')}. Ставка уже ${rub(slots[0].bid)} — ниже ${rub(floor!)} Ozon не принимает` : why, rule, level, atFloor });
         return;
       }
       for (const sl of slots) {
@@ -443,6 +460,8 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
         let next = sl.bid * factor;
         // К потолку ставки спускаемся, но не ниже самого потолка.
         if (rule === 'above_bid_ceiling' && ceil) next = Math.max(next, ceil.max);
+        // И не ниже минимальной ставки площадки — меньше кабинет не примет.
+        if (floor != null && dir === 'down') next = Math.max(next, floor);
         next = mp === 'wb' && c.payment === 'cpm' ? Math.round(next) : r2(next);
         if (dir === 'up' && next <= sl.bid) continue;
         if (dir === 'down' && next >= sl.bid) continue;
@@ -464,15 +483,28 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
       const share = total > 0 ? bad / total : 0;
       const checks = budgetDown.map(b => `${b.article}: ${b.why}`);
       if (share >= 0.6) {
-        const f = clampDown(budgetDown.reduce((t, b) => t + b.factor * b.spend, 0) / (bad || 1));
-        const next = r2(c.weeklyBudget * f);
+        const econF = budgetDown.reduce((t, b) => t + b.factor * b.spend, 0) / (bad || 1);
+        // Ориентир по конкурентам (замечание менеджера Ozon 22.10): их оценочный расход в неделю.
+        // Экономика задаёт потолок, конкуренты — к чему стремиться; шаг за раз — не больше −30%.
+        const comp = budgetDown.length === 1 ? ctx.compSpend.get(budgetDown[0].sku) ?? null : null;
+        const target = comp ? Math.min(c.weeklyBudget * econF, comp.weekly) : c.weeklyBudget * econF;
+        const f = clampDown(target / c.weeklyBudget);
+        const next = Math.round(c.weeklyBudget * f / 10) * 10;
+        if (comp) {
+          checks.push(`расход конкурентов на рекламу (оценка: выручка за 7 дн × их ДРР, «Товары на Ozon»), медиана по ${comp.n}: ~${rub(comp.weekly)} в неделю (~${rub(comp.weekly / 7)} в день), их ДРР ~${(comp.drr ?? 0).toLocaleString('ru-RU')}%`);
+          checks.push(...comp.list.slice(0, 5));
+          checks.push(`наш расход за 7 дн: ${rub(total)}`);
+        }
+        const goal = comp && Math.round(comp.weekly) < next ? ` Ориентир по конкурентам — ~${rub(comp.weekly)} в неделю; идём к нему шагами не больше 30%.` : '';
         out.push({
           mp, campaignId: c.id, sku: null, kind: 'weekly_budget', placement: null, fromValue: c.weeklyBudget, toValue: next,
           rule: budgetDown[0].rule, level: budgetDown.some(b => b.level === 'critical') ? 'critical' : 'warn',
-          title: `Снизить недельный бюджет ${rub(c.weeklyBudget)} → ${rub(next)} (−${Math.round((1 - f) * 100)}%)`,
-          reason: `${budgetDown.length === 1 ? budgetDown[0].why : `У ${budgetDown.length} товаров кампании реклама выходит за экономику`} — это ${Math.round(share * 100)}% расхода кампании. Ставку ведёт Ozon (${c.bidType ?? 'стратегия'}), поэтому сдерживаем бюджетом`,
+          title: `Снизить недельный бюджет ${rub(c.weeklyBudget)} → ${rub(next)} (−${Math.round((1 - next / c.weeklyBudget) * 100)}%)`,
+          reason: `${budgetDown.length === 1 ? budgetDown[0].why : `У ${budgetDown.length} товаров кампании реклама выходит за экономику`} — это ${Math.round(share * 100)}% расхода кампании. ${budgetDown.every(b => b.atFloor) ? 'Ставка на минимуме, поэтому' : `Ставку ведёт Ozon (${c.bidType ?? 'стратегия'}), поэтому`} сдерживаем бюджетом.${goal}`,
           fp: `${campFp}|weekly_budget`,
-          details: det({ checks, missing: [], confidence: 'medium', alternative: 'вынести проблемные товары в отдельную кампанию', risk: 'бюджет ограничит и нормальные товары кампании', rollback: 'вернуть бюджет, если прибыль товаров кампании за 3 дня упала' }),
+          details: det({ checks, missing: comp ? [] : ['расход конкурентов на рекламу (нет подтверждённых конкурентов с данными «Товаров на Ozon»)'],
+            confidence: 'medium', alternative: 'вынести проблемные товары в отдельную кампанию', risk: comp ? 'оценка расхода конкурентов приблизительная: их выручка и ДРР — из аналитики Ozon, не из их кабинета; бюджет ограничит показы' : 'бюджет ограничит и нормальные товары кампании',
+            rollback: 'вернуть бюджет, если прибыль товаров кампании за 3 дня упала' }),
         });
       } else {
         out.push({
@@ -513,7 +545,7 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
 
 /** Контекст этапа В по площадке: край маржи, конкуренты с витрины, нормы ДРР категорий Ozon. */
 export async function buildCtx(mp: AdMp, ov: Ads2Overview): Promise<AutopilotCtx> {
-  const ctx: AutopilotCtx = { ...EMPTY_CTX, marginFloorPct: marginThresholds(mp).floor, comps: new Map(), benchDrr: new Map(), stat28: new Map(), skuCr: new Map() };
+  const ctx: AutopilotCtx = { ...EMPTY_CTX, marginFloorPct: marginThresholds(mp).floor, comps: new Map(), benchDrr: new Map(), stat28: new Map(), skuCr: new Map(), compSpend: new Map() };
   // 28 дней «кампания × товар»: сравнение с 7 днями, конверсия для редких заказов, медианы воронки.
   try {
     const rows = campaignStats(mp, mskDate(27), mskDate(0), true);
@@ -550,6 +582,19 @@ export async function buildCtx(mp: AdMp, ov: Ads2Overview): Promise<AutopilotCtx
     }
   } catch { /* без конкурентов правила работают как раньше */ }
   if (mp === 'ozon') {
+    // Расход конкурентов на рекламу в неделю — оценка по «Товарам на Ozon»: выручка за 7 дней × ДРР.
+    try {
+      const fmt = (v: number) => `${Math.round(v).toLocaleString('ru-RU')} ₽`;
+      for (const w of getCompetitors('ozon').watch ?? []) {
+        const est = (w.links ?? []).filter(l => l.status === 'active' && l.gmv != null && l.drr != null && (l.ordersDays ?? 7) === 7)
+          .map(l => ({ spend: l.gmv! * l.drr! / 100, drr: l.drr!, title: l.title || l.url }));
+        if (!est.length) continue;
+        const med = (xs: number[]) => { const a = [...xs].sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+        const v = { weekly: Math.round(med(est.map(e => e.spend))), drr: r2(med(est.map(e => e.drr))), n: est.length,
+          list: est.sort((a, b) => b.spend - a.spend).map(e => `${e.title.slice(0, 50)}: ~${fmt(e.spend / 7)}/день (ДРР ${r2(e.drr).toLocaleString('ru-RU')}%)`) };
+        for (const k of [w.ourId, w.key]) if (k) ctx.compSpend.set(String(k), v);
+      }
+    } catch { /* конкурентов нет — бюджет считается только из экономики */ }
     try {
       for (const cat of getCompetitors('ozon').ozon?.categories ?? []) {
         if (cat.benchmark.drr == null) continue;

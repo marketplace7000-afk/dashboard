@@ -127,6 +127,23 @@ async function main() {
   const s8 = buildProposals({ ...overview([oz([ozItem('138', stat({ spend: 17000, orders: 17, revenue: 85000 })), ozItem('139', stat({ spend: 3000, orders: 10, revenue: 50000 }))])], [prod('138', { drr: 20 }), prod('139')]), mp: 'ozon' });
   check('убыточный товар — бо́льшая часть расхода → бюджет вниз по расчёту', by('37', undefined, s8).map(x => [x[0], x[1], x[3]]), [['weekly_budget', 'above_allowed_cpo', 7000]]);
 
+  // Замечание менеджера Ozon (MANIC-STICK-GREY-HX-2607, 22.10): ставка уже 10 ₽ — ниже Ozon не даёт;
+  // вместо «10 → 7 ₽» — недельный бюджет, ориентир — расход конкурентов (выручка × ДРР).
+  const ozCpc = (bid: number, s: Ads2Stat) => camp('40', [{ ...item('140', 0, s), bidSearch: null, bid }], { mp: 'ozon', payment: 'cpc', bidType: 'MAX_CLICKS', weeklyBudget: 35000,
+    can: { pause: true, start: false, bid: true, dailyLimit: false, weeklyBudget: true } });
+  const bad = stat({ clicks: 3733, spend: 34967, orders: 29, revenue: 206581 });
+  const f1 = buildProposals({ ...overview([ozCpc(10, bad)], [prod('140', { drr: 17, econ: econ({ allowedCpo: 478.67, allowedDrr: 5 }) })]), mp: 'ozon' });
+  check('ставка на минимуме 10 ₽ → не «10 → 7», а недельный бюджет −30%', f1.map(p => [p.kind, p.fromValue, p.toValue]), [['weekly_budget', 35000, 24500]]);
+  const f2 = buildProposals({ ...overview([ozCpc(10, bad)], [prod('140', { drr: 17, econ: econ({ allowedCpo: 478.67, allowedDrr: 5 }) })]), mp: 'ozon' },
+    { ...EMPTY_CTX, compSpend: new Map([['140', { weekly: 30000, drr: 5.6, n: 5, list: ['конкурент: ~4 286 ₽/день (ДРР 5,6%)'] }]]) });
+  check('ориентир конкурентов 30 000 ₽ ниже экономики? нет — экономика строже, −30%', f2.map(p => p.toValue), [24500]);
+  const f3 = buildProposals({ ...overview([ozCpc(10, stat({ clicks: 3733, spend: 34967, orders: 60, revenue: 306581 }))], [prod('140', { drr: 17, econ: econ({ allowedCpo: 550, allowedDrr: 5 }) })]), mp: 'ozon' },
+    { ...EMPTY_CTX, compSpend: new Map([['140', { weekly: 30000, drr: 5.6, n: 5, list: ['конкурент: ~4 286 ₽/день (ДРР 5,6%)'] }]]) });
+  check('экономика просит −5%, конкуренты тратят 30 000 → бюджет к 30 000', f3.map(p => p.toValue), [30000]);
+  check('в карточке — расход конкурентов в день', f3[0]?.details?.checks.some(c => c.includes('/день')) ?? false, true);
+  const f4 = buildProposals({ ...overview([ozCpc(12, bad)], [prod('140', { drr: 17, econ: econ({ allowedCpo: 478.67, allowedDrr: 5 }) })]), mp: 'ozon' });
+  check('ставка 12 ₽ → не ниже минимума 10 ₽', f4.map(p => [p.kind, p.toValue]), [['bid', 10]]);
+
   const over = buildProposals(overview([camp('2', [item('102', 200, stat({ spend: 500, orders: 5, revenue: 50000 }))])], [prod('102')], 7.5));
   check('площадка выше бюджета (7,5% при 5%) — не повышаем', over.filter(p => p.kind === 'bid').length, 0);
   // Допустимый заказ 600 ₽; факт 3000/4 = 750 ₽ → вниз на 20% (600/750).

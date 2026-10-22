@@ -4,7 +4,7 @@ import {
   MagnifyingGlassIcon, CaretDownIcon, CaretUpIcon, ArrowSquareOutIcon, XIcon, ProhibitIcon,
 } from '@phosphor-icons/react';
 import { apiPost, errText } from '../../api/http';
-import { nf1, rub, num, pct, ddmm, kRub, ProductCell } from '../ads2ui';
+import { nf1, rub, rub2, num, pct, ddmm, kRub, ProductCell } from '../ads2ui';
 import { NO_ADS_REASON_LABEL, type Ads2Overview, type Ads2Product } from '../../../shared/ads2';
 import { IssueIcon, StatusChip, type SetToast } from './shared';
 
@@ -102,6 +102,8 @@ export function Products({ d, openProduct, onChanged, setToast }: {
               <th className="ad2-num">Заказы</th>
               {th('revenue', 'Заказано')}
               {th('spend', 'Реклама')}
+              <th className="ad2-num" title="Клики по рекламе за период — из статистики кампаний">Клики</th>
+              <th className="ad2-num" title="Добавления в корзину после рекламы за период — из статистики кампаний">Корзины</th>
               {th('drr', 'ДРР')}
               <th className="ad2-num" title="Доля заказов, пришедших из рекламы">Из рекламы</th>
               <th className="ad2-num" title={`Карточка → корзина. Медиана площадки ${pct(d.medians.pdpToCart)}`}>В корзину</th>
@@ -120,6 +122,8 @@ export function Products({ d, openProduct, onChanged, setToast }: {
                 <td className="ad2-num">{num(p.orders)}</td>
                 <td className="ad2-num">{rub(p.revenue)}</td>
                 <td className="ad2-num">{p.spend ? rub(p.spend) : <span className="muted">–</span>}</td>
+                <td className="ad2-num">{p.ad ? num(p.ad.clicks) : <span className="muted">–</span>}</td>
+                <td className="ad2-num">{p.ad ? num(p.ad.carts) : <span className="muted">–</span>}</td>
                 <td className={`ad2-num ${p.drr != null && p.drr > 10 ? 'ad2-bad' : ''}`}>{pct(p.drr)}</td>
                 <td className="ad2-num">{pct(p.advShare)}</td>
                 <td className={`ad2-num ${p.issues.some(i => i.code === 'card_to_cart') ? 'ad2-warn' : ''}`}>{pct(p.pdpToCart)}</td>
@@ -227,6 +231,8 @@ export function ProductDrawer({ d, p, onClose, onChanged, setToast, openCampaign
           <div><span className="muted">Заказы</span><b>{num(p.orders)} · {kRub(p.revenue)}</b></div>
           <div><span className="muted">Реклама</span><b>{rub(p.spend)} · ДРР {pct(p.drr)}</b></div>
           <div><span className="muted">Из рекламы</span><b>{num(p.advOrders)} зак · {pct(p.advShare)}</b></div>
+          <div title="Статистика кампаний за период"><span className="muted">Реклама: показы · клики · корзины</span><b>{p.ad ? `${num(p.ad.views)} · ${num(p.ad.clicks)} · ${num(p.ad.carts)}` : '–'}</b>
+            {p.ad && <span className="muted ad2-small">CTR {pct(p.ad.ctr)} · CPC {rub2(p.ad.cpc)} · CR {pct(p.ad.cr)}</span>}</div>
           <div title="К продаже = наличие − резерв, по API площадки; снимок раз в день (РНП)"><span className="muted">Остаток к продаже</span><b>{num(p.stock)} шт · {p.daysOfStock == null ? '–' : `${p.daysOfStock} дн`}</b>
             <span className="muted ad2-small">FBO {num(p.stockFbo)} · FBS {num(p.stockFbs)}{p.outSince ? ` · нет с ${ddmm(p.outSince)}` : ''}</span></div>
           <div><span className="muted">Цена · маржа</span><b>{rub(p.price)} · {pct(p.marginPct)}</b></div>

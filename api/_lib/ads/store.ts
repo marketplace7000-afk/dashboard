@@ -97,6 +97,10 @@ export function adsDb(): any | null {
     // 14.10: архив товара (карточки под самовыкуп, дубли) — скрыт со всех экранов «Рекламы».
     const flagCols = (db.prepare('PRAGMA table_info(ad_product_flag)').all() as any[]).map(c => c.name);
     if (!flagCols.includes('archived')) db.exec('ALTER TABLE ad_product_flag ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
+    // 22.10: WB отдаёт по товару ещё заказанные штуки (shks) и отмены (canceled) — как в кабинете.
+    const statCols = (db.prepare('PRAGMA table_info(ad_stat_day)').all() as any[]).map(c => c.name);
+    if (!statCols.includes('shks')) db.exec('ALTER TABLE ad_stat_day ADD COLUMN shks REAL');
+    if (!statCols.includes('canceled')) db.exec('ALTER TABLE ad_stat_day ADD COLUMN canceled REAL');
     return db;
   } catch (e) {
     console.warn('[ads-store] sqlite init failed:', (e as Error).message);
@@ -254,7 +258,9 @@ export function patchItemBid(mp: AdMp, campaignId: string, sku: string, p: { bid
   }
 }
 
-export type CampaignStat = { campaign_id: string; sku: string | null; views: number; clicks: number; spend: number; carts: number; orders: number; revenue: number; avg_pos: number | null; days: number };
+export type CampaignStat = { campaign_id: string; sku: string | null; views: number; clicks: number; spend: number; carts: number; orders: number; revenue: number; avg_pos: number | null; days: number;
+  /** WB: заказанные штуки и отмены; у Ozon нет — null. */
+  shks: number | null; canceled: number | null };
 
 /** Сумма статистики за период: по кампании (sku = null) или по кампании × товару. */
 export function campaignStats(mp: AdMp, from: string, to: string, bySku = false): CampaignStat[] {
@@ -263,6 +269,7 @@ export function campaignStats(mp: AdMp, from: string, to: string, bySku = false)
   return d.prepare(`SELECT campaign_id, ${bySku ? 'sku' : 'NULL AS sku'},
       ROUND(SUM(views)) AS views, ROUND(SUM(clicks)) AS clicks, ROUND(SUM(spend), 2) AS spend,
       ROUND(SUM(carts), 1) AS carts, ROUND(SUM(orders), 1) AS orders, ROUND(SUM(revenue), 2) AS revenue,
+      SUM(shks) AS shks, SUM(canceled) AS canceled,
       ROUND(SUM(avg_pos * views) / NULLIF(SUM(CASE WHEN avg_pos IS NOT NULL THEN views END), 0), 1) AS avg_pos,
       COUNT(DISTINCT date) AS days
     FROM ad_stat_day WHERE mp = ? AND date >= ? AND date <= ?
@@ -295,6 +302,7 @@ export function spendByDay(mp: AdMp, from: string, to: string): { date: string; 
 export type StatDayRow = {
   date: string; campaign_id: string; sku: string;
   views: number; clicks: number; spend: number; carts: number; orders: number; revenue: number; avg_pos: number | null;
+  shks?: number | null; canceled?: number | null;
 };
 
 /**
@@ -306,8 +314,8 @@ export function saveStatDays(mp: AdMp, rows: StatDayRow[]): number {
   const d = adsDb();
   if (!d || !rows.length) return 0;
   const del = d.prepare('DELETE FROM ad_stat_day WHERE mp = ? AND date = ? AND campaign_id = ?');
-  const ins = d.prepare(`INSERT OR REPLACE INTO ad_stat_day (mp, date, campaign_id, sku, views, clicks, spend, carts, orders, revenue, avg_pos)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const ins = d.prepare(`INSERT OR REPLACE INTO ad_stat_day (mp, date, campaign_id, sku, views, clicks, spend, carts, orders, revenue, avg_pos, shks, canceled)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const pairs = new Set(rows.map(r => `${r.campaign_id}\u0000${r.date}`));
   const r2 = (v: number) => Math.round(v * 100) / 100;
   d.exec('BEGIN');
@@ -315,7 +323,7 @@ export function saveStatDays(mp: AdMp, rows: StatDayRow[]): number {
     for (const p of pairs) { const [cid, date] = p.split('\u0000'); del.run(mp, date, cid); }
     for (const r of rows) {
       ins.run(mp, r.date, r.campaign_id, r.sku, r2(r.views), r2(r.clicks), r2(r.spend), r2(r.carts), r2(r.orders), r2(r.revenue),
-        r.avg_pos == null ? null : r2(r.avg_pos));
+        r.avg_pos == null ? null : r2(r.avg_pos), r.shks == null ? null : r2(r.shks), r.canceled == null ? null : r2(r.canceled));
     }
     d.exec('COMMIT');
   } catch (e) {

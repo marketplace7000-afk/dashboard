@@ -19,7 +19,7 @@ function check(name: string, actual: unknown, expected: unknown): void {
 
 const stat = (s: Partial<Ads2Stat>): Ads2Stat => {
   const b = { views: 10000, clicks: 200, spend: 0, carts: 0, orders: 0, revenue: 0, ...s };
-  return { ...b, ctr: null, cpc: null, cpo: null, drr: b.revenue > 0 ? Math.round((b.spend / b.revenue) * 10000) / 100 : null, avgPos: null };
+  return { cpm: null, cartRate: null, cartToOrder: null, cr: null, shks: null, canceled: null, ...b, ctr: null, cpc: null, cpo: null, drr: b.revenue > 0 ? Math.round((b.spend / b.revenue) * 10000) / 100 : null, avgPos: null };
 };
 const camp = (id: string, items: Ads2Campaign['items'], over: Partial<Ads2Campaign> = {}): Ads2Campaign => ({
   mp: 'wb', id, name: `К${id}`, status: 'active', statusCode: 9, payment: 'cpm', bidType: 'manual',
@@ -33,7 +33,7 @@ const prod = (sku: string, o: Partial<Ads2Product> = {}): Ads2Product => ({
   key: sku, adSku: sku, article: `A-${sku}`, name: sku, photo: '', category: '', link: null,
   orders: 10, revenue: 50000, spend: 1000, drr: 2, advOrders: 5, advShare: 50, stock: 500, daysOfStock: 60,
   stockFbo: null, stockFbs: null, outSince: null, spendSinceOut: 0,
-  cardViews: null, carts: null, pdpToCart: null, cartToOrder: null, avgPos: null, price: 5000, marginPct: 30, marginRub: 1500,
+  cardViews: null, carts: null, pdpToCart: null, cartToOrder: null, avgPos: null, ad: null, price: 5000, marginPct: 30, marginRub: 1500,
   campaigns: [], flag: null, archived: false, issues: [], series: { orders: [], spend: [] }, ...o,
 });
 

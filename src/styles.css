@@ -1646,6 +1646,12 @@ code {
 .ad2-dates { display: inline-flex; gap: 8px; align-items: center; font-size: 16.5px; color: var(--muted); }
 .ad2-dates input { font: inherit; color: var(--text); padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .ad2-range { font-size: 16.5px; color: var(--muted); white-space: nowrap; }
+/* «Кампании»: выбор колонок (22.10.2026) */
+.ad2-colpick { position: relative; margin-left: auto; }
+.ad2-colpick-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 300px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px;
+  padding: 12px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(17, 20, 24, .12); font-size: 16px; }
+.ad2-colpick-menu label { display: flex; gap: 6px; align-items: center; cursor: pointer; white-space: nowrap; }
+.ad2-colpick-foot { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--border); }
 .ad2 .card h2 { font-size: 19.5px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 /* Раздел «Конкуренты» (15.10.2026) */

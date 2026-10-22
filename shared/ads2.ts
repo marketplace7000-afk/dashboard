@@ -23,6 +23,10 @@ export type Ads2Budget = {
 export type Ads2Stat = {
   views: number; clicks: number; spend: number; carts: number; orders: number; revenue: number;
   ctr: number | null; cpc: number | null; cpo: number | null; drr: number | null; avgPos: number | null;
+  /** 22.10.2026 — как в кабинете: цена 1000 показов, клик → корзина, корзина → заказ, клик → заказ (CR), %. */
+  cpm: number | null; cartRate: number | null; cartToOrder: number | null; cr: number | null;
+  /** WB: заказанные штуки и отмены; у Ozon нет — null. */
+  shks: number | null; canceled: number | null;
 };
 
 export type Ads2CampaignItem = {
@@ -68,6 +72,8 @@ export type Ads2Product = {
   outSince: string | null; spendSinceOut: number;
   cardViews: number | null; carts: number | null; pdpToCart: number | null; cartToOrder: number | null;
   avgPos: number | null;
+  /** Реклама товара за период по всем кампаниям — из статистики кабинета (показы, клики, корзины, заказы). */
+  ad: Ads2Stat | null;
   price: number | null; marginPct: number | null; marginRub: number | null;
   campaigns: { id: string; name: string; status: string }[];
   flag: { reason: string; note: string | null } | null;

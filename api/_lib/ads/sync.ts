@@ -67,7 +67,7 @@ export function parseWbAdverts(json: unknown): { campaigns: CampaignRow[]; items
   return { campaigns, items };
 }
 
-type NmRow = { nmId?: number; views?: number; clicks?: number; sum?: number; orders?: number; sum_price?: number; atbs?: number };
+type NmRow = { nmId?: number; views?: number; clicks?: number; sum?: number; orders?: number; sum_price?: number; atbs?: number; shks?: number; canceled?: number };
 type FsDay = { date?: string; atbs?: number; nm?: NmRow[]; nms?: NmRow[]; apps?: { atbs?: number; nm?: NmRow[]; nms?: NmRow[] }[] };
 type FsCampaign = { advertId?: number; days?: FsDay[]; boosterStats?: { date?: string; nm?: number; avg_position?: number }[] };
 
@@ -104,13 +104,15 @@ export function parseWbFullstats(json: unknown): StatDayRow[] {
           const row = acc.get(key) ?? {
             date, campaign_id: cid, sku: String(r.nmId),
             views: 0, clicks: 0, spend: 0, carts: 0, orders: 0, revenue: 0,
-            avg_pos: pos.get(`${date}|${r.nmId}`) ?? null,
+            avg_pos: pos.get(`${date}|${r.nmId}`) ?? null, shks: 0, canceled: 0,
           };
           row.views += num(r.views);
           row.clicks += num(r.clicks);
           row.spend += num(r.sum);
           row.orders += num(r.orders);
           row.revenue += num(r.sum_price);
+          row.shks = (row.shks ?? 0) + num(r.shks);
+          row.canceled = (row.canceled ?? 0) + num(r.canceled);
           row.carts += hasOwnAtbs ? num(r.atbs) : (clicks > 0 ? s.atbs * num(r.clicks) / clicks : 0);
           acc.set(key, row);
         }

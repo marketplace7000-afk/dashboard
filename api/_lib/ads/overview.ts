@@ -39,6 +39,9 @@ function toStat(s: Omit<CampaignStat, 'campaign_id' | 'sku' | 'days'> | null): A
     views: s.views, clicks: s.clicks, spend: r2(s.spend), carts: s.carts, orders: s.orders, revenue: r2(s.revenue),
     ctr: pct(s.clicks, s.views), cpc: s.clicks > 0 ? r2(s.spend / s.clicks) : null,
     cpo: s.orders > 0 ? r2(s.spend / s.orders) : null, drr: pct(s.spend, s.revenue), avgPos: s.avg_pos,
+    cpm: s.views > 0 ? r2(s.spend / s.views * 1000) : null, cartRate: pct(s.carts, s.clicks),
+    cartToOrder: pct(s.orders, s.carts), cr: pct(s.orders, s.clicks),
+    shks: s.shks == null ? null : Math.round(s.shks), canceled: s.canceled == null ? null : Math.round(s.canceled),
   };
 }
 
@@ -49,7 +52,9 @@ function addStat(acc: CampaignStat | undefined, s: CampaignStat): CampaignStat {
   const pos = acc.avg_pos != null && s.avg_pos != null && views > 0
     ? (acc.avg_pos * acc.views + s.avg_pos * s.views) / views : (acc.avg_pos ?? s.avg_pos);
   return { ...acc, views, clicks: acc.clicks + s.clicks, spend: acc.spend + s.spend, carts: acc.carts + s.carts,
-    orders: acc.orders + s.orders, revenue: acc.revenue + s.revenue, avg_pos: pos == null ? null : r2(pos) };
+    orders: acc.orders + s.orders, revenue: acc.revenue + s.revenue, avg_pos: pos == null ? null : r2(pos),
+    shks: acc.shks == null && s.shks == null ? null : (acc.shks ?? 0) + (s.shks ?? 0),
+    canceled: acc.canceled == null && s.canceled == null ? null : (acc.canceled ?? 0) + (s.canceled ?? 0) };
 }
 
 /** Сумма метрики РНП по товару за индексы дней. */
@@ -182,6 +187,10 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14, span?: { from?: stri
     campsBySku.set(it.sku, a);
   }
 
+  // Реклама товара по всем кампаниям за период (22.10.2026): клики и корзины — как в кабинете.
+  const adBySku = new Map<string, CampaignStat>();
+  for (const s of statsBySku) if (s.sku) adBySku.set(s.sku, addStat(adBySku.get(s.sku), s));
+
   const products: Ads2Product[] = [];
   for (const key of keys) {
     const ri = itemByKey.get(key);
@@ -222,6 +231,7 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14, span?: { from?: stri
       pdpToCart: cardViews && carts != null ? pct(carts, cardViews) : null,
       cartToOrder: carts ? pct(orders, carts) : null,
       avgPos: posW ? r2(posS! / posW) : null,
+      ad: adSku ? toStat(adBySku.get(adSku) ?? null) : null,
       price: pv?.price ?? rnp.sellerPrices?.[up(ri?.article ?? key)] ?? null,
       marginPct: pv?.marginPct ?? null, marginRub: pv?.marginRub ?? null,
       campaigns: adSku ? campsBySku.get(adSku) ?? [] : [],

@@ -241,6 +241,23 @@ export async function collectFinHistory(): Promise<string> {
   return out.join(' · ');
 }
 
+/**
+ * Выкупы WB по дням и артикулам из финотчёта — для РНП (22.10.2026): так же считает
+ * сервис 10X — по дате операции, по цене продавца до СПП, за вычетом возвратов.
+ */
+export function getWbBuyouts(from: string, to: string): { coveredTo: string | null; rows: Array<{ date: string; article: string; rev: number; units: number }> } {
+  const d = getDb();
+  if (!d) return { coveredTo: null, rows: [] };
+  const by = new Map<string, { date: string; article: string; rev: number; units: number }>();
+  for (const r of d.prepare(`SELECT date, sku, metric, value FROM fin_fact WHERE mp = 'wb' AND date >= ? AND date <= ? AND sku != '' AND metric IN ('rev', 'units')`).all(from, to) as Array<{ date: string; sku: string; metric: Metric; value: number }>) {
+    const k = `${r.date}|${r.sku}`;
+    const e = by.get(k) ?? { date: r.date, article: r.sku, rev: 0, units: 0 };
+    if (r.metric === 'rev') e.rev += Number(r.value) || 0; else e.units += Number(r.value) || 0;
+    by.set(k, e);
+  }
+  return { coveredTo: metaGet('wb:covered_to'), rows: [...by.values()] };
+}
+
 export type FinRange = {
   /** Дней с данными из дней периода. */
   days: number; total: number;

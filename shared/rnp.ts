@@ -36,15 +36,18 @@ const BOTH: RnpMp[] = ['wb', 'ozon'];
 
 export const RNP_METRICS: RnpMetric[] = [
   // ── Продажи ──
-  { key: 'ordered_cnt', label: 'Заказано, шт', group: 'Продажи', unit: 'pcs', kind: 'sum', better: 'up', mps: BOTH },
+  { key: 'ordered_cnt', label: 'Заказано, шт', group: 'Продажи', unit: 'pcs', kind: 'sum', better: 'up', mps: BOTH,
+    hint: 'WB — «Заказали, шт» из воронки, как в аналитике кабинета и в 10X; Ozon — «Заказано товаров» из аналитики' },
   { key: 'ordered_amount', label: 'Заказано, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', better: 'up', mps: BOTH,
-    hint: 'WB — цена со скидкой продавца (без СПП); Ozon — «Заказано на сумму» из аналитики' },
+    hint: 'По цене продавца, до СПП. WB — «Заказали на сумму» из воронки, как в кабинете и в 10X; Ozon — «Заказано на сумму» из аналитики' },
   { key: 'avg_bill', label: 'Средний чек, ₽', group: 'Продажи', unit: 'rub', kind: 'ratio', num: 'ordered_amount', den: 'ordered_cnt', mps: BOTH },
   { key: 'ma7_ordered', label: 'Заказы в день, ср. 7 дн', short: 'Ср. 7 дн', group: 'Продажи', unit: 'num', kind: 'last', better: 'up', mps: BOTH,
     hint: 'Среднее число заказов в день за 7 дней, заканчивающихся этой датой' },
   { key: 'cancel_cnt', label: 'Отмены, шт', group: 'Продажи', unit: 'pcs', kind: 'sum', better: 'down', mps: BOTH },
-  { key: 'bought_cnt', label: 'Выкуплено, шт', group: 'Продажи', unit: 'pcs', kind: 'sum', better: 'up', mps: ['wb'] },
-  { key: 'bought_amount', label: 'Выкуплено, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', better: 'up', mps: ['wb'] },
+  { key: 'bought_cnt', label: 'Выкуплено, шт', group: 'Продажи', unit: 'pcs', kind: 'sum', better: 'up', mps: ['wb'],
+    hint: 'По финотчёту WB на дату операции, за вычетом возвратов (как в 10X). Последние 1–2 дня пусты, пока WB не выпустит отчёт' },
+  { key: 'bought_amount', label: 'Выкуплено, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', better: 'up', mps: ['wb'],
+    hint: 'По финотчёту WB: цена продавца до СПП, за вычетом возвратов (как в 10X). Последние 1–2 дня пусты, пока WB не выпустит отчёт' },
   { key: 'delivered_cnt', label: 'Доставлено, шт', group: 'Продажи', unit: 'pcs', kind: 'sum', better: 'up', mps: ['ozon'] },
   { key: 'return_cnt', label: 'Возвраты, шт', group: 'Продажи', unit: 'pcs', kind: 'sum', better: 'down', mps: BOTH },
   { key: 'spp_pct', label: 'СПП / соинвест, %', short: 'СПП', group: 'Продажи', unit: 'pct', kind: 'ratio', num: 'spp_disc', den: 'spp_base', scale: 100, better: 'up', mps: BOTH,

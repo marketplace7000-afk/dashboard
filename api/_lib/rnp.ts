@@ -1091,6 +1091,69 @@ async function sellerPrices(mp: RnpMp): Promise<Record<string, number>> {
   return map;
 }
 
+type RnpRow = { date: string; sku: string; metric: string; value: number };
+
+/**
+ * Какие строки базы считать фактами РНП (22.10.2026, сверка с сервисом 10X):
+ *   • только настоящие товары — себестоимость заведена в «Складе»; товары для
+ *     выкупов (светильники, сифоны, 3KOEPHKI…) не учитываются ни в одном анализе;
+ *   • WB, заказы — из воронки (wbf_order_*), как «Заказали на сумму» в кабинете и в
+ *     10X: отчёт supplier/orders недосчитывал 5–25 % заказов в день. Дни без воронки —
+ *     по supplier/orders;
+ *   • WB, выкупы — из финотчёта (дата операции, цена продавца до СПП, минус
+ *     возвраты), как в 10X: отчёт «Продажи» давал +7 % за счёт других цен. Дни после
+ *     последнего финотчёта остаются пустыми, а не подменяются «Продажами».
+ * Отсюда читают все: экран РНП, Советник, обзор рекламы и сигналы.
+ */
+async function sourceRows(mp: RnpMp, raw: RnpRow[], items: any[], from: string, to: string, notes: string[]): Promise<RnpRow[]> {
+  const costs = getCosts();
+  const article = new Map(items.map(it => [String(it.sku), String(it.article || it.sku)]));
+  const realCache = new Map<string, boolean>();
+  const isReal = (sku: string) => {
+    let v = realCache.get(sku);
+    if (v === undefined) { v = !!resolveCost(article.get(sku) ?? sku, costs); realCache.set(sku, v); }
+    return v;
+  };
+  const fake = new Set<string>();
+  let out: RnpRow[] = [];
+  const funnelDays = mp === 'wb' ? new Set(raw.filter(r => r.metric === 'wbf_order_sum').map(r => r.date)) : new Set<string>();
+  for (const r of raw) {
+    if (!isReal(r.sku)) { if (r.metric === 'ordered_cnt' && r.value > 0) fake.add(r.sku); continue; }
+    if (mp === 'wb') {
+      if (r.metric === 'wbf_order_sum') { out.push({ ...r, metric: 'ordered_amount' }); continue; }
+      if (r.metric === 'wbf_order_cnt') { out.push({ ...r, metric: 'ordered_cnt' }); continue; }
+      if ((r.metric === 'ordered_amount' || r.metric === 'ordered_cnt') && funnelDays.has(r.date)) continue;
+    }
+    out.push(r);
+  }
+  if (mp === 'wb') {
+    const { getWbBuyouts } = await import('./finHistory');
+    const fin = getWbBuyouts(from, to);
+    if (fin.coveredTo) {
+      out = out.filter(r => r.metric !== 'bought_amount' && r.metric !== 'bought_cnt');
+      // Артикул финотчёта → nmId карточки. Артикул бывает у нескольких карточек — берём ту, у которой были заказы.
+      const ordered = new Set(raw.filter(r => r.metric === 'ordered_cnt' && r.value > 0).map(r => r.sku));
+      const nmByArticle = new Map<string, string>();
+      for (const [sku, art] of article) {
+        const k = art.toUpperCase();
+        if (!nmByArticle.has(k) || ordered.has(sku)) nmByArticle.set(k, sku);
+      }
+      let lost = 0;
+      for (const b of fin.rows) {
+        const nm = nmByArticle.get(b.article.toUpperCase());
+        if (!nm) { lost += b.rev; continue; }
+        if (!isReal(nm)) continue;
+        out.push({ date: b.date, sku: nm, metric: 'bought_amount', value: Math.round(b.rev * 100) / 100 });
+        out.push({ date: b.date, sku: nm, metric: 'bought_cnt', value: b.units });
+      }
+      notes.push(`Заказы WB — по воронке, как в кабинете; выкупы — по финотчёту WB (цена продавца до СПП, за вычетом возвратов), он есть по ${fin.coveredTo.split('-').reverse().join('.')}.`);
+      if (lost > 0) notes.push(`Выкупы на ${Math.round(lost).toLocaleString('ru-RU')} ₽ из финотчёта не сопоставились с карточками РНП.`);
+    }
+  }
+  if (fake.size) notes.push(`Не показаны товары для выкупов — без себестоимости в «Складе»: ${fake.size} шт.`);
+  return out;
+}
+
 export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise<RnpResponse> {
   const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
   let to = isDate(toIn) ? toIn! : mskDate(0);
@@ -1109,7 +1172,9 @@ export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise
 
   // Для «среднее за 7 дней» нужны 6 дней до начала периода.
   const preFrom = addDays(from, -6);
-  const rows = d.prepare('SELECT date, sku, metric, value FROM rnp_fact WHERE mp = ? AND date >= ? AND date <= ?').all(mp, preFrom, to) as Array<{ date: string; sku: string; metric: string; value: number }>;
+  const raw = d.prepare('SELECT date, sku, metric, value FROM rnp_fact WHERE mp = ? AND date >= ? AND date <= ?').all(mp, preFrom, to) as RnpRow[];
+  const items = d.prepare('SELECT * FROM rnp_item WHERE mp = ?').all(mp) as any[];
+  const rows = await sourceRows(mp, raw, items, preFrom, to, notes);
 
   const facts = res.facts;
   const present = new Set<string>();
@@ -1146,7 +1211,6 @@ export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise
     if (any) { (facts[sku] ??= {}).ma7_ordered = arr; present.add('ma7_ordered'); }
   }
 
-  const items = d.prepare('SELECT * FROM rnp_item WHERE mp = ?').all(mp) as any[];
   const known = new Set<string>();
   for (const it of items) {
     known.add(it.sku);

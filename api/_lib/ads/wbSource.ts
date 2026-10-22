@@ -11,6 +11,7 @@
 import { cacheGetNewestByPrefix, makeUpstreamCachePrefix } from '../cache';
 import { mskDate } from '../mskDate';
 import { AdFunnel, emptyFunnel } from './metrics';
+import { skuStatsByDay } from './store';
 
 type NmRow = { nmId: number; name?: string; views?: number; clicks?: number; sum?: number; orders?: number; sum_price?: number };
 // ⚠ У WB разбивка по товарам лежит в поле `nms`, а НЕ `nm`. Проверено на живом
@@ -76,6 +77,36 @@ let lastMiss: WbAdsMiss | null = null;
 export function wbAdsMissReason(): WbAdsMiss | null { return lastMiss; }
 
 export function getWbAdsByNm(days = 7): WbAdsByNm | null {
+  // 22.10.2026: метрики — из хранилища «Рекламы» (ad_stat_day). Свежее окно кэша
+  // бывает неполным (429 на часть кампаний) и занижало расход; хранилище копит
+  // строки по «кампания × день» и неполным ответом не стирается. Кэш — запасной путь
+  // и источник названий товаров.
+  const stored = skuStatsByDay('wb', isoDay(2 * days - 1), isoDay(0));
+  if (stored.length) {
+    const curFrom = isoDay(days - 1);
+    const current = new Map<number, AdFunnel>();
+    const previous = new Map<number, AdFunnel>();
+    const seen = new Set<string>();
+    for (const r of stored) {
+      const nmId = Number(r.sku);
+      if (!nmId) continue;
+      seen.add(r.date);
+      const map = r.date >= curFrom ? current : previous;
+      const f = map.get(nmId) ?? emptyFunnel();
+      f.views += num(r.views); f.clicks += num(r.clicks); f.spend += num(r.spend);
+      f.orders += num(r.orders); f.revenue += num(r.revenue); f.carts += num(r.carts);
+      map.set(nmId, f);
+    }
+    const names = new Map<number, string>();
+    for (const c of readFullStats() ?? []) for (const d of c.days ?? []) {
+      for (const n of [...(d.nms ?? d.nm ?? []), ...(d.apps ?? []).flatMap(a => a?.nms ?? a?.nm ?? [])]) {
+        if (n?.nmId && n.name && !names.has(n.nmId)) names.set(n.nmId, n.name);
+      }
+    }
+    lastMiss = null;
+    return { current, previous, names, daysCovered: seen.size };
+  }
+
   const campaigns = readFullStats();
   if (!campaigns) { lastMiss = 'no-cache'; return null; }
 

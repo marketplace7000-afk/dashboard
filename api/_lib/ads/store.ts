@@ -269,6 +269,19 @@ export function campaignStats(mp: AdMp, from: string, to: string, bySku = false)
     GROUP BY campaign_id${bySku ? ', sku' : ''}`).all(mp, from, to) as any[];
 }
 
+/**
+ * Статистика «товар × день» по всем кампаниям — для РНП (22.10.2026). Строки
+ * копятся проходами и не стираются неполным ответом площадки, поэтому РНП
+ * берёт рекламу WB отсюда, а не из одного окна кэша fullstats.
+ */
+export function skuStatsByDay(mp: AdMp, from: string, to: string): { date: string; sku: string; views: number; clicks: number; spend: number; carts: number; orders: number; revenue: number }[] {
+  const d = adsDb();
+  if (!d) return [];
+  return d.prepare(`SELECT date, sku, SUM(views) AS views, SUM(clicks) AS clicks, SUM(spend) AS spend,
+      SUM(carts) AS carts, SUM(orders) AS orders, SUM(revenue) AS revenue
+    FROM ad_stat_day WHERE mp = ? AND date >= ? AND date <= ? GROUP BY date, sku`).all(mp, from, to) as any[];
+}
+
 /** Расход по дням (для графика темпа бюджета). */
 export function spendByDay(mp: AdMp, from: string, to: string): { date: string; spend: number }[] {
   const d = adsDb();

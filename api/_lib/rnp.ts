@@ -31,6 +31,7 @@ import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { cacheGet, cacheSet, isFresh, cacheGetNewestByPrefix, makeUpstreamCachePrefix, makeUpstreamCacheKey } from './cache';
 import { mskDate } from './mskDate';
+import { skuStatsByDay } from './ads/store';
 import { fetchWithRetry } from './fetchRetry';
 import { listOzonFbsPostings } from './ozonFbsList';
 import { getUiState } from './uiState';
@@ -268,41 +269,34 @@ function collectWbSales(items: Map<string, RnpItem>): string {
   return `заказы WB: ${orders.length} заказов, ${sales.length} продаж → ${rows} значений`;
 }
 
-type NmRow = { nmId?: number; views?: number; clicks?: number; sum?: number; orders?: number; sum_price?: number };
-type WbAdDay = { date?: string; nm?: NmRow[]; nms?: NmRow[]; apps?: Array<{ nm?: NmRow[]; nms?: NmRow[] }> };
+/** Сколько дней рекламы WB переписывать за проход: окно fullstats 30 дн + запас. */
+const WB_ADS_DAYS = 35;
 
-/** Реклама WB по дням и товарам из прогретой статистики кампаний. */
+/**
+ * Реклама WB по дням и товарам — из хранилища «Рекламы» (ads.sqlite, ad_stat_day).
+ *
+ * 22.10.2026: раньше читали одно самое свежее окно кэша fullstats и целиком
+ * переписывали им 31 день. Если WB ответил 429 на часть кампаний, окно было
+ * неполным — и РНП (а за ней «Реклама → Товары») теряла расход WB за весь месяц
+ * (22.10 один такой прогрев оставил ~3–5 тыс ₽/день вместо 14–22 тыс по API). Хранилище
+ * заменяет строки по паре «кампания × день» и неполным ответом ничего не стирает;
+ * syncAds в цепочке крона идёт раньше collectRnp, так что данные свежие.
+ */
 function collectWbAds(): string {
-  const near = cacheGetNewestByPrefix<{ status: number; text: string }>(
-    makeUpstreamCachePrefix('wb:promotion', 'GET', 'adv/v3/fullstats', '', undefined),
-  );
-  if (!near || near.data.status >= 400) return 'реклама WB: кэша нет';
-  let campaigns: Array<{ days?: WbAdDay[] }> = [];
-  try { campaigns = JSON.parse(near.data.text); } catch { return 'реклама WB: битый кэш'; }
-  if (!Array.isArray(campaigns)) return 'реклама WB: неожиданный формат';
-
+  const to = mskDate(0);
+  const from = mskDate(WB_ADS_DAYS - 1);
+  const stats = skuStatsByDay('wb', from, to);
+  if (!stats.length) return 'реклама WB: в хранилище рекламы пусто';
   const facts: DayFacts = new Map();
   const days = new Set<string>();
-  for (const c of campaigns) {
-    for (const d of c.days ?? []) {
-      const date = String(d.date ?? '').slice(0, 10);
-      if (!date) continue;
-      // Разбивка лежит в `nms` (иногда `nm`), прямо в дне или внутри apps[] — см. ads/wbSource.ts.
-      const nms: NmRow[] = [...(d.nms ?? d.nm ?? []), ...(d.apps ?? []).flatMap(a => a?.nms ?? a?.nm ?? [])];
-      if (!nms.length) continue;
-      days.add(date);
-      for (const r of nms) {
-        if (!r?.nmId) continue;
-        const nm = String(r.nmId);
-        bump(facts, date, nm, 'adv_views', num(r.views));
-        bump(facts, date, nm, 'adv_clicks', num(r.clicks));
-        bump(facts, date, nm, 'adv_expenses', num(r.sum));
-        bump(facts, date, nm, 'adv_orders', num(r.orders));
-        bump(facts, date, nm, 'adv_revenue', num(r.sum_price));
-      }
-    }
+  for (const r of stats) {
+    days.add(r.date);
+    bump(facts, r.date, r.sku, 'adv_views', num(r.views));
+    bump(facts, r.date, r.sku, 'adv_clicks', num(r.clicks));
+    bump(facts, r.date, r.sku, 'adv_expenses', num(r.spend));
+    bump(facts, r.date, r.sku, 'adv_orders', num(r.orders));
+    bump(facts, r.date, r.sku, 'adv_revenue', num(r.revenue));
   }
-  if (!days.size) return 'реклама WB: в статистике нет разбивки по товарам';
   const rows = writeDays('wb', days, ['adv_views', 'adv_clicks', 'adv_expenses', 'adv_orders', 'adv_revenue'], facts);
   markCollected('wb:ads');
   return `реклама WB: ${days.size} дн → ${rows} значений`;

@@ -130,6 +130,12 @@ async function main() {
     // Пересчёт того же дня без товара 222: строка товара должна исчезнуть.
     store.saveStatDays('wb', rows.filter(r => r.sku !== '222'));
     check('пересчёт дня заменяет строки', store.statSummary()[0]?.rows, 1);
+    // Неполный ответ WB (429 на часть кампаний) несёт только другую кампанию —
+    // строки первой за тот же день остаются, РНП берёт сумму по товару из всех.
+    const day = rows[0].date;
+    store.saveStatDays('wb', [{ ...rows[0], campaign_id: '99', sku: '555', spend: 10 }]);
+    const byDay = store.skuStatsByDay('wb', day, day);
+    check('неполный ответ не стирает другие кампании', byDay.map(r => r.sku).sort(), [...new Set([...rows.filter(r => r.sku !== '222').map(r => r.sku), '555'])].sort());
 
     let err = '';
     try { store.setFlag('wb', '923646381', true, null, null, 'manager'); } catch (e) { err = (e as Error).message; }

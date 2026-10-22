@@ -311,7 +311,8 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
           <label className="cmp-check"><input type="checkbox" checked={showIgnored} onChange={e => setShowIgnored(e.target.checked)} /> показывать «не наших»</label>
         </div>
       </section>
-      {gone.length > 0 && (
+      {/* Плашку «Не видны покупателям» на листе Ozon владелец попросил убрать (22.10.2026). */}
+      {mp === 'wb' && gone.length > 0 && (
         <section className="card cmp-gone-card" role="alert">
           <div className="cmp-gone-t"><WarningOctagonIcon size={20} weight="fill" /> Не видны покупателям: {gone.length} {gone.length === 1 ? 'наша карточка' : 'наших карточек'} при остатке на складе</div>
           <p className="cmp-gone-p">Витрина {mp === 'wb' ? 'WB' : 'Ozon'} {gone.length === 1 ? 'её' : 'их'} не показывает: заказов и рекламных показов не будет. Проверьте в кабинете, не скрыта ли карточка,

@@ -138,24 +138,11 @@ async function fetchAll() {
   }
 }
 
-// Новый товар (23.10.2026, AFERIY-STAN-AF-P280-2kWh): цена уже есть, а справочник
-// (название, фото) в сохранённом наборе его не знает — строка без фото до 6 часов.
-// Такую «дырку» считаем устареванием и перезапрашиваем, но раз за открытие вкладки:
-// товар, по которому Ozon справочника не отдаёт вовсе, не должен гонять запросы.
-let holesRetried = false;
-function hasInfoHoles(): boolean {
-  if (holesRetried || !cache.prices.length) return false;
-  const known = new Set(cache.products.map(p => p.id));
-  if (cache.prices.every(p => known.has(p.product_id))) return false;
-  holesRetried = true;
-  return true;
-}
-
 /** Фоновая предзагрузка при входе в приложение: греем кэш заранее, чтобы
  *  вкладки Ozon открывались мгновенно (просьба клиента 20.07). */
 export function prefetchOzonBundle() {
   const STALE_MS = 6 * 60 * 60_000;
-  const isStale = !cache.fetchedAt || (Date.now() - cache.fetchedAt.getTime() > STALE_MS) || hasInfoHoles();
+  const isStale = !cache.fetchedAt || (Date.now() - cache.fetchedAt.getTime() > STALE_MS);
   if (isStale && !cache.loading) loadPromise ||= fetchAll();
 }
 
@@ -171,7 +158,7 @@ export function useLiveOzonBundle(): LiveOzonBundle & { refresh: () => void } {
     // 6 часов: фронт НЕ дёргает API сам, пока данным меньше 6ч.
     // Свежесть обеспечивает cron на сервере (1×/сутки) + ручная кнопка «Обновить».
     const STALE_MS = 6 * 60 * 60_000;
-    const isStale = !cache.fetchedAt || (Date.now() - cache.fetchedAt.getTime() > STALE_MS) || hasInfoHoles();
+    const isStale = !cache.fetchedAt || (Date.now() - cache.fetchedAt.getTime() > STALE_MS);
     if (isStale && !cache.loading) {
       loadPromise ||= fetchAll();
     }

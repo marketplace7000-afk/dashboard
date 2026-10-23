@@ -49,21 +49,6 @@ const MANUAL_GATE_MS = 5 * 60_000;
 const manualLastTry = new Map<string, number>();
 const manualInflight = new Map<string, Promise<{ status: number; ct: string; text: string } | null>>();
 
-// Ключ кэша не учитывает тело POST (кроме analytics/data), поэтому справочник
-// товаров Ozon (v3/product/info/list по списку product_id) лежит одним ответом на
-// любой список. Новый товар (23.10.2026, AFERIY-STAN-AF-P280-2kWh) уже был в ценах,
-// а справочник из кэша его не знал — лист цен показывал строку без фото и названия.
-// Если в закэшированном ответе нет хотя бы одного запрошенного товара — он устарел.
-export function cacheMissesRequestedIds(rest: string, body: string | undefined, text: string): boolean {
-  if (!rest.endsWith('product/info/list') || !body) return false;
-  try {
-    const want: string[] = (JSON.parse(body)?.product_id ?? []).map(String);
-    if (!want.length) return false;
-    const have = new Set((JSON.parse(text)?.items ?? []).map((i: any) => String(i?.id)));
-    return want.some(id => !have.has(id));
-  } catch { return false; }
-}
-
 // Query-строка для upstream/ключа кэша БЕЗ служебного `p`. На self-host server.ts
 // переписывает req.url в `/api/route?p=<полный-путь>&<origQs>`, поэтому наивное
 // `req.url.split('?')[1]` захватывает routing-параметр `p` и отравляет ключ кэша
@@ -205,17 +190,11 @@ export async function handleProxy(
   // страницы не штормят Ozon: реальный поход к API максимум раз в 30 мин на датасет.
   if (upstream.cacheMode === 'swr') {
     const cached = cacheKey ? await cacheGet<{ status: number; ct: string; text: string }>(cacheKey) : null;
-    // Кэш не покрывает запрошенные товары — идём в Ozon мимо гейта (см. cacheMissesRequestedIds).
-    const missing = !!cached && cacheMissesRequestedIds(rest, body, cached.data.text);
-    if (cached && isFresh(cached) && !missing) return serveCached(cached, 'HIT');
+    if (cached && isFresh(cached)) return serveCached(cached, 'HIT');
     if (!cacheKey) { /* не кэшируемо — провалимся в обычный fetch ниже */ }
     else {
-      // Короткий гейт и тут: товар, которого Ozon не отдаёт вовсе (удалён), не должен
-      // превращать каждое открытие страницы в поход к API.
-      const sinceTry = Date.now() - (swrLastTry.get(cacheKey) ?? 0);
-      const gateOpen = sinceTry >= (missing ? MANUAL_GATE_MS : SWR_GATE_MS);
-      // Чужой inflight по тому же ключу мог уйти с другим списком товаров — не подхватываем его.
-      let p = missing ? undefined : swrInflight.get(cacheKey);
+      const gateOpen = Date.now() - (swrLastTry.get(cacheKey) ?? 0) >= SWR_GATE_MS;
+      let p = swrInflight.get(cacheKey);
       if (!p && gateOpen) {
         swrLastTry.set(cacheKey, Date.now());
         p = (async () => {

@@ -70,6 +70,12 @@ export type OzonSkuAds = {
   days: number;
   count: number;
   fetchedAt: number;
+  /**
+   * 23.10.2026: все ли пачки кампаний вошли в отчёт. false — бюджет окна кончился
+   * или пачка упала, и части товаров в items нет. Таким отчётом нельзя перезаписывать
+   * день целиком (РНП 22.10 потеряла 16 из 28 товаров, в т.ч. PEDICURE-STICK-GMC253-GREY).
+   */
+  complete?: boolean;
 };
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -451,13 +457,15 @@ async function compute(fromDays: number, toDays: number): Promise<OzonSkuAds> {
 
   const items: Record<string, SkuAdRow> = {};
   let okChunks = 0;
+  let skipped = false;
   // Общий потолок на окно. Бюджеты на отдельный отчёт нарочно щедрые (Ozon
   // готовит десяток кампаний минутами), но без общего потолка одно застрявшее
   // окно заняло бы очередь на часы и задушило прогрев остальных.
   const deadline = Date.now() + WINDOW_BUDGET_MS;
   for (const [i, chunk] of chunks.entries()) {
     if (Date.now() > deadline) {
-      console.warn(`[ozon-sku-ads] бюджет окна исчерпан на пачке ${i + 1}/${chunks.length} — остальное доберём следующим проходом`);
+      console.warn(`[ozon-sku-ads] бюджет окна исчерпан на пачке ${i + 1}/${chunks.length} — отчёт неполный, остальное доберём следующим проходом`);
+      skipped = true;
       break;
     }
     try {
@@ -508,7 +516,7 @@ async function compute(fromDays: number, toDays: number): Promise<OzonSkuAds> {
     (unmapped ? `, без артикула=${unmapped}` : ''));
   if (okChunks && !count) console.warn('[ozon-sku-ads] отчёты получены, но товары не сопоставились с артикулами');
 
-  return { items: byOffer, days: fromDays - toDays + 1, count, fetchedAt: Date.now() };
+  return { items: byOffer, days: fromDays - toDays + 1, count, fetchedAt: Date.now(), complete: !skipped && okChunks === chunks.length };
 }
 
 // Чтобы два одновременных запроса не заказывали одни и те же отчёты дважды.
@@ -520,7 +528,8 @@ async function refresh(fromDays: number, toDays: number): Promise<OzonSkuAds> {
   const key = rangeKey(fromDays, toDays);
   try {
     const fresh = await compute(fromDays, toDays);
-    await cacheSet(key, fresh, TTL_MS);
+    // Неполный отчёт держим недолго: следующий проход должен собрать его заново, а не жить с ним 6 часов.
+    await cacheSet(key, fresh, fresh.complete === false ? 30 * 60_000 : TTL_MS);
     return fresh;
   } catch (e) {
     console.warn('[ozon-sku-ads] сбой:', (e as Error).message);

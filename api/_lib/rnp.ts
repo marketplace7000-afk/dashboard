@@ -743,6 +743,54 @@ async function collectOzonAnalytics(items: Map<string, RnpItem>): Promise<string
  * плюс один ещё не собранный день из последних двух недель (добираем историю
  * постепенно — у Ozon один слот отчётов на кабинет).
  */
+const OZ_AD_METRICS = ['adv_expenses', 'adv_views', 'adv_clicks', 'adv_orders', 'adv_revenue'] as const;
+
+/**
+ * Запись рекламы Ozon за день без потерь (23.10.2026).
+ *
+ * Отчёт Ozon по товарам собирается пачками по 10 кампаний; если бюджет окна
+ * кончился, в нём только часть товаров — раньше он целиком перезаписывал день,
+ * и у остальных товаров расход пропадал (22.10: 12 товаров вместо 28).
+ * Теперь:
+ *   • неполный отчёт день не затирает: по каждому товару берём большее из
+ *     записанного и нового (расход за прошедший день только растёт);
+ *   • статистика кампаний «Рекламы» (ad_stat_day, синхронный метод Ozon, каждые 2 ч)
+ *     — страховка: товар, который есть там, а в отчёте нет или меньше, берём оттуда.
+ * Возвращает, сколько товаров добавлено из статистики кампаний.
+ */
+function mergeOzonAdsDay(date: string, facts: DayFacts, complete: boolean): number {
+  const d = getDb();
+  if (!d) return 0;
+  const day = facts.get(date) ?? new Map<string, Map<string, number>>();
+  facts.set(date, day);
+  const put = (sku: string, metric: string, v: number) => {
+    const m = day.get(sku) ?? new Map<string, number>();
+    m.set(metric, Math.max(m.get(metric) ?? 0, v));
+    day.set(sku, m);
+  };
+  if (!complete) {
+    const rows = d.prepare(`SELECT sku, metric, value FROM rnp_fact WHERE mp = 'ozon' AND date = ? AND metric IN (${OZ_AD_METRICS.map(() => '?').join(',')})`)
+      .all(date, ...OZ_AD_METRICS) as Array<{ sku: string; metric: string; value: number }>;
+    for (const r of rows) put(r.sku, r.metric, num(r.value));
+  }
+  // SKU площадки → артикул (ключ РНП).
+  const offerBySku = new Map((d.prepare(`SELECT sku, ext_id FROM rnp_item WHERE mp = 'ozon' AND ext_id IS NOT NULL AND ext_id <> ''`).all() as any[])
+    .map(r => [String(r.ext_id), String(r.sku)]));
+  let added = 0;
+  for (const s of skuStatsByDay('ozon', date, date)) {
+    const offer = offerBySku.get(String(s.sku));
+    if (!offer) continue;
+    if (!day.has(offer) && num(s.spend) > 0) added++;
+    put(offer, 'adv_expenses', num(s.spend));
+    put(offer, 'adv_views', num(s.views));
+    put(offer, 'adv_clicks', num(s.clicks));
+    put(offer, 'adv_orders', num(s.orders));
+    put(offer, 'adv_revenue', num(s.revenue));
+  }
+  writeDays('ozon', [date], [...OZ_AD_METRICS], facts);
+  return added;
+}
+
 async function collectOzonAds(): Promise<string> {
   const { getOzonSkuAdsRange } = await import('./ozonSkuAds');
   const backs = [0, 1];
@@ -765,11 +813,17 @@ async function collectOzonAds(): Promise<string> {
       bump(facts, date, offer, 'adv_orders', row.orders);
       bump(facts, date, offer, 'adv_revenue', row.revenue);
     }
-    writeDays('ozon', [date], ['adv_expenses', 'adv_views', 'adv_clicks', 'adv_orders', 'adv_revenue'], facts);
-    // Закрытый день (не сегодня) считаем собранным — дальше его не перезаказываем.
-    if (b >= 2 || (b === 1 && date === mskDate(1))) metaSet(`ozon:ads-day:${date}`, '1');
-    parts.push(`${date}: товаров ${r.count}`);
+    const complete = r.complete !== false;
+    const added = mergeOzonAdsDay(date, facts, complete);
+    // Закрытый день (не сегодня) считаем собранным — дальше его не перезаказываем. Неполный — перезакажем.
+    if (complete && (b >= 2 || (b === 1 && date === mskDate(1)))) metaSet(`ozon:ads-day:${date}`, '1');
+    parts.push(`${date}: товаров ${r.count}${complete ? '' : ' (отчёт неполный — день дополнен, не затёрт)'}${added ? `, из статистики кампаний +${added}` : ''}`);
   }
+  // Прошлые дни, которые отчёт в этот проход не трогал: дополняем из статистики кампаний
+  // (только добавляет и поднимает, ничего не стирает) — так чинятся дни, затёртые неполным отчётом.
+  let healed = 0;
+  for (let b = 2; b <= 13; b++) if (!backs.includes(b)) healed += mergeOzonAdsDay(mskDate(b), new Map(), false);
+  if (healed) parts.push(`прошлые дни дополнены: +${healed} товаро-дней`);
   markCollected('ozon:ads');
   return `реклама Ozon: ${parts.join(', ')}`;
 }

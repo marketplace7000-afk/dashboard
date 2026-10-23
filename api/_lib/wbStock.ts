@@ -11,6 +11,7 @@
 import { fetchWithRetry } from './fetchRetry';
 import { cacheGet, cacheSet, isFresh } from './cache';
 import { fetchAllWbCards } from './wbCards';
+import { trackStockSince, peekStockSince } from './stockSince';
 
 const CACHE_KEY = 'wb-stock:v2'; // v2: + FBS (склады продавца, marketplace-api v3)
 // 01.10.2026: 30 → 5 мин — фильтр «В продаже» должен замечать распродажу за ≤ 5 мин.
@@ -34,6 +35,7 @@ export type WbStock = {
   fboByNm?: Record<string, number>;
   fbsByNm?: Record<string, number>; // максимум по складам продавца (региональные склады дублируют один физический остаток)
   fbsError?: string; // если FBS не удалось получить — явный 0 в FBO-отчёте не считается «нет в наличии»
+  sinceByNm?: Record<string, number>; // когда остаток стал > 0 (0 = давно) — см. stockSince.ts
   fetchedAt: number;
 };
 
@@ -120,7 +122,9 @@ async function compute(): Promise<WbStock> {
   try { fbs = await computeFbs(); } catch (e: any) { fbsError = String(e?.message ?? e).slice(0, 200); }
   const combined: Record<string, number> = { ...byNm };
   for (const [nm, a] of Object.entries(fbs)) combined[nm] = (combined[nm] || 0) + a;
-  return { byNm: combined, fboByNm: byNm, fbsByNm: fbs, fbsError, fetchedAt: Date.now() };
+  // Без FBS снимок неполный: товары со склада продавца «обнулились» бы и потеряли отметку.
+  const sinceByNm = fbsError ? peekStockSince('wb') : trackStockSince('wb', combined);
+  return { byNm: combined, fboByNm: byNm, fbsByNm: fbs, fbsError, sinceByNm, fetchedAt: Date.now() };
 }
 
 async function computeFbs(): Promise<Record<string, number>> {

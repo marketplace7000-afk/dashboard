@@ -170,7 +170,7 @@ export function LiveOzonPricing() {
   }, [ozShowcase, ozStockRes.data]);
   const inStock = (r: Row) => {
     const oid = r.offer_id.toUpperCase();
-    const d = decideInSale(oid, ozStockComplete ? (ozStockRes.data!.byOffer[oid] || 0) : null, ozSweep);
+    const d = decideInSale(oid, ozStockComplete ? (ozStockRes.data!.byOffer[oid] || 0) : null, ozSweep, ozStockRes.data?.sinceByOffer?.[oid]);
     if (d !== null) return d;
     const sc = ozShowcase[oid];
     if (sc && sc.price > 0 && Date.now() - sc.at <= SHOWCASE_FRESH_MS) return true; // есть на витрине сейчас

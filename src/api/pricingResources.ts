@@ -50,10 +50,10 @@ export const wbCardEconRes = createSideResource<{
   fulfilment?: 'fbs' | 'fbo';
 }>('/api/wb-card-econ');
 
-export type WbStock = { byNm: Record<string, number>; fboByNm?: Record<string, number>; fbsByNm?: Record<string, number>; fbsError?: string; fetchedAt: number };
+export type WbStock = { byNm: Record<string, number>; fboByNm?: Record<string, number>; fbsByNm?: Record<string, number>; fbsError?: string; sinceByNm?: Record<string, number>; fetchedAt: number };
 export const wbStockRes = createSideResource<WbStock>('/api/wb-stock');
 
-export type OzonStock = { byOffer: Record<string, number>; fboByOffer?: Record<string, number>; fbsByOffer?: Record<string, number>; complete: boolean; total: number; fetchedAt: number };
+export type OzonStock = { byOffer: Record<string, number>; fboByOffer?: Record<string, number>; fbsByOffer?: Record<string, number>; complete: boolean; total: number; sinceByOffer?: Record<string, number>; fetchedAt: number };
 export const ozonStockRes = createSideResource<OzonStock>('/api/ozon-stock');
 
 /** Как часто лист цен перечитывает остатки и себестоимость, пока открыт (01.10.2026). */

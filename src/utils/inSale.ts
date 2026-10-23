@@ -40,11 +40,17 @@ export function lastSweep(items: Record<string, SweepRow>, stockPositive: number
 
 /**
  * Итоговое решение. stock: остаток по API (null — остатки неизвестны или неполные).
+ * stockSince: когда остаток стал > 0 (api/_lib/stockSince.ts; 0 — давно).
  * Возвращает null, если ни обход, ни остатки ответа не дают (тогда — старые фолбэки).
  */
-export function decideInSale(id: string, stock: number | null, sweep: Sweep): boolean | null {
+export function decideInSale(id: string, stock: number | null, sweep: Sweep, stockSince?: number): boolean | null {
   if (stock !== null && stock <= 0) return false;          // распродан — точно нет
-  if (sweep.usable) return sweep.ids.has(id.toUpperCase()); // витрина — главный судья
+  if (sweep.usable) {
+    if (sweep.ids.has(id.toUpperCase())) return true;
+    // Новинка (23.10.2026, AFERIY-STAN-AF-P280-2kWh): остаток появился ПОСЛЕ обхода —
+    // витрина о товаре ещё не знает. Показываем, следующий обход решит окончательно.
+    return stock !== null && !!stockSince && !!sweep.at && stockSince > sweep.at;
+  }
   if (stock !== null) return stock > 0;
   return null;
 }

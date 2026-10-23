@@ -311,7 +311,7 @@ export function LiveWbPricing() {
   const isInStock = (r: Row) => {
     const nm = String(r.nmId);
     const stock = stockComplete ? (stockRes.data!.byNm[nm] || 0) : null;
-    const d = decideInSale(nm, stock, sweep);
+    const d = decideInSale(nm, stock, sweep, stockRes.data?.sinceByNm?.[nm]);
     if (d !== null) return d;
     // ФОЛБЭК (нет ни обхода, ни полных остатков): частичные остатки, продажи, таблица.
     if ((stockRes.data?.byNm[nm] || 0) > 0) return true;

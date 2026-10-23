@@ -10,6 +10,7 @@
 // кабинете 182, а лимит страницы 100 (старый прогрев брал одну страницу).
 import { fetchWithRetry } from './fetchRetry';
 import { cacheGet, cacheSet, isFresh } from './cache';
+import { trackStockSince, peekStockSince } from './stockSince';
 
 const BASE = 'https://api-seller.ozon.ru';
 const CACHE_KEY = 'ozon-stock:v1';
@@ -23,6 +24,8 @@ export type OzonStock = {
   /** false — прошли не все страницы (ошибка посередине); тогда 0 не приговор. */
   complete: boolean;
   total: number;
+  /** Когда остаток стал > 0 (0 = давно) — см. stockSince.ts. */
+  sinceByOffer?: Record<string, number>;
   fetchedAt: number;
 };
 
@@ -82,7 +85,10 @@ async function compute(): Promise<OzonStock> {
     cursor = String(j?.cursor ?? '');
     if (!items.length || !cursor || (total && all.length >= total)) { complete = true; break; }
   }
-  return { ...aggregateOzonStocks(all), complete, total: total || all.length, fetchedAt: Date.now() };
+  const agg = aggregateOzonStocks(all);
+  // Неполный обход страниц — 0 не приговор, отметки не трогаем.
+  const sinceByOffer = complete ? trackStockSince('ozon', agg.byOffer) : peekStockSince('ozon');
+  return { ...agg, complete, total: total || all.length, sinceByOffer, fetchedAt: Date.now() };
 }
 
 let refreshing: Promise<OzonStock> | null = null;

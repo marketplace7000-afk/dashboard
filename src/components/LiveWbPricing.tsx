@@ -20,7 +20,6 @@ import {
   ArrowCounterClockwiseIcon,
 } from '@phosphor-icons/react';
 import { useLiveWbBundle, wbCardIndex } from '../api/useLiveWbCache';
-import { useLiveOzonBundle } from '../api/useLiveOzonCache';
 import type { WbPriceRow, WbCard } from '../api/marketplaces';
 import { useProcurement } from '../api/useProcurement';
 import { lastSweep, decideInSale, type SweepRow } from '../utils/inSale';
@@ -66,17 +65,6 @@ type BuyerPrice = { price: number; spp: number; beforeSpp: number; date: string;
 export function LiveWbPricing() {
   const bundle = useLiveWbBundle();
   const cards = wbCardIndex(bundle);
-  // Фото с Ozon по тому же артикулу — запасное, когда у карточки WB фото нет
-  // (23.10.2026: AFERIY-STAN-AF-P280-2kWh — на WB карточка без фото, на Ozon их 8).
-  const ozBundle = useLiveOzonBundle();
-  const ozPhotoBySku = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const p of ozBundle.products) {
-      const img = String(p.primary_image || p.images?.[0] || '');   // v3 отдаёт primary_image массивом
-      if (img && p.offer_id) m.set(p.offer_id.toUpperCase(), img);
-    }
-    return m;
-  }, [ozBundle.products]);
   const procurement = useProcurement();
   // Цена покупателя с СПП — живьём из продаж WB (finishedPrice), не из таблицы.
   // Module-scope ресурс с форс-обновлением: кнопка «Обновить» теперь реально
@@ -497,11 +485,8 @@ export function LiveWbPricing() {
               // с дублями), и тогда в модуле «Цены» оставались пустые квадраты —
               // жалоба клиента 11.08 и повторно 14.08. В «Аналитике» этот расчёт
               // уже применялся, в «Ценах» — нет.
-              // Карточка пришла без фото — на WB их нет вовсе, расчётный адрес даст 404: сразу Ozon.
-              const ozPhoto = ozPhotoBySku.get((r.vendorCode || '').toUpperCase()) || '';
               const photo = r.card?.photos?.[0]?.c246x328 || r.card?.photos?.[0]?.big
-                || (r.card ? ozPhoto : '')
-                || (r.nmId ? wbImageUrl(r.nmId) : ozPhoto);
+                || (r.nmId ? wbImageUrl(r.nmId) : '');
               const isOpen = expanded[r.nmId] ?? false;
               const isArchived = archivedSet.has(archivedKey(r));
               // Ручные значения — только те, под которыми данные не поменялись (src/utils/knobs.ts).
@@ -517,9 +502,7 @@ export function LiveWbPricing() {
                   <tr style={{ cursor: 'pointer', ...(isArchived ? { opacity: 0.55 } : {}) }} onClick={() => toggle(r.nmId)}>
                     <td>
                       {photo ? (
-                        <img src={photo} alt="" style={{ width: 54, height: 72, objectFit: 'cover', borderRadius: 6 }}
-                          // Расчётный адрес WB промахнулся (фото на WB нет) — пробуем Ozon, иначе прячем битую картинку.
-                          onError={e => { const img = e.currentTarget; if (ozPhoto && img.src !== ozPhoto) img.src = ozPhoto; else img.style.visibility = 'hidden'; }} />
+                        <img src={photo} alt="" style={{ width: 54, height: 72, objectFit: 'cover', borderRadius: 6 }} />
                       ) : (
                         <div style={{ width: 36, height: 48, borderRadius: 6, background: 'var(--bg-subtle, #f4f4f5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <ImageIcon size={16} weight="light" style={{ color: 'var(--muted)' }} />

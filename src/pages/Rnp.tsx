@@ -344,6 +344,21 @@ function RulesPanel({ mp, s, set }: { mp: RnpMp; s: Settings; set: (p: Partial<S
 
 const PAGE = 30;
 
+/** Высота элемента «вживую» (меняется при переносе строк, открытии панелей, ресайзе окна). */
+function useHeight<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [h, setH] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setH(el.offsetHeight));
+    ro.observe(el);
+    setH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, h] as const;
+}
+
 function RnpBoard({ mp }: { mp: RnpMp }) {
   const [s, setS] = useState<Settings>(() => loadSettings(mp));
   const set = useCallback((p: Partial<Settings>) => setS(prev => { const n = { ...prev, ...p }; saveSettings(mp, n); return n; }), [mp]);
@@ -354,6 +369,9 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
   const [shown, setShown] = useState(PAGE);
   const [panel, setPanel] = useState<'metrics' | 'rules' | null>(null);
   const { from, to } = periodRange(s);
+  // Панель фильтров липнет под строкой WB/Ozon (просьба владельца 26.10.2026): метрику, поиск
+  // и сортировку видно, сколько ни листай. Её высоту отдаём в CSS — по ней таблица ужимается.
+  const [filtersRef, filtersH] = useHeight<HTMLElement>();
 
   // Номер запроса: при быстром переключении фильтров старый ответ мог прийти
   // позже нового и затереть его (прожарка 20.10.2026) — применяем только последний.
@@ -477,8 +495,8 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
   const collected = data ? Math.max(0, ...Object.values(data.collectedAt)) : 0;
 
   return (
-    <div className="rnp">
-      {/* Фильтры */}
+    <div className="rnp" style={{ ['--rnp-filters-h' as string]: `${filtersH}px` }}>
+      {/* Фильтры: период и группировка — обычная карточка, уезжает вверх */}
       <section className="card rnp-filters">
         <div className="rnp-frow">
           <div className="period-switch" role="group" aria-label="Период">
@@ -504,7 +522,22 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
               <button key={k} className={`period-btn ${s.rowGroup === k ? 'active' : ''}`} onClick={() => set({ rowGroup: k })}>{l}</button>
             ))}
           </div>
+          <span className="rnp-active-rules">
+            {activeRules.map(r => <span key={r.id} className={`rnp-tag rnp-c-${r.color}`}>{ruleTitle(r)}</span>)}
+          </span>
+          <span className="rnp-spacer" />
+          <span className="muted rnp-upd">
+            {data?.collecting ? <><ArrowsClockwiseIcon size={13} className="spin" /> идёт сбор…</> : collected ? `обновлено ${new Date(collected).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
+          </span>
+          <button className="btn btn-sm" onClick={collectNow} disabled={!!data?.collecting} title="Собрать данные из API площадки сейчас, не дожидаясь планового прохода">
+            <ArrowsClockwiseIcon size={13} /> Обновить
+          </button>
+          <button className="btn btn-sm" onClick={exportCsv} disabled={!view?.blocks.length}><DownloadSimpleIcon size={13} /> CSV</button>
         </div>
+      </section>
+
+      {/* Поиск, категория, сортировка, метрики и подсветка — липнут под строкой WB/Ozon (26.10.2026) */}
+      <section className="card rnp-filters rnp-quick" ref={filtersRef}>
         <div className="rnp-frow">
           <label className="rnp-search">
             <MagnifyingGlassIcon size={15} />
@@ -529,25 +562,12 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
               {s.sortDir === 'desc' ? <CaretDownIcon size={13} /> : <CaretUpIcon size={13} />}
             </button>
           </span>
-        </div>
-        <div className="rnp-frow">
           <button className={`btn btn-sm ${panel === 'metrics' ? 'btn-primary' : ''}`} onClick={() => setPanel(p => p === 'metrics' ? null : 'metrics')}>
             Метрики · {metrics.length}
           </button>
           <button className={`btn btn-sm ${panel === 'rules' ? 'btn-primary' : ''}`} onClick={() => setPanel(p => p === 'rules' ? null : 'rules')}>
             <FunnelIcon size={13} /> Подсветка · {activeRules.length}
           </button>
-          <span className="rnp-active-rules">
-            {activeRules.map(r => <span key={r.id} className={`rnp-tag rnp-c-${r.color}`}>{ruleTitle(r)}</span>)}
-          </span>
-          <span className="rnp-spacer" />
-          <span className="muted rnp-upd">
-            {data?.collecting ? <><ArrowsClockwiseIcon size={13} className="spin" /> идёт сбор…</> : collected ? `обновлено ${new Date(collected).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
-          </span>
-          <button className="btn btn-sm" onClick={collectNow} disabled={!!data?.collecting} title="Собрать данные из API площадки сейчас, не дожидаясь планового прохода">
-            <ArrowsClockwiseIcon size={13} /> Обновить
-          </button>
-          <button className="btn btn-sm" onClick={exportCsv} disabled={!view?.blocks.length}><DownloadSimpleIcon size={13} /> CSV</button>
         </div>
         {panel === 'metrics' && <MetricPicker mp={mp} s={s} set={set} present={present} />}
         {panel === 'rules' && <RulesPanel mp={mp} s={s} set={set} />}
@@ -707,9 +727,12 @@ export function Rnp() {
     return () => { timers.forEach(clearTimeout); window.removeEventListener('resize', measure); window.removeEventListener('scroll', measure); };
   }, []);
 
+  // Под строкой WB/Ozon прилипает панель фильтров таблицы — ей нужна нижняя граница этой строки.
+  const [tabsRef, tabsH] = useHeight<HTMLDivElement>();
+
   return (
-    <div className="grid" style={{ gap: 16 }}>
-      <div className="row gap-8 rnp-tabs" style={{ top: topbarH }}>
+    <div className="grid" style={{ gap: 16, ['--rnp-stick-top' as string]: `${topbarH + tabsH - 10}px` }}>
+      <div className="row gap-8 rnp-tabs" style={{ top: topbarH }} ref={tabsRef}>
         <button className={`mp-tab ${mp === 'wb' ? 'active' : ''}`} onClick={() => choose('wb')}>
           <span className="mp-tab-dot" style={{ background: '#cb11ab' }} /> Wildberries
         </button>

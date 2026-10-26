@@ -930,6 +930,10 @@ code {
 .rnp-tabs { flex-wrap: wrap; position: sticky; z-index: 4; background: var(--bg); padding: 10px 0; margin: -10px 0 0; box-shadow: 0 6px 8px -8px rgba(0,0,0,.18); }
 
 .rnp-filters { display: grid; gap: 12px; }
+/* 26.10.2026: поиск, сортировка, метрики и подсветка (.rnp-quick) липнут под строкой WB/Ozon (--rnp-stick-top считает Rnp.tsx). Открытая панель
+   метрик бывает выше окна — тогда она прокручивается внутри, а не уезжает за край. */
+.rnp-quick { position: sticky; top: var(--rnp-stick-top, 0px); z-index: 4;
+  max-height: calc(100vh - var(--rnp-stick-top, 0px) - 24px); overflow-y: auto; box-shadow: 0 6px 12px -10px rgba(0,0,0,.25); }
 .rnp-frow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .rnp-frow .input, .rnp-frow .select { width: auto; padding: 8px 11px; font-size: 17px; }
 .rnp-filters .period-btn { font-size: 17px; padding: 7px 13px; }
@@ -982,7 +986,7 @@ code {
 
 .rnp-table-card { padding: 14px; display: grid; gap: 10px; }
 .rnp-table-head { display: flex; align-items: center; gap: 12px; font-size: 17px; }
-.rnp-scroll { overflow: auto; max-height: calc(100vh - 160px); border-radius: 10px; background: #fff; box-shadow: inset 0 0 0 1px var(--border); }
+.rnp-scroll { overflow: auto; max-height: max(320px, calc(100vh - var(--rnp-stick-top, 100px) - var(--rnp-filters-h, 0px) - 110px)); border-radius: 10px; background: #fff; box-shadow: inset 0 0 0 1px var(--border); }
 .rnp-table { border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; width: max-content; min-width: 100%; font-size: 17px; }
 .rnp-table th {
   position: sticky; top: 0; z-index: 2; background: #f8f9fb; font-weight: 600; font-size: 17px; color: #475569;
@@ -1943,6 +1947,8 @@ code {
 .rnp-sort > .muted { white-space: nowrap; }
 @media (max-width: 768px) {
   .rnp-tabs { position: static; margin: 0; box-shadow: none; }
+  .rnp-quick { position: static; max-height: none; overflow: visible; box-shadow: none; }
+  .rnp-scroll { max-height: calc(100vh - 160px); }
   .rnp-sort { flex: 1 1 100%; min-width: 0; }
   .rnp-sort > .select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
 }

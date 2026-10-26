@@ -163,7 +163,7 @@ export const lastResult = () => lastResultText;
 function resultText(message: string, parts: string[], failed: any[]): string {
   const lim = latestLimits();
   return [
-    `📊 <b>Сравнения WB готовы</b> — ${message}`,
+    `${parts.length ? '📊 <b>Сравнения WB готовы</b>' : '❌ <b>Сравнения WB не созданы</b>'} — ${message}`,
     '',
     ...parts,
     ...(failed.length ? ['', `❌ Не создано: ${failed.map(f => `${esc(f.key)} (${esc(String(f.error ?? '').slice(0, 80))})`).join('; ')}`] : []),

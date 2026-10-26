@@ -43,7 +43,34 @@ export async function ensureChrome(): Promise<boolean> {
 export async function getBrowser(): Promise<Browser> {
   if (browser?.isConnected()) return browser;
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${CONFIG.debugPort}`, { timeout: 15_000 });
+  armCompareRecorder(browser);
   return browser;
+}
+
+/**
+ * Запись создания «Сравнения карточек» WB человеком в окне Chrome агента (26.10.2026).
+ * Свой запрос агента кабинет отклонил (400 invalidRequestBody), а пробовать варианты —
+ * значит тратить лимит. Поэтому слушаем, что отправляет сама страница, когда менеджер
+ * создаёт сравнение, и пишем в журнал агента адрес и тело (артикулы и даты; заголовки
+ * сессии не пишем). Только чтение — ничего не меняет и не отправляет.
+ */
+function armCompareRecorder(b: Browser): void {
+  const isCreate = (u: string) => u.split('?')[0].endsWith('/competitor-comparison/nms');
+  const ctx = b.contexts()[0];
+  if (!ctx) return;
+  ctx.on('request', rq => {
+    if (rq.method() !== 'POST' || !isCreate(rq.url())) return;
+    localLog(`[wb-compare] страница кабинета создаёт сравнение: ${new URL(rq.url()).pathname} ${(rq.postData() ?? '').slice(0, 1500)}`);
+  });
+  ctx.on('response', rs => {
+    if (rs.request().method() !== 'POST' || !isCreate(rs.url())) return;
+    localLog(`[wb-compare] ответ кабинета: ${rs.status()}`);
+  });
+}
+
+/** Подключиться к Chrome заранее, чтобы запись работала и между заданиями. */
+export async function armRecorders(): Promise<void> {
+  try { await getBrowser(); } catch { /* Chrome ещё не готов — в следующий тик */ }
 }
 
 /** Новая вкладка в существующем контексте (профиле агента). */

@@ -8,7 +8,7 @@
  */
 import { CONFIG } from './config';
 import * as api from './api';
-import { ensureChrome } from './chrome';
+import { ensureChrome, armRecorders } from './chrome';
 import { runShowcasePrices } from './scenarios/showcasePrices';
 import { runOzonReviews } from './scenarios/ozonReviews';
 import { runCabinetRecon } from './scenarios/cabinetRecon';
@@ -30,6 +30,7 @@ async function tick(): Promise<void> {
     api.localLog('[host] Chrome не поднялся — задания не забираю');
     return;
   }
+  await armRecorders();
   const claimed = await api.claim(SUPPORTED);
   if (!claimed) return;
   const { task, settings } = claimed;

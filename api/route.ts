@@ -461,6 +461,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ─── /api/fbo — «Остатки FBO»: склады площадок по кластерам, поставки, спрос (api/_lib/fboStocks.ts).
+  //   GET  /api/fbo          → последний снимок (старше 3 ч — фоном собирается новый)
+  //   POST /api/fbo/refresh  → собрать заново (фоном)
+  if (section === 'fbo') {
+    try {
+      const fbo = await import('./_lib/fboStocks');
+      if (req.method === 'POST' && parts[1] === 'refresh') {
+        const already = fbo.fboCollecting();
+        void fbo.collectFbo().catch(() => {});
+        return res.status(200).json({ ok: true, started: !already });
+      }
+      return res.status(200).json({ ok: true, ...(await fbo.getFbo()) });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
+    }
+  }
+
   // ─── /api/product-econ ── экономика товара по артикулу ─────────────────────
   // Одна точка сборки входных данных для расчёта прибыли: себестоимость, ДРР,
   // комиссия и логистика по выбранной схеме работы. Каждое поле несёт признак

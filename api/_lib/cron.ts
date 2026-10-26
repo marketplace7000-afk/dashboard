@@ -718,6 +718,13 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
           cp ? `отслеживаем ${cp.tracked}, записано ${cp.saved}${cp.error ? ` · ${cp.error}` : ''}` : 'не удалось'
         }`);
 
+        // «Остатки FBO» (26.10.2026): снимок складов площадок, поставок и своих складов.
+        // Сам решает, пора ли (раз в 3 ч); долгий из-за лимитов поставок WB — идёт последним.
+        try {
+          const { getFbo } = await import('./fboStocks');
+          await getFbo();
+        } catch (e) { console.warn('[warm-extras] остатки FBO не обновлены:', (e as Error)?.message); }
+
       console.warn('[warm-extras] цепочка завершена');
       } catch (e) {
         console.warn('[warm-extras] failed:', (e as Error)?.message);

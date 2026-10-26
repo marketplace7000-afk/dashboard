@@ -43,11 +43,11 @@ export type AuthUser = {
 };
 
 /** Разделы кабинета (= страницы в src/App.tsx). */
-export const SECTIONS = ['dashboard', 'sklad', 'prices', 'reviews', 'chats', 'rnp', 'ads', 'competitors', 'collectors', 'settings'] as const;
+export const SECTIONS = ['dashboard', 'sklad', 'prices', 'reviews', 'chats', 'rnp', 'fbo', 'ads', 'competitors', 'collectors', 'settings'] as const;
 export type Section = typeof SECTIONS[number];
 export const SECTION_LABEL: Record<Section, string> = {
   dashboard: 'Дашборд', sklad: 'Склад', prices: 'Цены', reviews: 'Отзывы и вопросы', chats: 'Чаты с покупателями',
-  rnp: 'РНП', ads: 'Реклама', competitors: 'Конкуренты', collectors: 'Сборщики', settings: 'Настройки',
+  rnp: 'РНП', fbo: 'Остатки FBO', ads: 'Реклама', competitors: 'Конкуренты', collectors: 'Сборщики', settings: 'Настройки',
 };
 export const ROLE_SECTIONS: Record<Role, Section[]> = {
   owner: [...SECTIONS],

@@ -39,6 +39,8 @@ function writeSections(section: string, sub: string): Section[] | null | 'owner'
       return ['settings'];
     case 'rnp':
       return ['rnp'];
+    case 'fbo':
+      return ['fbo'];
     case 'agents':
       return ['collectors'];
     case 'reviews': case 'wb-answer':

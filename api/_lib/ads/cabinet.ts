@@ -13,7 +13,7 @@ import {
   getAllLinks, suggestLinks, watchedIds, addLink, setLinkStatus, removeLink, parseNmId, parseOzonSku, getLatestPrices,
   type CompetitorLink, type WatchStatus,
 } from '../competitorWatch';
-import { rnpInStockSkus, rnpItems } from '../rnp';
+import { rnpInStockSkus, rnpItems, saveWbCardViews } from '../rnp';
 import { wbImageUrl } from '../wbBasket';
 
 const KEEP = 30;
@@ -239,9 +239,20 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
     }
     if (!cardsN && !hiddenN) return `Ozon: продажи по артикулам — за 28 дней ${data.bySku.monthly?.length ?? 0}, за 7 дней ${data.bySku.weekly?.length ?? 0}`;
   }
+  // Дневной проход WB присылает показы карточек отдельной посылкой (26.10.2026) — сразу в РНП.
+  if (data.light && mp === 'wb' && Array.isArray(data.funnelViews)) {
+    const rows = saveWbCardViews(data.funnelViews);
+    if (!cardsN && !hiddenN) return `WB: показы карточек за ${data.funnelViews.length} дн → ${rows} значений`;
+  }
   // Быстрый проход днём (только карточки витрины) — в историю карточек, полный снимок кабинета не трогаем.
   if (data.light) return `${mp === 'wb' ? 'WB' : 'Ozon'}: быстрое обновление — карточек на витрине ${cardsN}, с ценой ${saved.priced}${hiddenN ? `, не видны на витрине ${hiddenN}` : ''}${errN ? `, ошибок ${errN}` : ''}`;
   const posN = savePosDaily(mp, data.daily);
+  // Показы карточек WB по дням (26.10.2026) — в РНП, для «CTR карточки».
+  let viewsN = 0;
+  if (mp === 'wb' && Array.isArray(data.funnelViews)) {
+    try { viewsN = saveWbCardViews(data.funnelViews); } catch (e) { console.warn('[rnp] показы WB не записаны:', (e as Error).message); }
+    delete data.funnelViews;   // в снимке кабинета не храним — они уже в РНП
+  }
   if (mp === 'wb') saveCompLast(data.compDetails, at);
   d.prepare('INSERT INTO ad_cabinet_snapshot (mp, at, json) VALUES (?, ?, ?)').run(mp, at, JSON.stringify(data));
   d.prepare(`DELETE FROM ad_cabinet_snapshot WHERE mp = ? AND id NOT IN (SELECT id FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT ?)`).run(mp, mp, KEEP);
@@ -253,7 +264,7 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
     const items = (data.report?.groups ?? []).reduce((s: number, g: any) => s + (g.items?.length ?? 0), 0);
     const pos = data.report?.positionInfo?.average?.current;
     const opened = Array.isArray(data.compDetails) ? `, отчётов сравнения ${data.compDetails.length}` : '';
-    return `WB: карточек с позициями ${items}${pos != null ? `, средняя позиция ${pos}` : ''}${posN ? `, позиций по дням ${posN}` : ''}, наборов сравнения ${data.comparisons?.history?.length ?? 0}${opened}${cards}${sug}`;
+    return `WB: карточек с позициями ${items}${pos != null ? `, средняя позиция ${pos}` : ''}${posN ? `, позиций по дням ${posN}` : ''}${viewsN ? `, показов карточек ${viewsN}` : ''}, наборов сравнения ${data.comparisons?.history?.length ?? 0}${opened}${cards}${sug}`;
   }
   const items = (data.markets ?? []).reduce((s: number, m: any) => s + (m.items?.length ?? 0), 0);
   const p = data.positions?.[0]?.days?.at?.(-1);

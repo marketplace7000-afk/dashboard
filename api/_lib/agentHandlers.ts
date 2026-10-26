@@ -131,6 +131,12 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     if (task.type === 'competitor_watch') {
       const { watchParams } = await import('./ads/cabinet');
       task.params = { ...task.params, ...watchParams(task.params.marketplace === 'ozon' ? 'ozon' : 'wb', !!task.params.light) };
+      // 26.10.2026: проходы WB заодно снимают показы карточек по дням — для CTR в РНП
+      // (ночной — вчера, позавчера и пропуски истории; дневные — сегодня и вчера).
+      if (task.params.marketplace !== 'ozon') {
+        const { wbViewsPlan } = await import('./rnp');
+        task.params = { ...task.params, ...wbViewsPlan(!!task.params.light) };
+      }
     }
     res.status(200).json({ task, settings: getSettings() });
     return;

@@ -127,6 +127,37 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
     comparisons: { limits: lim.json && lim.json.data || null, history: hist.json && hist.json.data || null }, compDetails: compDetails, errors: errors };
 })(${JSON.stringify(auth)})`;
 
+// Показы карточек WB по дням (26.10.2026, для CTR в РНП): «Воронка продаж» кабинета
+// (v1/sales-funnel/report). В открытом API показов нет. Отчёт отдаёт не больше 50 товаров
+// и пагинацию не понимает, поэтому список товаров передаём сами пачками по 50 — так сумма
+// по товарам сходится с итогом дня (проверено 24.10: 44 210 против 44 211). День засчитываем,
+// только если ответили все пачки, иначе сервер записал бы неполные показы.
+const WB_FUNNEL_VIEWS = (auth: Record<string, string>, nms: number[], days: string[]) => `(async (A, NMS, DAYS) => {
+  const U = 'https://seller-content.wildberries.ru/ns/analytics-api/content-analytics/api/v1/sales-funnel/report';
+  const prev = d => new Date(Date.parse(d + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+  const out = [], errors = [];
+  for (const day of DAYS) {
+    const items = [];
+    let ok = true;
+    for (let i = 0; i < NMS.length && ok; i += 50) {
+      const body = { currentPeriod: { start: day, end: day }, prevPeriod: { start: prev(day), end: prev(day) }, subjects: [], brands: [],
+        nms: NMS.slice(i, i + 50), tagIds: [], skipDeletedNm: false, orderBy: { field: 'orders', mode: 'desc' } };
+      try {
+        const r = await fetch(U, { method: 'POST', credentials: 'include', headers: Object.assign({}, A, { 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
+        const t = await r.text();
+        if (!r.ok) { ok = false; errors.push('показы WB ' + day + ' ' + r.status + ' ' + t.slice(0, 100)); break; }
+        const data = JSON.parse(t).data;
+        for (const g of (data && data.groups) || []) for (const it of g.itemsGroup || []) {
+          items.push({ nmId: it.nmId, views: it.viewCount && it.viewCount.current, open: it.openCard && it.openCard.current });
+        }
+      } catch (e) { ok = false; errors.push('показы WB ' + day + ': ' + String(e).slice(0, 100)); }
+      await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
+    }
+    if (ok) out.push({ date: day, items: items });
+  }
+  return { days: out, errors: errors };
+})(${JSON.stringify(auth)}, ${JSON.stringify(nms)}, ${JSON.stringify(days)})`;
+
 // Карточки WB на витрине пачкой — повтор собственного запроса страницы товара
 // (/__internal/card/cards/v4/detail) с нашими номерами. Цены там в копейках.
 const WB_CARDS = (url: string, headers: Record<string, string>, ids: number[]) => `(async (U, H, IDS) => {
@@ -329,6 +360,29 @@ async function ozonSales(task: AgentTask, page: Page, cid: string, data: any): P
   await api.progress(task.id, stage(1, `Продажи по артикулам: найдено ${data.bySku?.monthly?.length ?? 0} из ${skus.length}`, { items_done: data.bySku?.monthly?.length ?? 0, items_total: skus.length }), true);
 }
 
+/** Заголовки сессии аналитики WB — из собственного запроса страницы (держим только в памяти). */
+function watchWbAuth(page: Page): () => Record<string, string> | null {
+  let auth: Record<string, string> | null = null;
+  page.on('request', rq => {
+    if (auth || !/analytics-api/.test(rq.url())) return;
+    void rq.allHeaders().then(h => {
+      if (!auth && h.authorizev3) auth = { authorizev3: h.authorizev3, 'seller-lk': h['seller-lk'] ?? '', 'root-version': h['root-version'] ?? '' };
+    }).catch(() => {});
+  });
+  return () => auth;
+}
+
+/** Показы карточек WB по дням из «Воронки продаж» (товары и дни — из задания) → data.funnelViews. */
+async function wbViews(task: AgentTask, page: Page, auth: Record<string, string>, data: any): Promise<void> {
+  const wbNms = Array.isArray(task.params.wb_nms) ? task.params.wb_nms.map(Number).filter((n: number) => n > 0) : [];
+  const viewDays = Array.isArray(task.params.view_days) ? task.params.view_days.map(String).filter((s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s)) : [];
+  if (!wbNms.length || !viewDays.length) return;
+  await api.progress(task.id, stage(1, `Показы карточек по дням: ${viewDays.length} дн`), true);
+  const fv = await page.evaluate(WB_FUNNEL_VIEWS(auth, wbNms, viewDays)) as { days: unknown[]; errors: string[] };
+  data.funnelViews = fv.days;
+  data.errors = [...(data.errors ?? []), ...fv.errors.slice(0, 3)];
+}
+
 export async function runCompetitorWatch(task: AgentTask, settings: AgentSettings): Promise<void> {
   const mp = task.params.marketplace === 'ozon' ? 'ozon' : 'wb';
   const page = await newPage();
@@ -354,23 +408,38 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
           await api.log(task.id, 'warn', `кабинет Ozon не открылся (${page.url().slice(0, 80)}) — продажи по артикулам пропускаю, снимаю только витрину`);
         }
       }
+      // 26.10.2026: днём WB — ещё и показы карточек за сегодня и вчера (CTR в РНП 3 раза в день).
+      // Отправляем сразу, до витрины. Кабинет не открылся — только предупреждение, витрину снимаем.
+      if (mp === 'wb' && Array.isArray(task.params.view_days) && task.params.view_days.length) {
+        const getAuth = watchWbAuth(page);
+        await page.goto(WB_PAGE, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
+        await sleep(6000);
+        for (let i = 0; i < 10 && !getAuth(); i++) await sleep(1000);
+        const body = await page.evaluate('document.body ? document.body.innerText.slice(0, 4000) : ""').catch(() => '') as string;
+        const auth = getAuth();
+        if (auth && page.url().startsWith('https://seller.wildberries.ru/') && !looksLikeChallenge(page.url(), body)) {
+          const part: any = { light: true, errors: [] };
+          await wbViews(task, page, auth, part);
+          if (part.funnelViews?.length && await api.competitorsIngest(mp, part)) data.viewsSent = part.funnelViews.length;
+          data.errors.push(...part.errors);
+        } else {
+          await api.log(task.id, 'warn', `аналитика WB не открылась (${page.url().slice(0, 80)}) — показы карточек пропускаю, снимаю только витрину`);
+        }
+      }
     } else if (mp === 'wb') {
       await api.progress(task.id, stage(0, 'Открываю аналитику кабинета WB'), true);
       // Заголовки сессии аналитики — из собственного запроса страницы.
-      let auth: Record<string, string> | null = null;
-      page.on('request', rq => {
-        if (auth || !/analytics-api/.test(rq.url())) return;
-        void rq.allHeaders().then(h => {
-          if (!auth && h.authorizev3) auth = { authorizev3: h.authorizev3, 'seller-lk': h['seller-lk'] ?? '', 'root-version': h['root-version'] ?? '' };
-        }).catch(() => {});
-      });
+      const getAuth = watchWbAuth(page);
       if (!await openCabinet(task, page, WB_PAGE, /^https:\/\/seller\.wildberries\.ru\//, 'wb', settings)) return;
-      for (let i = 0; i < 10 && !auth; i++) await sleep(1000);
+      for (let i = 0; i < 10 && !getAuth(); i++) await sleep(1000);
+      const auth = getAuth();
       if (!auth) { await api.fail(task.id, { error: 'страница аналитики WB не сделала запрос — нет заголовков сессии', retryable: true }); return; }
       await api.progress(task.id, stage(1, 'Позиции по запросам и сравнения карточек'), true);
       data = await page.evaluate(WB_COLLECT(auth));
       const items = (data?.report?.groups ?? []).reduce((s: number, g: any) => s + (g.items?.length ?? 0), 0);
       await api.progress(task.id, stage(1, `Карточек с позициями: ${items}, наборов сравнения: ${data?.comparisons?.history?.length ?? 0}`, { items_done: items, items_total: items }), true);
+      // Показы карточек по дням для CTR в РНП: какие товары и дни — решает сервер (вчера, позавчера и пропуски истории).
+      if (data) await wbViews(task, page, auth, data);
     } else {
       await api.progress(task.id, stage(0, 'Открываю аналитику кабинета Ozon'), true);
       if (!await openCabinet(task, page, OZ_PAGE, /^https:\/\/seller\.ozon\.ru\/app\//, 'ozon', settings)) return;
@@ -403,7 +472,8 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
     if (!r) { await api.fail(task.id, { error: 'дашборд не принял данные конкурентов', retryable: true }); return; }
     const errs = data?.errors?.length ?? 0;
     const sales = data?.salesSent ? ` · продажи по артикулам: ${data.salesSent}` : '';
-    await api.complete(task.id, `${r}${sales}${errs ? ` · ошибок кабинета: ${errs}` : ''}`);
+    const views = data?.viewsSent ? ` · показы карточек: ${data.viewsSent} дн` : '';
+    await api.complete(task.id, `${r}${sales}${views}${errs ? ` · ошибок кабинета: ${errs}` : ''}`);
   } finally {
     await page.close().catch(() => {});
   }

@@ -70,7 +70,7 @@ const RATING_RULE: Rule = { id: 'r-rating', metric: 'rating', op: 'drop', value:
 
 const DEFAULTS: Settings = {
   period: '14', from: '', to: '', dateGroup: 'day', rowGroup: 'product', category: '', inStock: true,
-  metrics: ['ordered_cnt', 'ordered_amount', 'avg_bill', 'adv_expenses', 'percent_drr', 'rating', 'stocks'],
+  metrics: ['ordered_cnt', 'ordered_amount', 'avg_bill', 'adv_expenses', 'percent_drr', 'card_ctr', 'rating', 'stocks'],
   rules: [
     { id: 'r1', metric: 'percent_drr', op: 'gt', value: 15, color: 'red', on: true },
     { id: 'r2', metric: 'ordered_cnt', op: 'drop', value: 30, color: 'amber', on: true },
@@ -85,7 +85,15 @@ function loadSettings(mp: RnpMp): Settings {
   try {
     const raw = localStorage.getItem(LS_KEY(mp));
     if (raw) {
-      const s: Settings & { ratingAdded?: boolean } = { ...DEFAULTS, ...JSON.parse(raw) };
+      const s: Settings & { ratingAdded?: boolean; ctrAdded?: boolean } = { ...DEFAULTS, ...JSON.parse(raw) };
+      // 26.10.2026: так же один раз добавляем «CTR карточки» — перед рейтингом.
+      if (!s.ctrAdded) {
+        s.ctrAdded = true;
+        if (!s.metrics.includes('card_ctr')) {
+          const at = s.metrics.indexOf('rating') >= 0 ? s.metrics.indexOf('rating') : s.metrics.indexOf('stocks');
+          s.metrics = at >= 0 ? [...s.metrics.slice(0, at), 'card_ctr', ...s.metrics.slice(at)] : [...s.metrics, 'card_ctr'];
+        }
+      }
       // 18.10.2026: рейтинг появился позже — один раз показываем его и правило «Рейтинг упал»
       // тем, у кого список метрик уже сохранён (дальше выбор пользователя не трогаем).
       if (!s.ratingAdded) {

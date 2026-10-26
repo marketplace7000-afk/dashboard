@@ -62,7 +62,13 @@ export const RNP_METRICS: RnpMetric[] = [
   { key: 'spp_base', label: 'Цена продавца по заказам, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', mps: [] },
 
   // ── Воронка (Ozon — v1/analytics/data; WB с 14.10.2026 — sales-funnel/products/history: переходы и корзины, история с этой даты) ──
-  { key: 'hits_view', label: 'Показы', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: ['ozon'] },
+  { key: 'hits_view', label: 'Показы', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: BOTH,
+    hint: 'Сколько раз карточку показали покупателям (поиск, каталог, рекомендации). Ozon — аналитика API; WB — «Воронка продаж» кабинета, снимает Агент 3 ночью и днём в 11:20, 14:50, 16:50 МСК (за сегодня — на момент прохода), история за 30 дней догружается за несколько ночей с 27.10.2026' },
+  // Служебное слагаемое CTR: переходы в карточку из того же источника, что и показы (WB — кабинет, Ozon — посетители карточки).
+  { key: 'ctr_open', label: 'Переходы в карточку (для CTR)', group: 'Воронка', unit: 'num', kind: 'sum', mps: [] },
+  // 26.10.2026: CTR карточки — не рекламный, а общий: сколько из увидевших карточку в неё зашли.
+  { key: 'card_ctr', label: 'CTR карточки, %', short: 'CTR', group: 'Воронка', unit: 'pct', kind: 'ratio', num: 'ctr_open', den: 'hits_view', scale: 100, better: 'up', mps: BOTH,
+    hint: 'Переходы в карточку ÷ показы, %. Не рекламный CTR: все показы и все переходы. WB — обе цифры из «Воронки продаж» кабинета (совпадает там с «Конверсией в переход»), снимает Агент 3 ночью и днём в 11:20, 14:50, 16:50 МСК. Ozon — посетители карточки ÷ показы из аналитики, каждые 2 часа. Ozon в «Товарах на Ozon» делит все просмотры карточки (не уникальные) — там CTR в 1,4–1,8 раза выше' },
   { key: 'hits_view_search', label: 'Показы в поиске и каталоге', short: 'Показы в поиске', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: ['ozon'] },
   { key: 'session_view', label: 'Посетители', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: ['ozon'] },
   { key: 'session_view_pdp', label: 'Посетители карточки', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: BOTH },

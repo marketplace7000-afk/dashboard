@@ -631,6 +631,53 @@ async function collectWbFunnel(): Promise<string> {
   return `воронка WB: товаров ${ok} из ${nms.length} → ${rows} значений${failed ? `, сбой ${failed} (${lastErr})` : ''}`;
 }
 
+/**
+ * Показы карточек WB по дням (26.10.2026, для «CTR карточки»). В открытом API WB показов нет —
+ * их снимает Агент 3 из «Воронки продаж» кабинета ночным проходом (competitor_watch, WB).
+ * План: все наши nmID из справочника, дни — вчера, позавчера и до VIEWS_BACKFILL ещё не
+ * собранных дней из последних 30 (так история копится без долгих проходов).
+ */
+const VIEWS_BACKFILL = 10;
+export function wbViewsPlan(light = false): { wb_nms: number[]; view_days: string[] } {
+  const d = getDb();
+  if (!d) return { wb_nms: [], view_days: [] };
+  const nms = rnpItems('wb').map(i => Number(i.sku)).filter(n => Number.isFinite(n) && n > 0);
+  // Дневной проход (11:20 / 14:50 / 16:50 МСК) — сегодня и вчера: CTR обновляется в течение дня.
+  if (light) return { wb_nms: nms, view_days: [mskDate(0), mskDate(1)] };
+  const days = [mskDate(1), mskDate(2)];
+  for (let b = 3; b <= 30 && days.length < 2 + VIEWS_BACKFILL; b++) {
+    if (metaGet(`wb:views-day:${mskDate(b)}`) !== '1') days.push(mskDate(b));
+  }
+  return { wb_nms: nms, view_days: days };
+}
+
+/**
+ * Принять показы от агента: день целиком — стереть показы WB за день и записать пришедшие.
+ * Вместе с показами пишем переходы в карточку из того же ответа (ctr_open): CTR WB считается
+ * по одному снимку кабинета — внутри дня показы и переходы из API обновлялись бы в разное время.
+ */
+export function saveWbCardViews(days: unknown): number {
+  if (!Array.isArray(days)) return 0;
+  const facts: DayFacts = new Map();
+  const dates: string[] = [];
+  for (const day of days as Array<{ date?: string; items?: Array<{ nmId?: number; views?: number; open?: number }> }>) {
+    const date = String(day?.date ?? '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Array.isArray(day.items)) continue;
+    dates.push(date);
+    for (const it of day.items) {
+      if (!it?.nmId || !(num(it.views) > 0)) continue;
+      bump(facts, date, String(it.nmId), 'hits_view', num(it.views));
+      bump(facts, date, String(it.nmId), 'ctr_open', num(it.open));
+    }
+  }
+  if (!dates.length) return 0;
+  const rows = writeDays('wb', dates, ['hits_view', 'ctr_open'], facts);
+  // Закрытые дни (не вчера) больше не перезапрашиваем; вчера WB ещё досчитывает — повторим завтра.
+  for (const date of dates) if (date < mskDate(1)) metaSet(`wb:views-day:${date}`, '1');
+  markCollected('wb:views');
+  return rows;
+}
+
 // ─── Ozon ──────────────────────────────────────────────────────────────────
 
 const OZ_BASE = 'https://api-seller.ozon.ru';
@@ -1172,6 +1219,8 @@ async function sourceRows(mp: RnpMp, raw: RnpRow[], items: any[], from: string, 
       if (r.metric === 'wbf_order_cnt') { out.push({ ...r, metric: 'ordered_cnt' }); continue; }
       if ((r.metric === 'ordered_amount' || r.metric === 'ordered_cnt') && funnelDays.has(r.date)) continue;
     }
+    // Ozon: числитель «CTR карточки» — посетители карточки из той же аналитики, что и показы (26.10.2026).
+    if (mp === 'ozon' && r.metric === 'session_view_pdp') out.push({ ...r, metric: 'ctr_open' });
     out.push(r);
   }
   if (mp === 'wb') {
@@ -1270,7 +1319,7 @@ export async function getRnp(mp: RnpMp, fromIn?: string, toIn?: string): Promise
   }
 
   res.present = [...present];
-  for (const src of ['sales', 'ads', 'stock', 'analytics', 'funnel', 'prices', 'rating']) {
+  for (const src of ['sales', 'ads', 'stock', 'analytics', 'funnel', 'prices', 'rating', 'views']) {
     const v = metaGet(`collected:${mp}:${src}`);
     if (v) res.collectedAt[src] = Number(v);
   }

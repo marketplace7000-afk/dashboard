@@ -145,10 +145,13 @@ export function onWbSnapshot(data: any, at: number): void {
   const runId = Number(data?.compareRun);
   if (!runId || !Array.isArray(data?.compareCreated)) return;
   const created: any[] = data.compareCreated;
-  const ok = created.filter(c => c.id);
-  const byId = new Map((data.compDetails ?? []).map((s: any) => [String(s.id), s]));
-  const parts = ok.map(c => setSummary(c.key, { ...(byId.get(String(c.id)) as any ?? {}), created: c }));
-  const failed = created.filter(c => !c.id);
+  const ok = created.filter(c => c.id || c.ok);
+  const sets: any[] = data.compDetails ?? [];
+  // Набор: по номеру из ответа, иначе по составу карточек (ответ создания номера может не содержать).
+  const setOf = (c: any) => sets.find(s => c.id && String(s.id) === String(c.id))
+    ?? sets.find(s => sameSet((s.nms ?? []).map((x: any) => Number(x.nmId)), (c.nmIDs ?? []).map(Number))) ?? {};
+  const parts = ok.map(c => setSummary(c.key, { ...setOf(c), created: c }));
+  const failed = created.filter(c => !(c.id || c.ok));
   const message = `создано ${ok.length} из ${created.length}${failed.length ? `, не создано: ${failed.map(f => f.key).join(', ')}` : ''}`;
   d.prepare("UPDATE ad_wb_compare_run SET status = ?, result = ?, done_at = ? WHERE id = ?")
     .run(ok.length ? 'done' : 'failed', JSON.stringify({ created: ok.length, message, failed }), Date.now(), runId);

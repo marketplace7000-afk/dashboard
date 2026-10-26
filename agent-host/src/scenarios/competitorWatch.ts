@@ -136,8 +136,10 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
 })(${JSON.stringify(auth)})`;
 
 // Создать сравнения «Сравнение карточек» WB (26.10.2026, запуск менеджером из «Конкурентов»).
-// Как это делает сама страница кабинета: POST v3/competitor-comparison/nms со списком nmIDs
-// (2–5 карточек) и без id набора — WB формирует отчёт и списывает 1 сравнение из лимита;
+// Как это делает сама страница кабинета (записано 26.10.2026, когда владелец создал сравнение
+// в окне Chrome агента; догадка про v3 с startDate/endDate дала 400 invalidRequestBody):
+// POST v4/competitor-comparison/nms {period, nmIDs, searchQueriesRequest, sizeDetails} без id
+// набора — WB формирует отчёт и списывает 1 сравнение из лимита;
 // набор 72 часа открывается бесплатно (его потом читает WB_COLLECT). Те же артикулы в пределах
 // 72 часов лимит повторно не тратят (availableWithoutCharge в limits).
 const WB_CREATE = (auth: Record<string, string>, sets: { key: string; nmIDs: number[] }[]) => `(async (A, SETS) => {
@@ -145,17 +147,18 @@ const WB_CREATE = (auth: Record<string, string>, sets: { key: string; nmIDs: num
   const d = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
   const out = [];
   for (const s of SETS) {
-    let res = { key: s.key, nmIDs: s.nmIDs, id: null, error: null };
+    let res = { key: s.key, nmIDs: s.nmIDs, id: null, ok: false, error: null };
     try {
-      const r = await fetch(H + '/v3/competitor-comparison/nms', { method: 'POST', credentials: 'include',
+      const r = await fetch(H + '/v4/competitor-comparison/nms', { method: 'POST', credentials: 'include',
         headers: Object.assign({}, A, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ nmIDs: s.nmIDs, startDate: d(30), endDate: d(0),
-          searchQueriesOrderBy: { field: 'frequency', mode: 'desc', nmID: s.nmIDs[0] },
-          officesAndRegionsOrderBy: { field: 'stockCount', mode: 'desc' }, sizeDetails: false }) });
+        body: JSON.stringify({ period: { start: d(29), end: d(0) }, nmIDs: s.nmIDs,
+          searchQueriesRequest: { limit: 5, offset: 0, orderBy: { field: 'frequency', mode: 'desc', nmID: s.nmIDs[0] }, scopeNmIDs: s.nmIDs },
+          sizeDetails: true }) });
       const t = await r.text();
       let j = null; try { j = JSON.parse(t); } catch (e) {}
       const data = j && (j.data || j);
-      if (r.ok && data && data.ID) res.id = data.ID;
+      // Номер набора — из ответа; если его там нет, сервер найдёт набор в истории по составу карточек.
+      if (r.ok && data && !(j && j.error)) { res.id = data.ID || data.id || null; res.ok = true; }
       else {
         const keys = ((j && j.additionalErrors && j.additionalErrors.errors) || []).map(e => e.trKey).filter(Boolean);
         res.error = r.status + ' ' + (keys.join(', ') || (j && j.errorText) || t.slice(0, 160));
@@ -483,7 +486,7 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
         await api.progress(task.id, stage(1, `Создаю сравнения в кабинете WB: ${compare.length}`, { items_done: 0, items_total: compare.length }), true);
         try { created = await page.evaluate(WB_CREATE(auth, compare)) as any[]; }
         catch (e) { created = compare.map(c => ({ key: c.key, nmIDs: c.nmIDs, id: null, error: (e as Error).message.slice(0, 160) })); }
-        const ok = created.filter(c => c.id).length;
+        const ok = created.filter(c => c.id || c.ok).length;
         await api.progress(task.id, stage(1, `Сравнений создано: ${ok} из ${compare.length}`, { items_done: ok, items_total: compare.length }), true);
         for (const c of created.filter(c => c.error)) await api.log(task.id, 'warn', `сравнение ${c.key}: ${String(c.error).slice(0, 200)}`);
         await sleep(4000);

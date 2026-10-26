@@ -1,0 +1,219 @@
+/**
+ * «Сравнение карточек» WB раз в неделю (26.10.2026, решение владельца).
+ *
+ * Четверг утром бот напоминает в рабочем чате; менеджер в «Конкурентах» → WB отмечает
+ * товары (наш + до 4 закреплённых конкурентов) и жмёт «Запустить сравнения». Сервер ставит
+ * Агенту 3 задание competitor_watch с params.compare: агент создаёт наборы в кабинете
+ * (каждый — 1 сравнение из лимита, см. WB_CREATE), сразу читает их за 7 и 30 дней и
+ * присылает снимок; отсюда — итог в чат. Лимит тарифа «Продвинутый» — 20 в месяц
+ * (обновляется 15-го), докупается в кабинете; не больше 10 в неделю — правило владельца.
+ */
+import { adsDb } from './store';
+import { createTask, listTasks } from '../agentQueue';
+import { tgSend, tgEscape as esc, tgConfigured, chatId } from '../telegram';
+import type { Ads2WbCompare } from '../../../shared/ads2';
+
+export const WB_COMPARE_MAX_WEEK = 10;
+const SITE = 'https://e-avtovibe.ru/#competitors-wb';
+const MSK = 3 * 3600_000;
+
+let ready = false;
+function db(): any {
+  const d = adsDb();
+  if (!d) throw new Error('хранилище рекламы недоступно');
+  if (!ready) {
+    d.exec(`CREATE TABLE IF NOT EXISTS ad_wb_compare_run (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, by TEXT NOT NULL, sets TEXT NOT NULL,
+        task_id INTEGER, status TEXT NOT NULL, result TEXT, done_at INTEGER);
+      CREATE TABLE IF NOT EXISTS ad_tg_sent (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      -- История наборов по неделям: что было у нас и у конкурентов на дату сравнения (7 и 30 дней).
+      CREATE TABLE IF NOT EXISTS ad_wb_comp_hist (
+        set_id TEXT NOT NULL, date TEXT NOT NULL, nm TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL,
+        PRIMARY KEY (set_id, nm));`);
+    ready = true;
+  }
+  return d;
+}
+
+/** Понедельник текущей недели по Москве (мс, полночь МСК). */
+function weekStart(now = Date.now()): number {
+  const m = new Date(now + MSK);
+  const day = (m.getUTCDay() + 6) % 7;
+  return Date.UTC(m.getUTCFullYear(), m.getUTCMonth(), m.getUTCDate() - day) - MSK;
+}
+
+function latestLimits(): { left: number | null; free: number[][] } {
+  const row = db().prepare("SELECT json FROM ad_cabinet_snapshot WHERE mp = 'wb' AND json NOT LIKE '%\"light\":true%' ORDER BY at DESC LIMIT 1").get() as any;
+  try {
+    const l = row ? JSON.parse(row.json)?.comparisons?.limits : null;
+    // purchasedLimits — сколько сравнений осталось из купленных/входящих в тариф (20 − потрачено);
+    // remainingComparisonsThisMonth — общий потолок подписки (1 100), для нас не ограничение.
+    return { left: l && Number.isFinite(Number(l.purchasedLimits)) ? Number(l.purchasedLimits) : null,
+      free: Array.isArray(l?.availableWithoutCharge) ? l.availableWithoutCharge.map((x: any[]) => x.map(Number)) : [] };
+  } catch { return { left: null, free: [] }; }
+}
+
+const sameSet = (a: number[], b: number[]) => a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
+
+function weekUsed(): number {
+  let n = 0;
+  for (const r of db().prepare("SELECT sets, result, status FROM ad_wb_compare_run WHERE at >= ? AND status != 'failed'").all(weekStart()) as any[]) {
+    try {
+      const res = r.result ? JSON.parse(r.result) : null;
+      n += res?.created != null ? Number(res.created) : JSON.parse(r.sets).length;
+    } catch { /* пропуск */ }
+  }
+  return n;
+}
+
+function openTask(): any | null {
+  return listTasks({ status: ['queued', 'claimed', 'running'], type: 'competitor_watch', limit: 30 })
+    .find((t: any) => t.params?.marketplace !== 'ozon' && Array.isArray(t.params?.compare)) ?? null;
+}
+
+export function compareState(): Ads2WbCompare {
+  const lim = latestLimits();
+  const last = db().prepare('SELECT * FROM ad_wb_compare_run ORDER BY id DESC LIMIT 1').get() as any;
+  let lastRun: Ads2WbCompare['lastRun'] = null;
+  if (last) {
+    let res: any = null; try { res = last.result ? JSON.parse(last.result) : null; } catch { /* пусто */ }
+    lastRun = { id: last.id, at: last.at, status: last.status, total: JSON.parse(last.sets).length, created: res?.created ?? null, message: res?.message ?? null, doneAt: last.done_at ?? null };
+  }
+  return { maxWeek: WB_COMPARE_MAX_WEEK, weekUsed: weekUsed(), limitLeft: lim.left, freeSets: lim.free, running: !!openTask(), lastRun, telegram: tgConfigured() };
+}
+
+/** Запуск сравнений менеджером: [{key, nmIDs:[наш, конкуренты…]}]. */
+export function requestCompare(items: unknown, by: string): { ok: true; runId: number; taskId: number; charged: number } | { ok: false; error: string } {
+  if (!Array.isArray(items) || !items.length) return { ok: false, error: 'не выбрано ни одного товара' };
+  const sets: { key: string; nmIDs: number[] }[] = [];
+  for (const it of items as any[]) {
+    const ids = [...new Set((Array.isArray(it?.nmIDs) ? it.nmIDs : []).map(Number).filter((n: number) => Number.isFinite(n) && n > 0))] as number[];
+    if (ids.length < 2) return { ok: false, error: `${it?.key ?? 'товар'}: нужен наш товар и хотя бы один конкурент` };
+    if (ids.length > 5) return { ok: false, error: `${it?.key ?? 'товар'}: в одно сравнение WB помещается 5 карточек` };
+    sets.push({ key: String(it?.key ?? ids[0]).slice(0, 80), nmIDs: ids });
+  }
+  if (openTask()) return { ok: false, error: 'сравнения уже запущены — дождитесь окончания' };
+  const lim = latestLimits();
+  const charged = sets.filter(s => !lim.free.some(f => sameSet(f, s.nmIDs))).length;
+  const used = weekUsed();
+  if (used + charged > WB_COMPARE_MAX_WEEK) return { ok: false, error: `выбрано ${charged}, а на этой неделе можно ещё ${Math.max(0, WB_COMPARE_MAX_WEEK - used)} (не больше ${WB_COMPARE_MAX_WEEK} в неделю)` };
+  if (lim.left != null && charged > lim.left) return { ok: false, error: `в лимите WB осталось ${lim.left}, выбрано ${charged} — докупите сравнения в кабинете («Сравнение карточек» → «Купить»)` };
+  const d = db();
+  const runId = Number(d.prepare("INSERT INTO ad_wb_compare_run (at, by, sets, status) VALUES (?, ?, ?, 'queued')").run(Date.now(), by, JSON.stringify(sets)).lastInsertRowid);
+  const t = createTask('competitor_watch', { marketplace: 'wb', compare: sets, compare_run: runId }, by, { priority: 5 });
+  if (!t) { d.prepare("UPDATE ad_wb_compare_run SET status = 'failed', result = ? WHERE id = ?").run(JSON.stringify({ message: 'очередь агентов недоступна' }), runId); return { ok: false, error: 'очередь агентов недоступна' }; }
+  d.prepare('UPDATE ad_wb_compare_run SET task_id = ? WHERE id = ?').run(t.id, runId);
+  return { ok: true, runId, taskId: t.id, charged };
+}
+
+const pct = (v: number | null | undefined) => v == null ? '–' : `${(Math.round(v * 10) / 10).toString().replace('.', ',')}%`;
+const n0 = (v: number | null | undefined) => v == null ? '–' : Math.round(v).toLocaleString('ru-RU');
+const median = (a: number[]) => { const s = a.filter(Number.isFinite).sort((x, y) => x - y); return s.length ? (s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2) : null; };
+
+/** Итог по одному набору: наш против медианы конкурентов (за 7 дней, если есть, иначе 30). */
+function setSummary(key: string, set: any): string {
+  const rows: any[] = set.nms7?.length ? set.nms7 : set.nms ?? [];
+  const per = set.nms7?.length ? '7 дн' : '30 дн';
+  const names = new Map<string, string>((set.nms ?? []).map((x: any) => [String(x.nmId), String(x.name ?? '')]));
+  const ourNm = String((set.created?.nmIDs ?? [])[0] ?? rows[0]?.nmId ?? '');
+  const our = rows.find(r => String(r.nmId) === ourNm);
+  const comp = rows.filter(r => String(r.nmId) !== ourNm);
+  if (!our) return `• <b>${esc(key)}</b> — данных по нашей карточке нет`;
+  const cCtr = median(comp.map(r => Number(r.ctr))), cOrd = median(comp.map(r => Number(r.orders)));
+  const best = comp.map(r => Number(r.avgPos)).filter(v => Number.isFinite(v) && v > 0).sort((a, b) => a - b)[0] ?? null;
+  const notes: string[] = [];
+  if (our.ctr != null && cCtr != null && our.ctr < cCtr * 0.8) notes.push('CTR ниже конкурентов — проверить главное фото');
+  if (our.avgPos != null && best != null && our.avgPos > best * 2 && our.avgPos - best >= 5) notes.push('позиция заметно ниже лидера');
+  if (our.orders != null && cOrd != null && our.orders < cOrd * 0.6) notes.push('заказов меньше, чем у конкурентов');
+  return [
+    `• <b>${esc(key)}</b> — ${esc((names.get(ourNm) || '').slice(0, 60))}`,
+    `  CTR ${pct(our.ctr)} · у конкурентов ${pct(cCtr)} (медиана)`,
+    `  Позиция ${our.avgPos != null ? n0(our.avgPos) : '–'} · лучшая у конкурентов ${best != null ? n0(best) : '–'}`,
+    `  Заказы за ${per}: ${n0(our.orders)} · у конкурентов ${n0(cOrd)} (медиана)`,
+    ...(notes.length ? [`  ⚠️ ${notes.join('; ')}`] : []),
+  ].join('\n');
+}
+
+/** Снимок агента пришёл (из saveCabinetSnapshot): история наборов, итог запуска и сообщение в чат. */
+export function onWbSnapshot(data: any, at: number): void {
+  const d = db();
+  const ins = d.prepare('INSERT OR REPLACE INTO ad_wb_comp_hist (set_id, date, nm, at, json) VALUES (?, ?, ?, ?, ?)');
+  for (const set of data?.compDetails ?? []) {
+    const w7 = new Map((set.nms7 ?? []).map((x: any) => [String(x.nmId), x]));
+    for (const x of set.nms ?? []) ins.run(String(set.id), String(set.date ?? ''), String(x.nmId), at, JSON.stringify({ d30: x, d7: w7.get(String(x.nmId)) ?? null }));
+  }
+  const runId = Number(data?.compareRun);
+  if (!runId || !Array.isArray(data?.compareCreated)) return;
+  const created: any[] = data.compareCreated;
+  const ok = created.filter(c => c.id);
+  const byId = new Map((data.compDetails ?? []).map((s: any) => [String(s.id), s]));
+  const parts = ok.map(c => setSummary(c.key, { ...(byId.get(String(c.id)) as any ?? {}), created: c }));
+  const failed = created.filter(c => !c.id);
+  const message = `создано ${ok.length} из ${created.length}${failed.length ? `, не создано: ${failed.map(f => f.key).join(', ')}` : ''}`;
+  d.prepare("UPDATE ad_wb_compare_run SET status = ?, result = ?, done_at = ? WHERE id = ?")
+    .run(ok.length ? 'done' : 'failed', JSON.stringify({ created: ok.length, message, failed }), Date.now(), runId);
+  lastResultText = resultText(message, parts, failed);
+  void tgSend(lastResultText);
+}
+
+/** Последний итог — для проверки на копии данных без отправки. */
+let lastResultText = '';
+export const lastResult = () => lastResultText;
+
+function resultText(message: string, parts: string[], failed: any[]): string {
+  const lim = latestLimits();
+  return [
+    `📊 <b>Сравнения WB готовы</b> — ${message}`,
+    '',
+    ...parts,
+    ...(failed.length ? ['', `❌ Не создано: ${failed.map(f => `${esc(f.key)} (${esc(String(f.error ?? '').slice(0, 80))})`).join('; ')}`] : []),
+    '',
+    `В лимите WB осталось: ${lim.left ?? '–'}. Подробно — <a href="${SITE}">«Конкуренты» → WB</a>`,
+  ].join('\n');
+}
+
+/** Агент не смог (задание упало) — отметить запуск, чтобы кнопка снова стала доступна. */
+function closeStaleRuns(): void {
+  const d = db();
+  for (const r of d.prepare("SELECT id, task_id FROM ad_wb_compare_run WHERE status = 'queued' AND task_id IS NOT NULL").all() as any[]) {
+    const t = listTasks({ limit: 200 }).find((x: any) => x.id === r.task_id);
+    if (t && (t.status === 'failed' || t.status === 'cancelled')) {
+      d.prepare("UPDATE ad_wb_compare_run SET status = 'failed', result = ?, done_at = ? WHERE id = ?").run(JSON.stringify({ created: 0, message: `агент не выполнил: ${String(t.error ?? '').slice(0, 160)}` }), Date.now(), r.id);
+      void tgSend(`❌ Сравнения WB не запустились: ${esc(String(t.error ?? 'ошибка агента').slice(0, 200))}. Попробуйте ещё раз в <a href="${SITE}">«Конкурентах»</a>.`);
+    } else if (t && t.status === 'done') {
+      // Снимок пришёл без итогов (старый агент) — закрываем без сообщения.
+      d.prepare("UPDATE ad_wb_compare_run SET status = 'done', done_at = ? WHERE id = ? AND status = 'queued'").run(Date.now(), r.id);
+    }
+  }
+}
+
+/** Напоминания по четвергам (МСК): 09:30 всегда, 14:00 — если сравнения на неделе ещё не запускали. */
+async function tick(): Promise<void> {
+  try { closeStaleRuns(); } catch (e) { console.warn('[wb-compare] проверка запусков:', (e as Error).message); }
+  if (!tgConfigured()) return;
+  const m = new Date(Date.now() + MSK);
+  if (m.getUTCDay() !== 4) return;
+  const hm = m.getUTCHours() * 60 + m.getUTCMinutes();
+  const week = new Date(weekStart() + MSK).toISOString().slice(0, 10);
+  const d = db();
+  const sent = (k: string) => !!d.prepare('SELECT 1 FROM ad_tg_sent WHERE key = ?').get(k);
+  const mark = (k: string) => d.prepare('INSERT OR IGNORE INTO ad_tg_sent (key, at) VALUES (?, ?)').run(k, Date.now());
+  const st = compareState();
+  const head = `В лимите WB осталось: <b>${st.limitLeft ?? '–'}</b> · на этой неделе можно до ${st.maxWeek}${st.weekUsed ? ` (уже ${st.weekUsed})` : ''}.`;
+  const how = `Откройте <a href="${SITE}">«Конкуренты» → WB</a>, проверьте конкурентов у нужных товаров, отметьте «В сравнение» и нажмите «Запустить сравнения».`;
+  if (hm >= 9 * 60 + 30 && hm < 13 * 60 && !sent(`remind1:${week}`)) {
+    if (await tgSend(`📌 <b>Четверг — время сравнений WB.</b>\n${head}\n${how}`)) mark(`remind1:${week}`);
+  } else if (hm >= 14 * 60 && hm < 18 * 60 && !sent(`remind2:${week}`) && !st.weekUsed && !st.running) {
+    if (await tgSend(`⏰ Напоминание: сравнения WB на этой неделе ещё не запускали.\n${head}\n${how}`)) mark(`remind2:${week}`);
+  }
+  if (st.limitLeft != null && st.limitLeft < 7 && !sent(`lowlimit:${week}`) && hm >= 9 * 60 + 30) {
+    if (await tgSend(`⚠️ В лимите сравнений WB осталось ${st.limitLeft} — меньше недельной нормы. Докупить: кабинет WB → «Сравнение карточек» → «Купить». Лимит тарифа обновляется 15-го.`)) mark(`lowlimit:${week}`);
+  }
+}
+
+export function scheduleWbCompare(): void {
+  void chatId();
+  setInterval(() => { void tick(); }, 60_000).unref();
+  console.log('[wb-compare] напоминания по четвергам 09:30 / 14:00 МСК' + (tgConfigured() ? '' : ' — токен Telegram не задан'));
+}
+

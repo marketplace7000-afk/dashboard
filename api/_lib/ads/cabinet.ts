@@ -15,6 +15,7 @@ import {
 } from '../competitorWatch';
 import { rnpInStockSkus, rnpItems, saveWbCardViews } from '../rnp';
 import { wbImageUrl } from '../wbBasket';
+import { onWbSnapshot, compareState } from './wbCompare';
 
 const KEEP = 30;
 
@@ -254,6 +255,8 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
     delete data.funnelViews;   // в снимке кабинета не храним — они уже в РНП
   }
   if (mp === 'wb') saveCompLast(data.compDetails, at);
+  // Недельные сравнения WB: история наборов, итог запуска менеджера и сообщение в чат.
+  if (mp === 'wb') { try { onWbSnapshot(data, at); } catch (e) { console.warn('[wb-compare] итог не записан:', (e as Error).message); } }
   d.prepare('INSERT INTO ad_cabinet_snapshot (mp, at, json) VALUES (?, ?, ?)').run(mp, at, JSON.stringify(data));
   d.prepare(`DELETE FROM ad_cabinet_snapshot WHERE mp = ? AND id NOT IN (SELECT id FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT ?)`).run(mp, mp, KEEP);
   let suggested = 0;
@@ -708,6 +711,10 @@ export function requestRefresh(mp: AdMp, by: string, delayMin = 0): { ok: true; 
   return t ? { ok: true, taskId: t.id, already: false } : { ok: false, error: 'очередь агентов недоступна' };
 }
 
+function safeCompareState() {
+  try { return compareState(); } catch (e) { console.warn('[wb-compare] состояние:', (e as Error).message); return undefined; }
+}
+
 export function getCompetitors(mp: AdMp): Ads2Competitors {
   const d = db();
   const row = d.prepare('SELECT at, json FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT 1').get(mp) as any;
@@ -715,5 +722,5 @@ export function getCompetitors(mp: AdMp): Ads2Competitors {
   if (!row) return { ok: true, mp, at: null, empty: true, errors: [], refresh, ...buildWatch(mp, null) };
   const data = JSON.parse(row.json);
   const base = { ok: true as const, mp, at: Number(row.at), empty: false, refresh, errors: (data?.errors ?? []).map(String).slice(0, 10), ...buildWatch(mp, data) };
-  return mp === 'wb' ? { ...base, wb: parseWb(data) } : { ...base, ozon: parseOzon(data, String(process.env.OZON_CLIENT_ID || '').trim()) };
+  return mp === 'wb' ? { ...base, wb: parseWb(data), wbCompare: safeCompareState() } : { ...base, ozon: parseOzon(data, String(process.env.OZON_CLIENT_ID || '').trim()) };
 }

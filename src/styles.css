@@ -1672,6 +1672,11 @@ code {
 .cmp-badge { margin-left: 2px; }
 .cmp-check { display: inline-flex; align-items: center; gap: 6px; font-size: 17px; color: var(--muted); white-space: nowrap; cursor: pointer; }
 .cmp-check input { width: 16px; height: 16px; }
+/* 26.10: недельные сравнения WB — галочка у товара и панель запуска */
+.cmp-pick { margin-left: auto; color: var(--text); font-weight: 600; }
+.cmp-pick:has(input:disabled) { color: var(--muted); font-weight: 400; cursor: default; }
+.cmp-compare-s { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 17px; }
+.cmp-compare-last { font-size: 16px; }
 .cmp-refresh { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; flex: 1 1 100%; }
 .cmp-refresh-t { display: grid; gap: 4px; font-size: 17px; flex: 1 1 420px; min-width: 0; }
 .cmp-fresh { font-size: 19px; }

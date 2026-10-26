@@ -191,6 +191,18 @@ export type Ads2CompRefresh = {
 /** Наш товар (ключ — наш артикул продавца) и его конкуренты. */
 export type Ads2WatchProduct = { key: string; ourId: string; name: string; photo: string; our: Ads2WatchLink | null; links: Ads2WatchLink[] };
 
+/** «Сравнение карточек» WB раз в неделю (26.10.2026): лимиты и последний запуск. */
+export type Ads2WbCompare = {
+  maxWeek: number; weekUsed: number;
+  /** Сколько сравнений осталось в лимите кабинета (последний ночной проход); null — неизвестно. */
+  limitLeft: number | null;
+  /** Наборы, которые можно открыть заново без списания (72 часа с прошлого сравнения тех же карточек). */
+  freeSets: number[][];
+  running: boolean;
+  lastRun: { id: number; at: number; status: string; total: number; created: number | null; message: string | null; doneAt: number | null } | null;
+  telegram: boolean;
+};
+
 export type Ads2Competitors = {
   ok: true; mp: Ads2Mp; at: number | null;
   /** Нет снимка — задание ещё не отработало. */
@@ -200,6 +212,7 @@ export type Ads2Competitors = {
   watch: Ads2WatchProduct[];
   /** Наши товары для выбора при добавлении: артикул и название. */
   catalog: { key: string; name: string }[];
+  wbCompare?: Ads2WbCompare;
   wb?: {
     period: { start: string; end: string } | null;
     summary: { avgPos: number | null; avgPosDyn: number | null; medianPos: number | null; visibility: number | null; advertised: number | null; total: number | null };

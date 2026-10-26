@@ -363,6 +363,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (!r.ok) return res.status(503).json(r);
             return res.status(200).json({ ...getCompetitors(b.mp === 'ozon' ? 'ozon' : 'wb'), queued: r });
           }
+          // Недельные сравнения WB: менеджер выбрал товары (наш + до 4 конкурентов) — агент создаст наборы в кабинете.
+          if (b.action === 'compare') {
+            const { requestCompare } = await import('./_lib/ads/wbCompare');
+            const r = requestCompare(b.items, 'panel');
+            if (!r.ok) return res.status(400).json(r);
+            return res.status(200).json({ ...getCompetitors('wb'), compareQueued: r });
+          }
           const r = editWatch(b);
           if (!r.ok) return res.status(400).json(r);
           return res.status(200).json(getCompetitors(b.mp === 'ozon' ? 'ozon' : 'wb'));

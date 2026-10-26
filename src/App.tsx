@@ -88,7 +88,8 @@ const TITLES: Record<Page, string> = {
 
 export function App() {
   const [logged, setLogged] = useState(false);
-  const [page, setPage] = useState<Page>('dashboard');
+  // Ссылка из Telegram (напоминание о сравнениях WB) ведёт сразу в «Конкуренты»: e-avtovibe.ru/#competitors-wb
+  const [page, setPage] = useState<Page>(() => (typeof location !== 'undefined' && location.hash.startsWith('#competitors') ? 'competitors' : 'dashboard'));
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Кто вошёл и какие разделы ему открыты (роль + галочки владельца, см.

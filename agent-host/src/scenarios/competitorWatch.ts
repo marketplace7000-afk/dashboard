@@ -111,6 +111,14 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
         avgPos: c(p.avgPosition), avgPosDyn: dy(p.avgPosition), openCard: c(p.openCard), orders: c(p.orders), ordersDyn: dy(p.orders),
         ctr: c(p.CTR), views: c(p.viewCount), buyoutPercent: c(p.buyoutPercent), inAds: !!p.inAdvertising, inPromo: !!(p.promo && p.promo.inPromo) })),
       queries: (det.searchQueries || []).map(q => ({ text: q.text, freq: c(q.frequency) })) });
+    // Тот же набор за 7 дней (26.10.2026: сравнения раз в неделю — «неделя к неделе»). Период лимит не тратит.
+    await new Promise(r => setTimeout(r, 1200 + Math.random() * 1000));
+    const r7 = await j('/v4/competitor-comparison/nms/detail', { period: { start: d(6), end: d(0) }, id: h.ID,
+      searchQueriesRequest: { limit: 5, offset: 0, orderBy: { field: 'frequency', mode: 'desc', nmID: scope[0] }, scopeNmIDs: scope }, sizeDetails: true });
+    const det7 = r7.json && !r7.json.error && r7.json.data;
+    if (det7) compDetails[compDetails.length - 1].nms7 = (det7.commonParams || []).map(p => ({ nmId: p.nmId,
+      avgPos: c(p.avgPosition), openCard: c(p.openCard), orders: c(p.orders), ordersDyn: dy(p.orders), ctr: c(p.CTR), ctrDyn: dy(p.CTR), views: c(p.viewCount),
+      addToCart: c(p.addToCart), inAds: !!p.inAdvertising, inPromo: !!(p.promo && p.promo.inPromo) }));
     await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500));
   }
   // Позиция и воронка каждой нашей карточки за вчера и позавчера — отчёт за один день
@@ -126,6 +134,40 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
   return { period: { start: d(7), end: d(1) }, report: data, recommendations: reco, daily: daily,
     comparisons: { limits: lim.json && lim.json.data || null, history: hist.json && hist.json.data || null }, compDetails: compDetails, errors: errors };
 })(${JSON.stringify(auth)})`;
+
+// Создать сравнения «Сравнение карточек» WB (26.10.2026, запуск менеджером из «Конкурентов»).
+// Как это делает сама страница кабинета: POST v3/competitor-comparison/nms со списком nmIDs
+// (2–5 карточек) и без id набора — WB формирует отчёт и списывает 1 сравнение из лимита;
+// набор 72 часа открывается бесплатно (его потом читает WB_COLLECT). Те же артикулы в пределах
+// 72 часов лимит повторно не тратят (availableWithoutCharge в limits).
+const WB_CREATE = (auth: Record<string, string>, sets: { key: string; nmIDs: number[] }[]) => `(async (A, SETS) => {
+  const H = 'https://seller-content.wildberries.ru/ns/analytics-api/content-analytics/api';
+  const d = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+  const out = [];
+  for (const s of SETS) {
+    let res = { key: s.key, nmIDs: s.nmIDs, id: null, error: null };
+    try {
+      const r = await fetch(H + '/v3/competitor-comparison/nms', { method: 'POST', credentials: 'include',
+        headers: Object.assign({}, A, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ nmIDs: s.nmIDs, startDate: d(30), endDate: d(0),
+          searchQueriesOrderBy: { field: 'frequency', mode: 'desc', nmID: s.nmIDs[0] },
+          officesAndRegionsOrderBy: { field: 'stockCount', mode: 'desc' }, sizeDetails: false }) });
+      const t = await r.text();
+      let j = null; try { j = JSON.parse(t); } catch (e) {}
+      const data = j && (j.data || j);
+      if (r.ok && data && data.ID) res.id = data.ID;
+      else {
+        const keys = ((j && j.additionalErrors && j.additionalErrors.errors) || []).map(e => e.trKey).filter(Boolean);
+        res.error = r.status + ' ' + (keys.join(', ') || (j && j.errorText) || t.slice(0, 160));
+      }
+    } catch (e) { res.error = 'обрыв связи: ' + e.message; }
+    out.push(res);
+    // Лимит кончился — дальше не пробуем.
+    if (res.error && /[Ll]imit/.test(res.error)) break;
+    await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
+  }
+  return out;
+})(${JSON.stringify(auth)}, ${JSON.stringify(sets)})`;
 
 // Показы карточек WB по дням (26.10.2026, для CTR в РНП): «Воронка продаж» кабинета
 // (v1/sales-funnel/report). В открытом API показов нет. Отчёт отдаёт не больше 50 товаров
@@ -434,8 +476,21 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
       for (let i = 0; i < 10 && !getAuth(); i++) await sleep(1000);
       const auth = getAuth();
       if (!auth) { await api.fail(task.id, { error: 'страница аналитики WB не сделала запрос — нет заголовков сессии', retryable: true }); return; }
+      // Запуск сравнений менеджером: сначала создать наборы, потом обычный проход их прочитает.
+      const compare = Array.isArray(task.params.compare) ? task.params.compare as { key: string; nmIDs: number[] }[] : [];
+      let created: any[] | null = null;
+      if (compare.length) {
+        await api.progress(task.id, stage(1, `Создаю сравнения в кабинете WB: ${compare.length}`, { items_done: 0, items_total: compare.length }), true);
+        try { created = await page.evaluate(WB_CREATE(auth, compare)) as any[]; }
+        catch (e) { created = compare.map(c => ({ key: c.key, nmIDs: c.nmIDs, id: null, error: (e as Error).message.slice(0, 160) })); }
+        const ok = created.filter(c => c.id).length;
+        await api.progress(task.id, stage(1, `Сравнений создано: ${ok} из ${compare.length}`, { items_done: ok, items_total: compare.length }), true);
+        for (const c of created.filter(c => c.error)) await api.log(task.id, 'warn', `сравнение ${c.key}: ${String(c.error).slice(0, 200)}`);
+        await sleep(4000);
+      }
       await api.progress(task.id, stage(1, 'Позиции по запросам и сравнения карточек'), true);
       data = await page.evaluate(WB_COLLECT(auth));
+      if (data && created) { data.compareCreated = created; data.compareRun = task.params.compare_run ?? null; }
       const items = (data?.report?.groups ?? []).reduce((s: number, g: any) => s + (g.items?.length ?? 0), 0);
       await api.progress(task.id, stage(1, `Карточек с позициями: ${items}, наборов сравнения: ${data?.comparisons?.history?.length ?? 0}`, { items_done: items, items_total: items }), true);
       // Показы карточек по дням для CTR в РНП: какие товары и дни — решает сервер (вчера, позавчера и пропуски истории).

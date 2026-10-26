@@ -17,7 +17,7 @@ import {
   ArrowsClockwiseIcon, MagnifyingGlassIcon, PlusIcon, WarningIcon, WarningOctagonIcon, CheckCircleIcon, XIcon,
 } from '@phosphor-icons/react';
 import { apiGet, apiPost, errText } from '../api/http';
-import type { Ads2Mp, Ads2Competitors, Ads2WatchLink, Ads2WatchProduct } from '../../shared/ads2';
+import type { Ads2Mp, Ads2Competitors, Ads2WatchLink, Ads2WatchProduct, Ads2WbCompare } from '../../shared/ads2';
 import { nf0, nf1, rub, num, pct, ddmm, kRub, when, whenRel, ProductCell, PosDyn, PctDyn, MiniLines } from './ads2ui';
 
 type Sheet = 'watch' | 'market';
@@ -156,8 +156,17 @@ function HiddenNote({ mp, since }: { mp: Ads2Mp; since: number | null }) {
   );
 }
 
-function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7 }: {
-  p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; showIgnored: boolean; per?: OzPer; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
+/** Карточки для «Сравнения карточек» WB: наш товар + первые 4 подтверждённых конкурента (в набор WB помещается 5). */
+function compareNms(p: Ads2WatchProduct): number[] {
+  const our = Number(p.ourId);
+  if (!Number.isFinite(our) || our <= 0) return [];
+  const comp = p.links.filter(l => l.status === 'active' && !l.hidden).map(l => Number(l.id)).filter(n => Number.isFinite(n) && n > 0 && n !== our).slice(0, 4);
+  return comp.length ? [our, ...comp] : [];
+}
+
+function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7, pick }: {
+  p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; showIgnored: boolean; per?: OzPer;
+  pick?: { on: boolean; toggle: () => void }; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [link, setLink] = useState('');
@@ -193,6 +202,17 @@ function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7 }:
             <div className="muted cmp-name">{our?.url ? <a href={our.url} target="_blank" rel="noreferrer">{p.name}</a> : p.name}{p.ourId ? ` · ${p.ourId}` : ''}</div>
           </div>
         </div>
+        {pick && (() => {
+          const nms = compareNms(p);
+          const active = p.links.filter(l => l.status === 'active' && !l.hidden).length;
+          const why = !p.ourId ? 'у нашего товара нет артикула WB' : !nms.length ? 'нет подтверждённых конкурентов' : '';
+          const tip = why || `В сравнение пойдут наш товар и ${nms.length - 1} ${nms.length - 1 === 1 ? 'конкурент' : 'конкурента'}${active > 4 ? ' (первые 4 подтверждённых: в набор WB помещается 5 карточек)' : ''}`;
+          return (
+            <label className="cmp-check cmp-pick" title={tip}>
+              <input type="checkbox" checked={pick.on && !why} disabled={!!why} onChange={pick.toggle} /> В сравнение{nms.length ? <span className="muted"> · {nms.length} карт.</span> : null}
+            </label>
+          );
+        })()}
         <button className={`btn ${adding ? '' : 'btn-primary'}`} onClick={() => { setAdding(a => !a); setErr(null); }}>
           {adding ? 'Отмена' : <><PlusIcon size={14} weight="bold" /> Конкурент</>}
         </button>
@@ -259,6 +279,59 @@ function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7 }:
   );
 }
 
+/** Недельные сравнения WB (26.10.2026): счётчики лимита и кнопка запуска — агент создаст наборы в кабинете сам. */
+function ComparePanel({ st, picked, onClear, onData, setToast }: {
+  st: Ads2WbCompare; picked: Ads2WatchProduct[]; onClear: () => void; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const same = (a: number[], b: number[]) => a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
+  const items = picked.map(p => ({ key: p.key, nmIDs: compareNms(p) }));
+  const charged = items.filter(i => !st.freeSets.some(f => same(f, i.nmIDs))).length;
+  const weekLeft = Math.max(0, st.maxWeek - st.weekUsed);
+  const over = charged > weekLeft ? `на этой неделе можно ещё ${weekLeft}`
+    : st.limitLeft != null && charged > st.limitLeft ? `в лимите WB осталось ${st.limitLeft} — докупите сравнения в кабинете` : '';
+  const run = async () => {
+    if (!items.length || over) return;
+    const free = items.length - charged;
+    const msg = `Запустить сравнения WB: ${items.length} шт.?\nИз лимита спишется ${charged}${free ? ` (${free} — бесплатно, сравнивали в последние 72 часа)` : ''}.\nАгент создаст их в кабинете WB, снимет данные и пришлёт итог в Telegram.`;
+    if (!window.confirm(msg)) return;
+    setBusy(true);
+    try {
+      const r = await apiPost<Ads2Competitors>('/api/ads2/competitors', { mp: 'wb', action: 'compare', items });
+      onData(r.data);
+      onClear();
+      setToast({ ok: true, text: 'Сравнения запущены — агент создаст их в кабинете WB за несколько минут, итог придёт в Telegram' });
+    } catch (e) { setToast({ ok: false, text: 'Не запустилось: ' + errText(e).replace(/^сервер ответил \d+: /, '') }); }
+    finally { setBusy(false); }
+  };
+  const lr = st.lastRun;
+  const lrText = !lr ? '' : lr.status === 'queued' ? 'идёт…' : lr.status === 'failed' ? `не получилось — ${lr.message ?? ''}` : (lr.message ?? `${lr.total} шт.`);
+  return (
+    <section className="card cmp-card cmp-compare">
+      <div className="cmp-head">
+        <h2>Сравнения WB на этой неделе</h2>
+        <button className="btn btn-primary" disabled={busy || st.running || !items.length || !!over} onClick={run}
+          title={over || (st.running ? 'Сравнения уже идут' : !items.length ? 'Отметьте товары галочкой «В сравнение»' : '')}>
+          {st.running ? 'Агент создаёт сравнения…' : `Запустить сравнения${items.length ? ` (${items.length})` : ''}`}
+        </button>
+      </div>
+      <p className="muted cmp-lead">
+        Отметьте у товаров «В сравнение» — в набор пойдут наш товар и до 4 подтверждённых конкурентов. Агент сам создаст сравнения в кабинете WB,
+        снимет CTR, позиции и заказы за 7 и 30 дней и пришлёт итог в Telegram. Каждое сравнение — 1 из лимита; те же карточки в течение 72 часов — бесплатно.
+      </p>
+      <div className="cmp-compare-s">
+        <span>Выбрано: <b>{items.length}</b>{charged !== items.length ? <span className="muted"> (спишется {charged})</span> : null}</span>
+        <span>На этой неделе: <b>{st.weekUsed}</b> из {st.maxWeek}</span>
+        <span>В лимите WB осталось: <b>{st.limitLeft ?? '–'}</b> <span className="muted">· обновляется 15-го</span></span>
+        {items.length > 0 && <button className="btn btn-sm" onClick={onClear}>Снять выбор</button>}
+        {!st.telegram && <span className="chip warn">Telegram не подключён — итог будет только здесь</span>}
+      </div>
+      {over && <div className="ad2-err">{over}</div>}
+      {lr && <div className="muted cmp-compare-last">Последний запуск {when(lr.at)}: {lrText}</div>}
+    </section>
+  );
+}
+
 function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2Mp; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void }) {
   const [q, setQ] = useState('');
   const [all, setAll] = useState(false);
@@ -269,6 +342,11 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
   const pickPer = (v: OzPer) => { setPer(v); try { localStorage.setItem('cmp:ozPer', String(v)); } catch { /* приватное окно */ } };
   const withLinks = d.watch.filter(p => p.links.length > 0);
   const gone = d.watch.filter(p => p.our?.hidden);
+  // Выбор товаров для недельных сравнений WB — помним до запуска (менеджер отмечает в течение дня).
+  const [picks, setPicks] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem('cmp:wbPick') || '[]')); } catch { return new Set(); } });
+  const savePicks = (x: Set<string>) => { setPicks(x); try { localStorage.setItem('cmp:wbPick', JSON.stringify([...x])); } catch { /* приватное окно */ } };
+  const togglePick = (key: string) => { const x = new Set(picks); if (x.has(key)) x.delete(key); else x.add(key); savePicks(x); };
+  const picked = mp === 'wb' ? d.watch.filter(p => picks.has(p.key) && compareNms(p).length) : [];
   const pendingOf = (p: Ads2WatchProduct) => p.links.filter(l => l.status === 'suggested').length;
   const pending = d.watch.reduce((s, p) => s + pendingOf(p), 0);
   const needle = q.trim().toLowerCase();
@@ -308,6 +386,7 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
           <label className="cmp-check"><input type="checkbox" checked={showIgnored} onChange={e => setShowIgnored(e.target.checked)} /> показывать «не наших»</label>
         </div>
       </section>
+      {mp === 'wb' && d.wbCompare && <ComparePanel st={d.wbCompare} picked={picked} onClear={() => savePicks(new Set())} onData={onData} setToast={setToast} />}
       {/* Плашку «Не видны покупателям» на листе Ozon владелец попросил убрать (22.10.2026). */}
       {mp === 'wb' && gone.length > 0 && (
         <section className="card cmp-gone-card" role="alert">
@@ -321,7 +400,8 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
         </section>
       )}
       {list.length === 0 && <div className="card muted">{all || needle || onlyPending ? 'Ничего не найдено.' : 'Привязок пока нет. Предложения появятся после ночного прохода агента; своего конкурента можно привязать в «Все товары».'}</div>}
-      {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} per={per} showIgnored={showIgnored} onData={onData} setToast={setToast} />)}
+      {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} per={per} showIgnored={showIgnored} onData={onData} setToast={setToast}
+        pick={mp === 'wb' && d.wbCompare ? { on: picks.has(p.key), toggle: () => togglePick(p.key) } : undefined} />)}
       {list.length > more && <button className="btn" onClick={() => setMore(m => m + 20)}>Показать ещё ({list.length - more})</button>}
     </>
   );
@@ -487,7 +567,7 @@ function Board({ mp, mpSwitch }: { mp: Ads2Mp; mpSwitch: React.ReactNode }) {
 }
 
 export function Competitors() {
-  const [mp, setMp] = useState<Ads2Mp>(() => { try { return localStorage.getItem('cmp:mp') === 'ozon' ? 'ozon' : localStorage.getItem('cmp:mp') === 'wb' ? 'wb' : (localStorage.getItem('ads2:mp') === 'ozon' ? 'ozon' : 'wb'); } catch { return 'wb'; } });
+  const [mp, setMp] = useState<Ads2Mp>(() => { try { if (location.hash === '#competitors-wb') return 'wb'; return localStorage.getItem('cmp:mp') === 'ozon' ? 'ozon' : localStorage.getItem('cmp:mp') === 'wb' ? 'wb' : (localStorage.getItem('ads2:mp') === 'ozon' ? 'ozon' : 'wb'); } catch { return 'wb'; } });
   const choose = (m: Ads2Mp) => { setMp(m); try { localStorage.setItem('cmp:mp', m); } catch { /* не критично */ } };
   // Стиль А (22.10.2026): класс .sa включает общий слой стиля — см. блок «Стиль А» в styles.css.
   const mpSwitch = (

@@ -104,6 +104,10 @@ app.listen(PORT, '0.0.0.0', () => {
   import('./api/_lib/reviews')
     .then(m => m.scheduleReviews())
     .catch(e => console.warn('[reviews] таймер не запущен:', (e as Error).message));
+  // Агент 3: недельные сравнения WB — напоминания в Telegram по четвергам и итоги запусков.
+  import('./api/_lib/ads/wbCompare')
+    .then(m => m.scheduleWbCompare())
+    .catch(e => console.warn('[wb-compare] таймер не запущен:', (e as Error).message));
 });
 
 // ─── Прогрев кэша (замена vercel.json crons) ──────────────────────────────

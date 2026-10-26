@@ -220,3 +220,36 @@ export function scheduleWbCompare(): void {
   console.log('[wb-compare] напоминания по четвергам 09:30 / 14:00 МСК' + (tgConfigured() ? '' : ' — токен Telegram не задан'));
 }
 
+
+export type CompareFact = {
+  setId: string; date: string; period: 7 | 30;
+  ours: { nm: string; ctr: number | null; views: number | null; avgPos: number | null; orders: number | null; ordersDyn: number | null };
+  comps: { nm: string; name: string; ctr: number | null; views: number | null; avgPos: number | null; orders: number | null; ordersDyn: number | null }[];
+};
+
+/**
+ * Последнее сравнение по каждому нашему товару (для «Советника», 26.10.2026): наш nmId → наш ряд
+ * и ряды конкурентов того же набора, за 7 дней (если сняты), иначе за 30. Наборы старше maxAgeDays — не берём.
+ */
+export function lastCompareFacts(ourNms: Set<string>, maxAgeDays = 10): Map<string, CompareFact> {
+  const out = new Map<string, CompareFact>();
+  const since = Date.now() - maxAgeDays * 86_400_000;
+  const rows = db().prepare('SELECT set_id, date, nm, at, json FROM ad_wb_comp_hist WHERE at >= ? ORDER BY at DESC').all(since) as any[];
+  const bySet = new Map<string, any[]>();
+  for (const r of rows) { const a = bySet.get(r.set_id) ?? []; a.push(r); bySet.set(r.set_id, a); }
+  const num = (v: unknown) => v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v);
+  for (const [setId, rs] of bySet) {
+    const parsed = rs.map(r => { let j: any = {}; try { j = JSON.parse(r.json); } catch { /* пусто */ } return { nm: String(r.nm), date: String(r.date), j }; });
+    const has7 = parsed.every(x => x.j.d7);
+    const pick = (x: any) => {
+      const s = has7 ? x.j.d7 : x.j.d30 ?? {};
+      return { nm: x.nm, name: String(x.j.d30?.name ?? ''), ctr: num(s.ctr), views: num(s.views), avgPos: num(s.avgPos), orders: num(s.orders), ordersDyn: num(s.ordersDyn) };
+    };
+    for (const x of parsed) {
+      if (!ourNms.has(x.nm) || out.has(x.nm)) continue; // строки идут от свежих к старым — первое попадание и есть последнее
+      const { name: _n, ...ours } = pick(x);
+      out.set(x.nm, { setId, date: x.date, period: has7 ? 7 : 30, ours, comps: parsed.filter(y => y.nm !== x.nm && !ourNms.has(y.nm)).map(pick) });
+    }
+  }
+  return out;
+}

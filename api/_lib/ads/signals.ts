@@ -18,6 +18,7 @@ import { adsDb, type AdMp } from './store';
 import { getAdsOverview } from './overview';
 import { getAdvisor, ADVISOR_LABEL } from './advisor';
 import { hiddenCards, compCardSeries, cardHistory, refreshState } from './cabinet';
+import { lastCompareFacts } from './wbCompare';
 import { lastAdsSync } from './sync';
 import { getAllLinks } from '../competitorWatch';
 import { getRnp, collectRnp, rnpCollecting } from '../rnp';
@@ -228,6 +229,64 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
       }
     }
   } catch (e) { notes.push(`Конкуренты: ${(e as Error).message}`); }
+
+  // 5. «Сравнение карточек» WB (26.10.2026): CTR, позиция и рост заказов против конкурентов
+  //    из последнего недельного сравнения (не старше 10 дней; за 7 дней, если сняты).
+  if (mp === 'wb') {
+    try {
+      const ours = new Set(ov.products.filter(p => !p.archived).map(p => String(p.key)));
+      const facts = lastCompareFacts(ours);
+      const med = (xs: (number | null)[]) => { const v = xs.filter((x): x is number => x != null && Number.isFinite(x)).sort((a, b) => a - b); if (!v.length) return null; const m = Math.floor(v.length / 2); return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; };
+      const f1 = (v: number) => String(Math.round(v * 10) / 10).replace('.', ',');
+      const ids = new Set<string>();
+      for (const f of facts.values()) { ids.add(f.ours.nm); for (const c of f.comps) ids.add(c.nm); }
+      let shelf = new Map<string, { price: number | null }>();
+      try { shelf = cardHistory(mp, [...ids]) as any; } catch { /* без цен — сигнал по позиции не даём */ }
+      for (const p of ov.products) {
+        const f0 = facts.get(String(p.key));
+        if (!f0 || p.archived) continue;
+        // Только конкуренты с заметным трафиком: «позиция 1» или CTR 31% при 300 показах против наших 8 500 —
+        // случайность (проверено 26.10). Показов не меньше 1000 и 10% наших, либо от 3 заказов.
+        const minViews = Math.max(1000, (f0.ours.views ?? 0) * 0.1);
+        const f = { ...f0, comps: f0.comps.filter(c => (c.views ?? 0) >= minViews || (c.orders ?? 0) >= 3) };
+        if (!f.comps.length) continue;
+        const o = f.ours;
+        const when = `сравнение от ${f.date.slice(8, 10)}.${f.date.slice(5, 7)}, за ${f.period} дн`;
+        // 5a. CTR ниже конкурентов — главное фото и первые слайды (дизайнеру).
+        const cCtr = med(f.comps.map(c => c.ctr));
+        if (o.ctr != null && cCtr != null && cCtr > 0 && o.ctr < cCtr * 0.8 && (o.views ?? 0) >= 300) {
+          const lost = o.views != null ? Math.round(o.views * (cCtr - o.ctr) / 100) : null;
+          drafts.push({
+            sku: p.key, code: 'cmp_ctr_low', level: o.ctr < cCtr * 0.6 ? 'warn' : 'info', role: 'content', title: ADVISOR_LABEL.cmp_ctr_low.label,
+            text: `CTR карточки ${f1(o.ctr)}% против ${f1(cCtr)}% у конкурентов (медиана ${f.comps.length}, ${when})${lost ? `: при ${nf.format(o.views!)} показах это ≈ ${nf.format(lost)} переходов в карточку недобрано` : ''}`,
+            action: ADVISOR_LABEL.cmp_ctr_low.action, rub: null, prod: prodOf(p),
+          });
+        }
+        // 5b. Позиция заметно ниже лидера набора при сопоставимой цене — дело не в цене.
+        const best = f.comps.map(c => c.avgPos).filter((x): x is number => x != null && x > 0).sort((a, b) => a - b)[0] ?? null;
+        const ourPrice = shelf.get(o.nm)?.price ?? null;
+        const cPrice = med(f.comps.map(c => shelf.get(c.nm)?.price ?? null));
+        const priceOk = ourPrice != null && cPrice != null && ourPrice <= cPrice * 1.1;
+        if (o.avgPos != null && best != null && o.avgPos >= best * 2 && o.avgPos - best >= 5 && priceOk) {
+          drafts.push({
+            sku: p.key, code: 'cmp_pos_behind', level: o.avgPos - best >= 20 ? 'warn' : 'info', role: 'ads', title: ADVISOR_LABEL.cmp_pos_behind.label,
+            text: `Средняя позиция в поиске ${nf.format(o.avgPos)} против ${nf.format(best)} у лучшего из конкурентов (${when}), а цена сопоставима: наша ${rub(ourPrice!)}, медиана конкурентов ${rub(cPrice!)}`,
+            action: ADVISOR_LABEL.cmp_pos_behind.action, rub: null, prod: prodOf(p),
+          });
+        }
+        // 5c. Конкурент растёт: его заказы за период выросли на 30%+ к прошлому, а наши — нет.
+        const grow = f.comps.filter(c => c.ordersDyn != null && c.ordersDyn >= 30 && (c.orders ?? 0) >= 5).sort((a, b) => (b.ordersDyn ?? 0) - (a.ordersDyn ?? 0));
+        if (grow.length && (o.ordersDyn == null || o.ordersDyn <= 5)) {
+          const g = grow[0];
+          drafts.push({
+            sku: p.key, code: 'cmp_comp_growing', level: 'info', role: 'price', title: ADVISOR_LABEL.cmp_comp_growing.label,
+            text: `Конкурент «${(g.name || g.nm).slice(0, 40)}» нарастил заказы на ${Math.round(g.ordersDyn!)}% (${nf.format(g.orders ?? 0)} шт, ${when}), а наши ${o.ordersDyn != null ? `${o.ordersDyn > 0 ? '+' : ''}${Math.round(o.ordersDyn)}%` : 'без роста'} (${nf.format(o.orders ?? 0)} шт)${grow.length > 1 ? `; растут ещё ${grow.length - 1}` : ''}`,
+            action: ADVISOR_LABEL.cmp_comp_growing.action, rub: null, prod: prodOf(p),
+          });
+        }
+      }
+    } catch (e) { notes.push(`Сравнение карточек: ${(e as Error).message}`); }
+  }
 
   // 6. Цены (этап Б): маржа ниже порога и цена против подтверждённых конкурентов — с рекомендованной
   //    ценой ЛК, не ниже пола по марже (порог — настройка репрайсера, по умолчанию 15%).

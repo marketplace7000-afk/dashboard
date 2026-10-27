@@ -1,38 +1,51 @@
 /**
- * «Остатки FBO» (26.10.2026) — остатки на складах маркетплейсов по кластерам Ozon
- * и регионам WB, поставки к ним, где покупают и свои склады (FBS) отдельным блоком.
- * Снимок собирает сервер (api/_lib/fboStocks.ts) раз в 3 часа; расчёты — utils/fboModel.ts.
+ * «Остатки FBO» — остатки на складах маркетплейсов по кластерам Ozon и регионам WB,
+ * поставки, где покупают и свои склады (FBS). Снимок собирает сервер
+ * (api/_lib/fboStocks.ts) раз в 3 часа; расчёты — utils/fboModel.ts.
+ *
+ * 27.10.2026 по просьбе владельца: вместо карточек — таблица «один товар — одна строка»
+ * (слева фото, артикул, название; справа остатки, поставки, заказы, FBS), кластеры —
+ * строкой сверху, подробности по кластерам — по клику на строку.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowsClockwiseIcon } from '@phosphor-icons/react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowsClockwiseIcon, CaretDownIcon, CaretRightIcon } from '@phosphor-icons/react';
 import '../fbo.css';
 import { apiGet, apiPost, errText } from '../api/http';
 import {
-  type FboBundle, type Mp, type Source, type Item, type Supply,
-  buildOzon, buildWb, clustersOf, demandRows, itemsFor, fmt, pct, plural, KIND_ORDER,
+  type FboBundle, type Mp, type Source, type Supply, type ProductRow, type SortKey, type RowFilter,
+  buildOzon, buildWb, clustersOf, demandRows, productRows, sortRows, filterRows, fmt, pct, plural, KIND_ORDER, shortPlace,
 } from '../utils/fboModel';
 
 type Resp = { ok: boolean; data: FboBundle | null; collecting: boolean; ageMin: number | null };
+type View = 'items' | 'demand' | 'supplies' | 'fbs';
 
-const SUP_MAX = 4;
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: 'fbo', label: 'по остатку FBO' },
+  { key: 'orders', label: 'по заказам' },
+  { key: 'days', label: 'по запасу в днях' },
+  { key: 'fbs', label: 'по остатку FBS' },
+  { key: 'far', label: 'по доле «издалека»' },
+  { key: 'name', label: 'по названию' },
+];
 
 export function Fbo() {
   const [resp, setResp] = useState<Resp | null>(null);
   const [err, setErr] = useState('');
   const [mp, setMp] = useState<Mp>('o');
   const [cluster, setCluster] = useState<string | null>(null);
-  const [wh, setWh] = useState<string | null>(null);
+  const [view, setView] = useState<View>('items');
   const [query, setQuery] = useState('');
-  const [supOpen, setSupOpen] = useState(false);
+  const [filter, setFilter] = useState<RowFilter>('all');
+  const [sort, setSort] = useState<SortKey>('fbo');
+  const [open, setOpen] = useState<Set<string>>(new Set());
   const timer = useRef<number | undefined>(undefined);
 
   const load = async () => {
     try {
       const r = await apiGet<Resp>('/api/fbo');
       setResp(r.data); setErr('');
-      // Пока сервер собирает снимок — спрашиваем снова.
       window.clearTimeout(timer.current);
-      if (r.data.collecting) timer.current = window.setTimeout(load, 20_000);
+      if (r.data.collecting) timer.current = window.setTimeout(load, 20_000); // сервер собирает — спросим снова
     } catch (e) { setErr(errText(e)); }
   };
   useEffect(() => { void load(); return () => window.clearTimeout(timer.current); }, []);
@@ -46,33 +59,37 @@ export function Fbo() {
 
   const D = resp?.data ?? null;
   const src = useMemo(() => (D ? { o: buildOzon(D), w: buildWb(D) } : null), [D]);
-
-  const pickMp = (m: Mp) => { setMp(m); setCluster(null); setWh(null); setSupOpen(false); };
-  const pickCluster = (c: string | null) => { setCluster(c); setWh(null); setSupOpen(false); };
+  const S = src?.[mp];
+  const allRows = useMemo(() => (S && D ? productRows(S, D, cluster) : []), [S, D, cluster]);
+  const rows = useMemo(() => sortRows(filterRows(allRows, filter, query), sort, sort !== 'name'), [allRows, filter, query, sort]);
 
   if (err && !D) return <div className="card">Не удалось загрузить остатки: {err}</div>;
   if (!resp) return <div className="card muted">Загружаю остатки…</div>;
-  if (!D || !src) {
+  if (!D || !S) {
     return (
       <div className="card">
         <h2>Остатки FBO</h2>
         <p className="muted">{resp.collecting
-          ? 'Собираю данные с Ozon, WB и таблицы «Склад» — это занимает 2–4 минуты (у WB строгие лимиты на поставки). Страница обновится сама.'
+          ? 'Собираю данные с Ozon, WB и таблицы «Склад» — это занимает 2–4 минуты. Страница обновится сама.'
           : 'Данных пока нет.'}</p>
         {!resp.collecting && <button className="btn btn-primary" onClick={refresh}>Собрать сейчас</button>}
       </div>
     );
   }
 
-  const S = src[mp];
+  const isOz = mp === 'o';
   const at = new Date(D.at).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const pickMp = (m: Mp) => { setMp(m); setCluster(null); setOpen(new Set()); };
+  const pickCluster = (c: string | null) => { setCluster(c); setOpen(new Set()); };
+  const toggle = (art: string) => setOpen(s => { const n = new Set(s); if (n.has(art)) n.delete(art); else n.add(art); return n; });
+
+  const scopeSupplies = S.supplies.filter(s => !cluster || s.cluster === cluster);
+  const shortCount = allRows.filter(r => r.fbo === 0 && r.ordFbo + r.ordFbs > 0).length;
 
   return (
     <div className="fbo">
       <div className="fbo-top">
-        <div>
-          <div className="fbo-sub">Остатки на складах маркетплейса, поставки к ним и где покупают. Ваши склады (FBS) — отдельным блоком, в остатки FBO не входят.</div>
-        </div>
+        <div className="fbo-sub">Остатки на складах маркетплейса по {isOz ? 'кластерам' : 'регионам'}, поставки, заказы за 30 дней и остатки на ваших складах (FBS).</div>
         <div className="fbo-upd">
           <span className="muted">Данные на {at}</span>
           <button className="btn btn-sm" onClick={refresh} disabled={resp.collecting} title="Собрать данные заново">
@@ -80,136 +97,200 @@ export function Fbo() {
           </button>
         </div>
       </div>
-      {D.notes.length > 0 && <div className="fbo-note">Не всё удалось получить: {D.notes.join('; ')}</div>}
+      {D.notes.length > 0 && <div className="fbo-note">{D.notes.join('; ')}</div>}
 
       <div className="fbo-controls">
         <div className="fbo-seg" role="group" aria-label="Площадка">
-          <button aria-pressed={mp === 'o'} onClick={() => pickMp('o')}>Ozon</button>
-          <button aria-pressed={mp === 'w'} onClick={() => pickMp('w')}>Wildberries</button>
+          <button aria-pressed={isOz} onClick={() => pickMp('o')}>Ozon</button>
+          <button aria-pressed={!isOz} onClick={() => pickMp('w')}>Wildberries</button>
         </div>
-        <input className="fbo-search" type="search" placeholder="Найти товар или артикул" value={query} onChange={e => setQuery(e.target.value)} />
+        <div className="fbo-seg" role="group" aria-label="Раздел">
+          <button aria-pressed={view === 'items'} onClick={() => setView('items')}>Товары</button>
+          <button aria-pressed={view === 'demand'} onClick={() => setView('demand')}>Где покупают</button>
+          <button aria-pressed={view === 'supplies'} onClick={() => setView('supplies')}>Поставки{scopeSupplies.length ? ` (${scopeSupplies.length})` : ''}</button>
+          <button aria-pressed={view === 'fbs'} onClick={() => setView('fbs')}>Ваши склады</button>
+        </div>
       </div>
 
-      <div className="fbo-layout">
-        <ClusterNav src={S} cluster={cluster} wh={wh} onCluster={pickCluster} onWh={w => setWh(cur => (cur === w ? null : w))} />
-        <main className="fbo-panel">
-          <Panel D={D} src={S} cluster={cluster} wh={wh} query={query} supOpen={supOpen}
-            onSupToggle={() => setSupOpen(v => !v)} onCluster={c => { pickCluster(c); window.scrollTo({ top: 0 }); }} />
-        </main>
-      </div>
+      <ClusterBar src={S} cluster={cluster} onPick={pickCluster} />
+      {!isOz && S.stopped.size > 0 && <Stopped stopped={S.stopped} />}
+
+      {view === 'items' && <>
+        <div className="fbo-tools">
+          <input className="fbo-search" type="search" placeholder="Найти товар или артикул" value={query} onChange={e => setQuery(e.target.value)} />
+          <div className="fbo-seg fbo-seg--sm" role="group" aria-label="Фильтр">
+            <button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>Все</button>
+            <button aria-pressed={filter === 'instock'} onClick={() => setFilter('instock')}>Есть на FBO</button>
+            <button aria-pressed={filter === 'short'} onClick={() => setFilter('short')}>Нет на FBO, но заказывают{shortCount ? ` (${shortCount})` : ''}</button>
+          </div>
+          <label className="fbo-sort">Сортировка
+            <select value={sort} onChange={e => setSort(e.target.value as SortKey)}>
+              {SORTS.filter(s => isOz || s.key !== 'far').map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+          </label>
+          <span className="muted fbo-count">{fmt(rows.length)} {plural(rows.length, 'товар', 'товара', 'товаров')}</span>
+        </div>
+        <ItemsTable rows={rows} isOz={isOz} cluster={cluster} open={open} onToggle={toggle} />
+      </>}
+      {view === 'demand' && <Demand src={S} onCluster={c => { pickCluster(c); setView('items'); }} />}
+      {view === 'supplies' && <Supplies sups={scopeSupplies} showCluster={!cluster} mp={mp} />}
+      {view === 'fbs' && <FbsBlock D={D} />}
     </div>
   );
 }
 
-function ClusterNav({ src, cluster, wh, onCluster, onWh }: {
-  src: Source; cluster: string | null; wh: string | null; onCluster: (c: string | null) => void; onWh: (w: string) => void;
-}) {
+/** Кластеры (Ozon) / регионы (WB) — кнопками в строку над таблицей. */
+function ClusterBar({ src, cluster, onPick }: { src: Source; cluster: string | null; onPick: (c: string | null) => void }) {
   const cls = clustersOf(src);
   const total = cls.reduce((a, c) => a + c.q, 0);
   return (
-    <nav className="fbo-nav" aria-label="Кластеры и склады">
-      <button className="fbo-cl" aria-current={!cluster} onClick={() => onCluster(null)}>
-        <span className="n">Все {src.noun === 'кластер' ? 'кластеры' : 'регионы'}</span><span className="q">{fmt(total)}</span>
+    <div className="fbo-clbar" role="group" aria-label={src.mp === 'o' ? 'Кластеры' : 'Регионы'}>
+      <button className="fbo-chip" aria-pressed={!cluster} onClick={() => onPick(null)}>
+        <span className="n">Все {src.mp === 'o' ? 'кластеры' : 'регионы'}</span><span className="q">{fmt(total)}</span>
       </button>
-      <div className="fbo-sep" />
-      {cls.map(c => {
-        const cur = cluster === c.name;
+      {cls.map(c => (
+        <button key={c.name} className="fbo-chip" aria-pressed={cluster === c.name} onClick={() => onPick(cluster === c.name ? null : c.name)}
+          title={`FBO ${fmt(c.q)} шт.${c.ord ? `, заказов за 30 дней ${fmt(c.ord)}` : ''}${c.go + c.soon ? `, едет/готовится ${fmt(c.go + c.soon)}` : ''}`}>
+          <span className="n">{shortPlace(c.name)}</span>
+          <span className={`q ${c.q ? '' : 'zero'}`}>{c.q ? fmt(c.q) : '0'}</span>
+          {c.ord > 0 && <span className="o">зак. {fmt(c.ord)}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const list = (xs: [string, number][], max: number, fmtV: (v: number) => string = fmt) => (
+  <>
+    {xs.slice(0, max).map(([k, v]) => <div key={k} className="kv"><span title={k}>{shortPlace(k)}</span><b>{fmtV(v)}</b></div>)}
+    {xs.length > max && <div className="more">ещё {xs.length - max}</div>}
+  </>
+);
+
+function ItemsTable({ rows, isOz, cluster, open, onToggle }: {
+  rows: ProductRow[]; isOz: boolean; cluster: string | null; open: Set<string>; onToggle: (art: string) => void;
+}) {
+  if (!rows.length) return <div className="fbo-empty">Ничего не нашлось. Измените поиск, фильтр или кластер.</div>;
+  const here = cluster ? (isOz ? 'в кластере' : 'в регионе') : 'всего';
+  return (
+    <div className="fbo-table" role="table">
+      <div className="fbo-tr fbo-th" role="row">
+        <span role="columnheader">Товар</span>
+        <span role="columnheader" className="r">FBO {here}</span>
+        <span role="columnheader">{cluster && isOz ? 'Склады кластера' : `Где лежит FBO`}</span>
+        <span role="columnheader">Едет в поставках</span>
+        <span role="columnheader" className="r">Заказы 30 дн{cluster && isOz ? ' сюда' : ''}</span>
+        <span role="columnheader">{isOz ? 'Кластеры покупателей' : 'Округа покупателей'}</span>
+        <span role="columnheader">FBS на ваших складах</span>
+        <span role="columnheader" aria-label="Подробнее" />
+      </div>
+      {rows.map(r => {
+        const isOpen = open.has(r.art);
+        const orders = r.ordFbo + r.ordFbs;
+        const farP = pct(r.far, orders);
+        const totalBuy = r.buyers.reduce((a, b) => a + b[1], 0);
         return (
-          <div key={c.name}>
-            <button className="fbo-cl" aria-current={cur} onClick={() => onCluster(c.name)}>
-              <span className="n">{c.name}</span><span className="q">{c.q ? fmt(c.q) : '—'}</span>
-              {(c.ord > 0 || c.go > 0 || c.soon > 0) && (
-                <span className="s">
-                  {c.ord > 0 && <span>заказов {fmt(c.ord)}</span>}
-                  {c.go > 0 && <span className="go">едет {fmt(c.go)}</span>}
-                  {c.soon > 0 && <span className="wait">готовится {fmt(c.soon)}</span>}
+          <Fragment key={r.art}>
+            <div className={`fbo-tr ${isOpen ? 'open' : ''}`} role="row" tabIndex={0} aria-expanded={isOpen}
+              onClick={() => onToggle(r.art)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(r.art); } }}>
+              <span className="c-prod" role="cell">
+                <span className="ph" style={r.img ? { backgroundImage: `url("${r.img}")` } : undefined} />
+                <span className="pt">
+                  <span className="art">{r.art}</span>
+                  <span className="nm" title={r.name}>{r.name}</span>
                 </span>
-              )}
-            </button>
-            {cur && c.whs.size > 1 && (
-              <div className="fbo-whs">
-                {[...c.whs].sort((a, b) => b[1] - a[1]).map(([w, q]) => (
-                  <button key={w} className="fbo-whb" aria-current={wh === w} onClick={() => onWh(w)}><span>{w}</span><span>{fmt(q)}</span></button>
-                ))}
-              </div>
-            )}
-          </div>
+              </span>
+              <span className="c-num r" role="cell">
+                <b className={r.fbo ? '' : 'bad'}>{fmt(r.fbo)}</b>
+                <span className={`sub ${r.days !== null && r.days < 14 ? 'bad' : ''}`}>
+                  {r.days === null ? (r.fbo ? 'нет заказов FBO' : '') : `хватит на ${fmt(r.days)} дн`}
+                </span>
+              </span>
+              <span className="c-list" role="cell">{r.where.length ? list(r.where, 3) : <span className="muted">—</span>}</span>
+              <span className="c-list" role="cell">
+                {r.lines.length
+                  ? <>
+                      {r.going > 0 && <div className="kv"><span>едет / готовится</span><b>+{fmt(r.going)}</b></div>}
+                      <SupplyBadges lines={r.lines} />
+                    </>
+                  : <span className="muted">—</span>}
+              </span>
+              <span className="c-num r" role="cell">
+                <b>{fmt(orders)}</b>
+                <span className="sub">FBO {fmt(r.ordFbo)} · FBS {fmt(r.ordFbs)}</span>
+                {isOz && orders > 0 && <span className={`sub ${farP >= 50 ? 'bad' : ''}`}>издалека {farP}%</span>}
+              </span>
+              <span className="c-list" role="cell">{r.buyers.length ? list(r.buyers, 3, v => `${pct(v, totalBuy)}%`) : <span className="muted">заказов не было</span>}</span>
+              <span className="c-list" role="cell">
+                {r.fbs.length
+                  ? <>{r.fbs.slice(0, 4).map(([k, v]) => <div key={k} className="kv"><span>{k}</span><b className={v < 0 ? 'bad' : ''}>{fmt(v)}</b></div>)}
+                      {r.fbs.length > 1 && <div className="kv tot"><span>всего</span><b>{fmt(r.fbsTotal)}</b></div>}</>
+                  : <span className="muted">нет</span>}
+              </span>
+              <span className="c-exp" role="cell" aria-hidden>{isOpen ? <CaretDownIcon size={18} /> : <CaretRightIcon size={18} />}</span>
+            </div>
+            {isOpen && <RowDetail r={r} isOz={isOz} />}
+          </Fragment>
         );
       })}
-    </nav>
+    </div>
   );
 }
 
-const SUP_NOTE: Record<Mp, string> = {
-  o: 'Ozon принимает поставку на кластер, а не на конкретный склад. Поставки видны при выборе кластера целиком.',
-  w: 'Поставки WB идут через сортировочный центр, итоговый склад становится известен после приёмки. Поставки видны при выборе региона целиком.',
-};
+function SupplyBadges({ lines }: { lines: { s: Supply; q: number }[] }) {
+  // Одинаковые статусы склеиваем: «Готова к отгрузке ×3 · +45».
+  const by = new Map<string, { s: Supply; q: number; n: number }>();
+  for (const l of lines) { const k = l.s.status.short ?? l.s.status.label; const v = by.get(k) ?? { s: l.s, q: 0, n: 0 }; v.q += l.q; v.n++; by.set(k, v); }
+  return <>{[...by.values()].sort((a, b) => KIND_ORDER[a.s.status.kind] - KIND_ORDER[b.s.status.kind]).map(v => (
+    <div key={v.s.status.short ?? v.s.status.label} className="kv"><span className={`fbo-st ${v.s.status.kind}`} title={v.s.status.label}>{v.s.status.short ?? v.s.status.label}{v.n > 1 ? ` ×${v.n}` : ''}</span><b>+{fmt(v.q)}</b></div>
+  ))}</>;
+}
 
-function Panel({ D, src, cluster, wh, query, supOpen, onSupToggle, onCluster }: {
-  D: FboBundle; src: Source; cluster: string | null; wh: string | null; query: string; supOpen: boolean;
-  onSupToggle: () => void; onCluster: (c: string) => void;
-}) {
-  const { items, supplies } = itemsFor(src, cluster, wh, query);
-  const isOz = src.mp === 'o';
-  const title = wh || cluster || (isOz ? 'Все кластеры' : 'Все регионы');
-  const stockSum = items.reduce((a, it) => a + it.q, 0);
-  const goSum = items.reduce((a, it) => a + it.lines.filter(l => l.s.status.kind !== 'idle' && l.s.status.kind !== 'done').reduce((x, l) => x + l.q, 0), 0);
-  const zeroGoing = items.filter(it => !it.q).length;
-  const sups = supplies.slice().sort((a, b) => KIND_ORDER[a.status.kind] - KIND_ORDER[b.status.kind] || (a.sortDate || '').localeCompare(b.sortDate || ''));
-  const demHere = isOz && cluster ? demandRows(src.orders).find(r => r.key === cluster) : undefined;
-  const stockByCluster = new Map<string, number>();
-  for (const r of src.stock) stockByCluster.set(r.cluster, (stockByCluster.get(r.cluster) ?? 0) + r.q);
-
+/** Раскрытие строки: по каждому кластеру/региону — лежит, заказы, издалека, поставки. */
+function RowDetail({ r, isOz }: { r: ProductRow; isOz: boolean }) {
+  const places = r.places.filter(p => p.stock || p.ordFbo || p.ordFbs || p.lines.length);
   return (
-    <>
-      <section className="fbo-head">
-        <h2>{title}</h2>
-        <div className="fbo-facts">
-          <span><b>{fmt(stockSum)}</b>шт. FBO на складах {isOz ? 'Ozon' : 'WB'}</span>
-          <span><b>{fmt(items.filter(i => i.q).length)}</b>товаров в наличии</span>
-          {!wh && <span><b>{fmt(goSum)}</b>шт. едет или готовится</span>}
-          {isOz && cluster && (demHere
-            ? <><span><b>{fmt(demHere.q)}</b>шт. заказали сюда за 30 дней</span>
-                <span><b className={pct(demHere.far, demHere.q) >= 50 ? 'bad' : ''}>{pct(demHere.far, demHere.q)}%</b>везли из других кластеров</span></>
-            : <span><b>0</b>заказов сюда за 30 дней</span>)}
-          {zeroGoing > 0 && <span><b>{zeroGoing}</b>нет здесь, но есть в поставке</span>}
-        </div>
-        {isOz && cluster && !wh && demHere && demHere.far > 0 && (
-          <p className="fbo-farfrom">Откуда везли заказы этого кластера: {[...demHere.from].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}.</p>
+    <div className="fbo-detail" role="row">
+      <div role="cell">
+        {isOz ? (
+          <table className="fbo-dt">
+            <thead><tr><th>Кластер</th><th className="r">Лежит FBO</th><th>Склады</th><th className="r">Заказы FBO</th><th className="r">Заказы FBS</th><th className="r">Издалека</th><th>Откуда везли</th><th>Поставки сюда</th></tr></thead>
+            <tbody>{places.map(p => {
+              const o = p.ordFbo + p.ordFbs, fp = pct(p.far, o);
+              return (
+                <tr key={p.key}>
+                  <td className="k" title={p.key}>{shortPlace(p.key)}</td>
+                  <td className={`r ${p.stock ? '' : 'bad'}`}>{p.stock ? fmt(p.stock) : (o ? 'нет' : '—')}</td>
+                  <td>{p.whs.length ? p.whs.map(([w, q]) => `${w} ${q}`).join(', ') : ''}</td>
+                  <td className="r">{p.ordFbo || '—'}</td>
+                  <td className="r">{p.ordFbs || '—'}</td>
+                  <td className={`r ${fp >= 50 ? 'bad' : ''}`}>{o ? `${fp}%` : '—'}</td>
+                  <td>{p.from.map(([k, v]) => `${k} ${v}`).join(', ')}</td>
+                  <td>{p.lines.map((l, i) => <div key={i}><span className={`fbo-st ${l.s.status.kind}`}>{l.s.status.label}</span> +{fmt(l.q)} <span className="muted">{l.s.status.note.split(',')[0]}</span></div>)}</td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+        ) : (
+          <div className="fbo-dgrid">
+            <table className="fbo-dt">
+              <thead><tr><th>Где лежит</th><th className="r">FBO</th></tr></thead>
+              <tbody>{places.filter(p => p.stock).map(p => <tr key={p.key}><td className="k" title={p.key}>{shortPlace(p.key)}</td><td className="r">{fmt(p.stock)}</td></tr>)}
+                {!places.some(p => p.stock) && <tr><td colSpan={2} className="muted">на складах WB нет</td></tr>}</tbody>
+            </table>
+            <table className="fbo-dt">
+              <thead><tr><th>Округ покупателя</th><th className="r">Заказов</th><th className="r">Доля</th></tr></thead>
+              <tbody>{r.buyers.map(([k, v]) => <tr key={k}><td className="k">{k}</td><td className="r">{fmt(v)}</td><td className="r">{pct(v, r.ordFbo + r.ordFbs)}%</td></tr>)}
+                {!r.buyers.length && <tr><td colSpan={3} className="muted">заказов за 30 дней не было</td></tr>}</tbody>
+            </table>
+            <table className="fbo-dt">
+              <thead><tr><th>Поставка</th><th>Куда</th><th className="r">Шт</th></tr></thead>
+              <tbody>{r.lines.map((l, i) => <tr key={i}><td><span className={`fbo-st ${l.s.status.kind}`}>{l.s.status.label}</span> <span className="muted">{l.s.status.note.split(',')[0]}</span></td><td>{l.s.to}</td><td className="r">+{fmt(l.q)}</td></tr>)}
+                {!r.lines.length && <tr><td colSpan={3} className="muted">поставок нет</td></tr>}</tbody>
+            </table>
+          </div>
         )}
-        {wh
-          ? <div className="fbo-sups muted">{SUP_NOTE[src.mp]}</div>
-          : sups.length
-            ? <div className="fbo-sups">
-                <h3>Поставки{cluster ? ' сюда' : ''}</h3>
-                {sups.slice(0, supOpen ? 999 : SUP_MAX).map(s => <SupplyRow key={s.id + s.cluster} s={s} showCluster={!cluster} />)}
-                {sups.length > SUP_MAX && <button className="fbo-more" onClick={onSupToggle}>{supOpen ? 'Свернуть' : `Показать все поставки (${sups.length})`}</button>}
-              </div>
-            : <div className="fbo-sups muted">Активных поставок нет.</div>}
-      </section>
-
-      {!cluster && !wh && <>
-        {src.stopped.size > 0 && <Stopped stopped={src.stopped} />}
-        <Demand src={src} stockByCluster={stockByCluster} onCluster={onCluster} />
-        <FbsBlock D={D} />
-      </>}
-
-      {items.length
-        ? <div className="fbo-grid">{items.map(it => <Card key={it.art} it={it} src={src} D={D} cluster={cluster} wh={wh} />)}</div>
-        : <div className="fbo-empty">Ничего не нашлось. Измените поиск или выберите другой {src.noun}.</div>}
-    </>
-  );
-}
-
-function SupplyRow({ s, showCluster }: { s: Supply; showCluster: boolean }) {
-  const n = s.items.reduce((a, i) => a + i.q, 0);
-  const where = s.from ? `сдаём в ${s.from}` : s.to ? `на ${s.to}` : '';
-  return (
-    <div className="fbo-sup">
-      <span className={`fbo-st ${s.status.kind}`}>{s.status.label}</span>
-      <span>№ {s.id}, {fmt(n)} шт., {s.items.length} {plural(s.items.length, 'товар', 'товара', 'товаров')}{showCluster ? ` → ${s.cluster}` : ''}
-        <div className="meta">{s.status.note}{where ? ', ' + where : ''}</div>
-      </span>
+      </div>
     </div>
   );
 }
@@ -225,45 +306,66 @@ function Stopped({ stopped }: { stopped: Map<string, number> }) {
   );
 }
 
-function Demand({ src, stockByCluster, onCluster }: { src: Source; stockByCluster: Map<string, number>; onCluster: (c: string) => void }) {
+function Supplies({ sups, showCluster, mp }: { sups: Supply[]; showCluster: boolean; mp: Mp }) {
+  if (!sups.length) return <div className="fbo-empty">Активных поставок нет.</div>;
+  const sorted = sups.slice().sort((a, b) => KIND_ORDER[a.status.kind] - KIND_ORDER[b.status.kind] || (a.sortDate || '').localeCompare(b.sortDate || ''));
+  return (
+    <section className="fbo-box">
+      <p className="lead">{mp === 'o'
+        ? 'Ozon принимает поставку на кластер, а не на конкретный склад.'
+        : 'Поставки WB идут через сортировочный центр — итоговый склад WB не сообщает.'}</p>
+      <table className="fbo-dt fbo-dt--wide">
+        <thead><tr><th>Статус</th><th>№</th>{showCluster && <th>{mp === 'o' ? 'Кластер' : 'Регион'}</th>}<th>Куда сдаём</th><th>Когда</th><th className="r">Товаров</th><th className="r">Шт</th></tr></thead>
+        <tbody>{sorted.map(s => (
+          <tr key={s.id + s.cluster}>
+            <td><span className={`fbo-st ${s.status.kind}`}>{s.status.label}</span></td>
+            <td>{s.id}</td>
+            {showCluster && <td>{s.cluster}</td>}
+            <td>{s.from || s.to || '—'}</td>
+            <td className="muted">{s.status.note}</td>
+            <td className="r">{s.items.length}</td>
+            <td className="r"><b>{fmt(s.items.reduce((a, i) => a + i.q, 0))}</b></td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </section>
+  );
+}
+
+function Demand({ src, onCluster }: { src: Source; onCluster: (c: string) => void }) {
   const rows = demandRows(src.orders);
   const total = rows.reduce((a, r) => a + r.q, 0);
-  if (!total) return null;
-  const max = rows[0].q;
+  if (!total) return <div className="fbo-empty">Заказов за 30 дней нет.</div>;
   const isOz = src.mp === 'o';
-  const fbo = rows.reduce((a, r) => a + r.fbo, 0);
-  const far = rows.reduce((a, r) => a + r.far, 0);
+  const max = rows[0].q;
+  const fbo = rows.reduce((a, r) => a + r.fbo, 0), far = rows.reduce((a, r) => a + r.far, 0);
+  const stock = new Map<string, number>();
+  for (const r of src.stock) stock.set(r.cluster, (stock.get(r.cluster) ?? 0) + r.q);
   return (
-    <section className={`fbo-box fbo-dem ${isOz ? 'oz' : 'wb'}`}>
-      <h3>Где покупают</h3>
+    <section className="fbo-box">
       <p className="lead">
         {isOz
-          ? <>За 30 дней {fmt(total)} шт.: со складов Ozon (FBO) {fmt(fbo)}, с ваших складов (FBS) {fmt(total - fbo)}. <b>{pct(far, total)}%</b> заказов везли в кластер покупателя из другого кластера — это дольше для покупателя.</>
-          : <>За 30 дней {fmt(total)} заказов: со складов WB (FBO) {fmt(fbo)}, с ваших складов (FBS) {fmt(total - fbo)}. WB сообщает только округ покупателя, а склад отправки FBO скрывает.</>}
+          ? <>За 30 дней {fmt(total)} шт.: со складов Ozon (FBO) {fmt(fbo)}, с ваших складов (FBS) {fmt(total - fbo)}. <b>{pct(far, total)}%</b> заказов везли в кластер покупателя из другого кластера. Нажмите на кластер — откроется список товаров в нём.</>
+          : <>За 30 дней {fmt(total)} заказов: со складов WB (FBO) {fmt(fbo)}, с ваших складов (FBS) {fmt(total - fbo)}. WB сообщает только округ покупателя, склад отправки FBO скрывает.</>}
       </p>
-      <div className="fbo-dhead">
-        <span>{isOz ? 'Кластер покупателя' : 'Округ покупателя'}</span><span className="r">FBO</span><span /><span className="r">FBS</span>
-        {isOz ? <><span className="r">Лежит FBO</span><span className="r">Издалека</span></> : <span className="r">Всего</span>}
-      </div>
-      {rows.map(r => {
-        const bar = (
-          <span className="fbo-bar">
-            <i className="fbs" style={{ width: `${(r.q / max) * 100}%` }} />
-            <i style={{ width: `${Math.max(r.fbo ? 2 : 0, (r.fbo / max) * 100)}%` }} />
-          </span>
-        );
-        if (!isOz) return (
-          <div key={r.key} className="fbo-drow"><span>{r.key}</span><span className="r">{fmt(r.fbo)}</span>{bar}<span className="r muted">{fmt(r.q - r.fbo)}</span><span className="r">{fmt(r.q)}</span></div>
-        );
-        const stock = stockByCluster.get(r.key) ?? 0, farP = pct(r.far, r.q);
-        return (
-          <button key={r.key} className="fbo-drow" onClick={() => onCluster(r.key)}>
-            <span>{r.key}</span><span className="r">{fmt(r.fbo)}</span>{bar}<span className="r muted">{fmt(r.q - r.fbo)}</span>
-            <span className={`r ${stock ? '' : 'bad'}`}>{stock ? fmt(stock) : 'нет'}</span>
-            <span className={`r ${farP >= 50 ? 'bad' : ''}`}>{farP}%</span>
-          </button>
-        );
-      })}
+      <table className="fbo-dt fbo-dt--wide">
+        <thead><tr>
+          <th>{isOz ? 'Кластер покупателя' : 'Округ покупателя'}</th><th className="r">FBO</th><th className="r">FBS</th><th className="bar-h" />
+          {isOz && <><th className="r">Лежит FBO</th><th className="r">Издалека</th></>}
+          {!isOz && <th className="r">Всего</th>}
+        </tr></thead>
+        <tbody>{rows.map(r => {
+          const st = stock.get(r.key) ?? 0, fp = pct(r.far, r.q);
+          return (
+            <tr key={r.key} className={isOz ? 'click' : ''} onClick={isOz ? () => onCluster(r.key) : undefined}>
+              <td className="k">{r.key}</td><td className="r">{fmt(r.fbo)}</td><td className="r muted">{fmt(r.q - r.fbo)}</td>
+              <td className="bar-c"><span className="fbo-bar"><i className="fbs" style={{ width: `${(r.q / max) * 100}%` }} /><i style={{ width: `${Math.max(r.fbo ? 2 : 0, (r.fbo / max) * 100)}%` }} /></span></td>
+              {isOz && <><td className={`r ${st ? '' : 'bad'}`}>{st ? fmt(st) : 'нет'}</td><td className={`r ${fp >= 50 ? 'bad' : ''}`}>{fp}%</td></>}
+              {!isOz && <td className="r">{fmt(r.q)}</td>}
+            </tr>
+          );
+        })}</tbody>
+      </table>
       <div className="fbo-legend">
         <span><i style={{ background: 'var(--accent)' }} />FBO — со складов {isOz ? 'Ozon' : 'WB'}</span>
         <span><i style={{ background: 'var(--fbo-fbs)' }} />FBS — с ваших складов</span>
@@ -276,63 +378,19 @@ function FbsBlock({ D }: { D: FboBundle }) {
   const rows = D.fbs.wh.map(w => ({
     ...w,
     q: D.fbs.stock.filter(r => r.wh === w.id).reduce((a, r) => a + r.q, 0),
+    n: D.fbs.stock.filter(r => r.wh === w.id && r.q > 0).length,
     ow: D.fbs.ord.filter(o => o.wh === w.id && o.mp === 'w').reduce((a, o) => a + o.q, 0),
     oo: D.fbs.ord.filter(o => o.wh === w.id && o.mp === 'o').reduce((a, o) => a + o.q, 0),
   })).sort((a, b) => b.q - a.q);
   return (
-    <section className="fbo-box fbo-fbs">
-      <h3>Ваши склады (FBS)</h3>
-      <p className="lead">Остатки — из Google‑таблицы «Склад», лист каждого склада. Это общий запас для WB и Ozon, поэтому к остаткам FBO он не прибавляется.</p>
-      <div className="fbo-dhead"><span>Склад</span><span className="r">Остаток</span><span className="r">Едет на склад</span><span className="r">Заказы WB</span><span className="r">Заказы Ozon</span></div>
-      {rows.map(r => (
-        <div key={r.id} className="fbo-drow">
-          <span>{r.own ? `${r.name} (свой)` : `ФФ ${r.name}`}</span><span className="r"><b>{fmt(r.q)}</b></span>
-          <span className="r muted">{r.way ? fmt(r.way) : '—'}</span><span className="r">{fmt(r.ow)}</span><span className="r">{fmt(r.oo)}</span>
-        </div>
-      ))}
-      <p className="lead" style={{ margin: '8px 0 0' }}>Заказы FBS за 30 дней: WB — по листу «Отгрузка», Ozon — по данным Ozon.</p>
+    <section className="fbo-box">
+      <p className="lead">Остатки — из Google‑таблицы «Склад», лист каждого склада. Это общий запас для WB и Ozon, к остаткам FBO он не прибавляется. Заказы FBS за 30 дней: WB — по листу «Отгрузка», Ozon — по данным Ozon.</p>
+      <table className="fbo-dt fbo-dt--wide">
+        <thead><tr><th>Склад</th><th className="r">Остаток, шт</th><th className="r">Товаров</th><th className="r">Едет на склад</th><th className="r">Заказы WB</th><th className="r">Заказы Ozon</th></tr></thead>
+        <tbody>{rows.map(r => (
+          <tr key={r.id}><td className="k">{r.own ? `${r.name} (свой)` : `ФФ ${r.name}`}</td><td className="r"><b>{fmt(r.q)}</b></td><td className="r">{r.n}</td><td className="r muted">{r.way ? fmt(r.way) : '—'}</td><td className="r">{fmt(r.ow)}</td><td className="r">{fmt(r.oo)}</td></tr>
+        ))}</tbody>
+      </table>
     </section>
-  );
-}
-
-function Card({ it, src, D, cluster, wh }: { it: Item; src: Source; D: FboBundle; cluster: string | null; wh: string | null }) {
-  const own = src.orders.filter(o => o.art.toUpperCase() === it.art.toUpperCase());
-  const total = own.reduce((a, o) => a + o.q, 0);
-  let demand: JSX.Element;
-  if (!own.length) demand = <div className="dem muted">Заказов за 30 дней не было</div>;
-  else if (cluster && src.mp === 'o') {
-    const here = own.filter(o => o.key === cluster);
-    const n = here.reduce((a, o) => a + o.q, 0), far = here.filter(o => o.from !== o.key).reduce((a, o) => a + o.q, 0);
-    demand = n
-      ? <div className="dem">Заказали сюда за 30 дней: <b>{fmt(n)}</b>{far ? <>, <span className="bad">из них {fmt(far)} везли из других кластеров</span></> : ', всё из этого кластера'}</div>
-      : <div className="dem muted">Сюда за 30 дней не заказывали (всего {fmt(total)} шт.)</div>;
-  } else {
-    const top = demandRows(own).slice(0, 3).map(r => `${r.key} ${pct(r.q, total)}%`).join(', ');
-    const fbo = own.filter(o => !o.fbs).reduce((a, o) => a + o.q, 0);
-    demand = <div className="dem">Покупают: {top} <span className="muted">(FBO {fmt(fbo)}, FBS {fmt(total - fbo)} за 30 дней)</span></div>;
-  }
-  const ffName = new Map(D.fbs.wh.map(w => [w.id, w.own ? w.name : 'ФФ ' + w.name]));
-  const fbs = D.fbs.stock.filter(r => r.art.toUpperCase() === it.art.toUpperCase()).sort((a, b) => b.q - a.q);
-  return (
-    <article className="fbo-card">
-      <div className="ph" style={it.img ? { backgroundImage: `url("${it.img}")` } : undefined} role="img" aria-label={it.name} />
-      <div>
-        <div className="nm" title={it.name}>{it.name}</div>
-        <div className="art">{it.art}</div>
-        <div className={`qty ${it.q ? '' : 'zero'}`}><b>{fmt(it.q)}</b><span>шт. {it.q ? 'на складе' : '— на складе нет'}</span></div>
-        {(it.whs.length > 1 || (it.whs.length === 1 && !wh)) && (
-          <div className="where">{it.whs.map(([w, q], i) => <span key={w}>{i ? ', ' : ''}{w} <b>{q}</b></span>)}</div>
-        )}
-        {demand}
-        {fbs.length > 0 && (
-          <div className="fbsl">FBS у вас: {fbs.map((r, i) => <span key={r.wh}>{i ? ', ' : ''}{ffName.get(r.wh)} <b className={r.q < 0 ? 'bad' : ''}>{r.q}</b></span>)}</div>
-        )}
-      </div>
-      {it.lines.length
-        ? <div className="go-lines">{it.lines.map((l, i) => (
-            <div key={i} className="gl"><span className={`fbo-st ${l.s.status.kind}`}>{l.s.status.label}</span><span className="t">{l.s.status.note.split(',')[0]}</span><b>+{fmt(l.q)}</b></div>
-          ))}</div>
-        : !wh && <div className="nogo">{cluster ? 'Поставок сюда нет' : 'Активных поставок нет'}</div>}
-    </article>
   );
 }

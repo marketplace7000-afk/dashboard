@@ -27,7 +27,15 @@ export type FboBundle = {
 
 export type Mp = 'o' | 'w';
 export type Kind = 'go' | 'soon' | 'idle' | 'stuck' | 'done';
-export type Status = { kind: Kind; label: string; note: string };
+export type Status = { kind: Kind; label: string; note: string; short?: string };
+
+/** Короткие названия длинных кластеров для таблицы (полные — в подсказках и подробностях). */
+const SHORT_PLACE: Record<string, string> = {
+  'Москва, МО и Дальние регионы': 'Москва и МО',
+  'Санкт-Петербург и СЗО': 'СПб и СЗО',
+  'Россия — все склады WB': 'Россия (Склад WB РФ)',
+};
+export const shortPlace = (s: string) => SHORT_PLACE[s] ?? s;
 export type StockRow = { art: string; name?: string; wh: string; cluster: string; q: number };
 export type Supply = { id: string; cluster: string; status: Status; sortDate?: string; from?: string; to?: string; items: { art: string; q: number; name?: string; img?: string }[] };
 export type Order = { art: string; q: number; key: string; from?: string; fbs: boolean };
@@ -52,14 +60,14 @@ function ozStatus(s: FboBundle['ozSupplies'][number], now: number): Status {
     case 'IN_TRANSIT': {
       const d = s.slot ? Math.floor((now - Date.parse(s.slot)) / 864e5) : 0;
       return d > 14
-        ? { kind: 'stuck', label: `В пути ${d} ${plural(d, 'день', 'дня', 'дней')}`, note: `отгружена ${slot}, до сих пор не принята` }
+        ? { kind: 'stuck', label: `В пути ${d} ${plural(d, 'день', 'дня', 'дней')}`, short: `В пути ${d} дн`, note: `отгружена ${slot}, до сих пор не принята` }
         : { kind: 'go', label: 'В пути', note: `отгружена ${slot}` };
     }
-    case 'ACCEPTANCE_AT_STORAGE_WAREHOUSE': return { kind: 'go', label: 'Приёмка на складе', note: `привезли ${slot}` };
-    case 'ACCEPTED_AT_SUPPLY_WAREHOUSE': return { kind: 'go', label: 'Принята в точке отгрузки', note: `сдана ${slot}` };
-    case 'READY_TO_SUPPLY': return { kind: 'soon', label: 'Готова к отгрузке', note: `отгрузка ${slot}` };
-    case 'REPORTS_CONFIRMATION_AWAITING': return { kind: 'soon', label: 'Принята, ждёт подтверждения акта', note: 'подтвердите акт приёмки в кабинете Ozon' };
-    case 'REPORT_REJECTED': return { kind: 'stuck', label: 'Акт приёмки оспорен', note: 'идёт разбор расхождений' };
+    case 'ACCEPTANCE_AT_STORAGE_WAREHOUSE': return { kind: 'go', label: 'Приёмка на складе', short: 'Приёмка', note: `привезли ${slot}` };
+    case 'ACCEPTED_AT_SUPPLY_WAREHOUSE': return { kind: 'go', label: 'Принята в точке отгрузки', short: 'Сдана', note: `сдана ${slot}` };
+    case 'READY_TO_SUPPLY': return { kind: 'soon', label: 'Готова к отгрузке', short: 'К отгрузке', note: `отгрузка ${slot}` };
+    case 'REPORTS_CONFIRMATION_AWAITING': return { kind: 'soon', label: 'Принята, ждёт подтверждения акта', short: 'Ждёт акта', note: 'подтвердите акт приёмки в кабинете Ozon' };
+    case 'REPORT_REJECTED': return { kind: 'stuck', label: 'Акт приёмки оспорен', short: 'Акт оспорен', note: 'идёт разбор расхождений' };
     case 'DATA_FILLING': return { kind: 'idle', label: 'Заполняется', note: `слот ${slot}, ещё не отправлена` };
     default: return { kind: 'idle', label: s.state, note: '' };
   }
@@ -68,10 +76,10 @@ function wbStatus(s: FboBundle['wbSupplies'][number]): Status {
   switch (s.status) {
     case 1: return { kind: 'idle', label: 'Черновик', note: `создан ${day(s.created)}, дата не назначена — не едет` };
     case 2: return { kind: 'soon', label: 'Запланирована', note: `на ${day(s.date)}` };
-    case 3: return { kind: 'soon', label: 'Отгрузка разрешена', note: `отгрузка ${day(s.date)}` };
-    case 4: return { kind: 'go', label: 'Идёт приёмка', note: `с ${day(s.date)}` };
+    case 3: return { kind: 'soon', label: 'Отгрузка разрешена', short: 'Разрешена', note: `отгрузка ${day(s.date)}` };
+    case 4: return { kind: 'go', label: 'Идёт приёмка', short: 'Приёмка', note: `с ${day(s.date)}` };
     case 5: return { kind: 'done', label: 'Принята', note: `принята ${day(s.fact)}` };
-    case 6: return { kind: 'go', label: 'Отгружена на воротах', note: day(s.date) };
+    case 6: return { kind: 'go', label: 'Отгружена на воротах', short: 'На воротах', note: day(s.date) };
     default: return { kind: 'idle', label: 'Статус ' + s.status, note: '' };
   }
 }
@@ -169,30 +177,134 @@ export function demandRows(orders: Order[]): DemandRow[] {
 
 export const KIND_ORDER: Record<Kind, number> = { stuck: 0, go: 1, soon: 2, idle: 3, done: 4 };
 
-export type Item = {
-  art: string; name: string; img?: string; q: number; whs: [string, number][];
-  lines: { s: Supply; q: number }[];
+
+
+// ───────── Строки таблицы: один товар — одна строка (27.10.2026) ─────────
+
+/** Данные товара по одному кластеру (Ozon) / региону (WB) — для раскрытия строки. */
+export type PlaceRow = {
+  key: string; stock: number; whs: [string, number][];
+  ordFbo: number; ordFbs: number; far: number; from: [string, number][];
+  going: number; lines: { s: Supply; q: number }[];
 };
 
-/** Карточки товаров для выбранного кластера/склада: остаток здесь + что сюда едет. */
-export function itemsFor(src: Source, cluster: string | null, wh: string | null, query: string): { items: Item[]; supplies: Supply[] } {
+export type ProductRow = {
+  art: string; name: string; img?: string;
+  /** FBO в выбранном кластере (или всего). */
+  fbo: number;
+  /** Где лежит FBO: кластер (при «все») или склад (при выбранном кластере) → шт. */
+  where: [string, number][];
+  /** Заказы за 30 дней в выбранном кластере (или все). */
+  ordFbo: number; ordFbs: number; far: number;
+  /** Где покупают: кластер/округ покупателя → шт (по всем заказам товара). */
+  buyers: [string, number][];
+  /** Поставки в выбранный кластер (или все), без черновиков в сумме «едет». */
+  lines: { s: Supply; q: number }[]; going: number;
+  /** Свои склады (FBS) из таблицы «Склад»: склад → шт. */
+  fbs: [string, number][]; fbsTotal: number;
+  /** На сколько дней хватит FBO при темпе заказов FBO за 30 дней. */
+  days: number | null;
+  /** Раскрытие строки: по каждому кластеру/региону. */
+  places: PlaceRow[];
+};
+
+export type SortKey = 'fbo' | 'orders' | 'fbs' | 'far' | 'days' | 'name';
+export type RowFilter = 'all' | 'instock' | 'short';
+
+const up = (s: string) => s.toUpperCase();
+
+export function productRows(src: Source, D: FboBundle, cluster: string | null): ProductRow[] {
   const inCl = (c: string) => !cluster || c === cluster;
-  const stock = src.stock.filter(r => inCl(r.cluster) && (!wh || r.wh === wh));
-  const supplies = wh ? [] : src.supplies.filter(s => inCl(s.cluster));
-  const acc = new Map<string, { art: string; q: number; whs: Map<string, number>; lines: Item['lines']; name?: string; img?: string }>();
-  const get = (art: string) => { const k = art.toUpperCase(); if (!acc.has(k)) acc.set(k, { art, q: 0, whs: new Map(), lines: [] }); return acc.get(k)!; };
-  for (const r of stock) { const it = get(r.art); it.q += r.q; it.whs.set(r.wh, (it.whs.get(r.wh) ?? 0) + r.q); it.name ||= r.name; }
-  for (const s of supplies) for (const i of s.items) { const it = get(i.art); it.lines.push({ s, q: i.q }); it.name ||= i.name; it.img ||= i.img; }
-  const q = query.trim().toLowerCase();
-  const items: Item[] = [...acc.values()].map(it => {
-    const inf = src.info(it.art);
-    return {
-      art: it.art, name: inf.name || it.name || it.art, img: inf.img || it.img, q: it.q,
-      whs: [...it.whs].sort((a, b) => b[1] - a[1]),
-      lines: it.lines.sort((a, b) => KIND_ORDER[a.s.status.kind] - KIND_ORDER[b.s.status.kind]),
+  const ffName = new Map(D.fbs.wh.map(w => [w.id, w.own ? `${w.name} (свой)` : `ФФ ${w.name}`]));
+  const acc = new Map<string, { art: string; name?: string; img?: string }>();
+  const touch = (art: string, name?: string, img?: string) => {
+    const k = up(art); const v = acc.get(k) ?? { art };
+    v.name ||= name; v.img ||= img; acc.set(k, v);
+  };
+  // Товар попадает в список, если в выбранном месте у него есть остаток FBO, поставка или заказы.
+  for (const r of src.stock) if (inCl(r.cluster)) touch(r.art, r.name);
+  for (const s of src.supplies) if (inCl(s.cluster)) for (const i of s.items) touch(i.art, i.name, i.img);
+  // У WB заказ знает только округ покупателя, а не склад — к региону склада не привязываем.
+  for (const o of src.orders) if (src.mp === 'w' || inCl(o.key)) touch(o.art);
+
+  return [...acc.values()].map(({ art, name, img }) => {
+    const k = up(art);
+    const stock = src.stock.filter(r => up(r.art) === k);
+    const orders = src.orders.filter(o => up(o.art) === k);
+    const sups = src.supplies.flatMap(s => s.items.filter(i => up(i.art) === k).map(i => ({ s, q: i.q })));
+
+    // По местам (кластер/регион) — для раскрытия.
+    const places = new Map<string, PlaceRow>();
+    const place = (key: string) => {
+      if (!places.has(key)) places.set(key, { key, stock: 0, whs: [], ordFbo: 0, ordFbs: 0, far: 0, from: [], going: 0, lines: [] });
+      return places.get(key)!;
     };
-  }).filter(it => !q || it.name.toLowerCase().includes(q) || it.art.toLowerCase().includes(q));
-  const going = (it: Item) => it.lines.reduce((a, l) => a + l.q, 0);
-  items.sort((a, b) => b.q - a.q || going(b) - going(a));
-  return { items, supplies };
+    const whMap = new Map<string, Map<string, number>>(), fromMap = new Map<string, Map<string, number>>();
+    for (const r of stock) {
+      const p = place(r.cluster); p.stock += r.q;
+      const m = whMap.get(r.cluster) ?? new Map(); m.set(r.wh, (m.get(r.wh) ?? 0) + r.q); whMap.set(r.cluster, m);
+    }
+    const wbBuyers = new Map<string, number>();
+    let wbFbo = 0, wbFbs = 0;
+    for (const o of orders) {
+      if (src.mp === 'w') { wbBuyers.set(o.key, (wbBuyers.get(o.key) ?? 0) + o.q); if (o.fbs) wbFbs += o.q; else wbFbo += o.q; continue; }
+      const p = place(o.key);
+      if (o.fbs) p.ordFbs += o.q; else p.ordFbo += o.q;
+      if (o.from && o.from !== o.key) {
+        p.far += o.q;
+        const m = fromMap.get(o.key) ?? new Map(); m.set(o.from, (m.get(o.from) ?? 0) + o.q); fromMap.set(o.key, m);
+      }
+    }
+    for (const l of sups) { const p = place(l.s.cluster); p.lines.push(l); if (l.s.status.kind !== 'idle' && l.s.status.kind !== 'done') p.going += l.q; }
+    for (const p of places.values()) {
+      p.whs = [...(whMap.get(p.key) ?? new Map())].sort((a, b) => b[1] - a[1]);
+      p.from = [...(fromMap.get(p.key) ?? new Map())].sort((a, b) => b[1] - a[1]);
+      p.lines.sort((a, b) => KIND_ORDER[a.s.status.kind] - KIND_ORDER[b.s.status.kind]);
+    }
+
+    const scope = cluster ? [places.get(cluster)].filter(Boolean) as PlaceRow[] : [...places.values()];
+    const sum = (f: (p: PlaceRow) => number) => scope.reduce((a, p) => a + f(p), 0);
+    const fbo = sum(p => p.stock), far = sum(p => p.far), going = sum(p => p.going);
+    const ordFbo = src.mp === 'w' ? wbFbo : sum(p => p.ordFbo), ordFbs = src.mp === 'w' ? wbFbs : sum(p => p.ordFbs);
+    const where: [string, number][] = cluster
+      ? (places.get(cluster)?.whs ?? [])
+      : [...places.values()].filter(p => p.stock > 0).map(p => [p.key, p.stock] as [string, number]).sort((a, b) => b[1] - a[1]);
+    const buyers: [string, number][] = (src.mp === 'w' ? [...wbBuyers] : [...places.values()].map(p => [p.key, p.ordFbo + p.ordFbs] as [string, number]))
+      .filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+    const fbsRows = D.fbs.stock.filter(r => up(r.art) === k && r.q !== 0).sort((a, b) => b.q - a.q).map(r => [ffName.get(r.wh) ?? '?', r.q] as [string, number]);
+    const inf = src.info(art);
+    return {
+      art, name: inf.name || name || art, img: inf.img || img,
+      fbo, where, ordFbo, ordFbs, far, buyers,
+      lines: scope.flatMap(p => p.lines).sort((a, b) => KIND_ORDER[a.s.status.kind] - KIND_ORDER[b.s.status.kind]), going,
+      fbs: fbsRows, fbsTotal: fbsRows.reduce((a, r) => a + r[1], 0),
+      days: ordFbo > 0 ? Math.round(fbo / (ordFbo / 30)) : null,
+      places: [...places.values()].sort((a, b) => (b.stock + b.ordFbo + b.ordFbs) - (a.stock + a.ordFbo + a.ordFbs)),
+    };
+  });
+}
+
+export function sortRows(rows: ProductRow[], key: SortKey, desc: boolean): ProductRow[] {
+  const v = (r: ProductRow): number | string => {
+    switch (key) {
+      case 'fbo': return r.fbo;
+      case 'orders': return r.ordFbo + r.ordFbs;
+      case 'fbs': return r.fbsTotal;
+      case 'far': return r.ordFbo + r.ordFbs ? r.far / (r.ordFbo + r.ordFbs) : -1;
+      case 'days': return r.days ?? (desc ? -1 : Infinity);
+      case 'name': return r.name.toLowerCase();
+    }
+  };
+  return rows.slice().sort((a, b) => {
+    const x = v(a), y = v(b);
+    const c = typeof x === 'string' ? x.localeCompare(String(y)) : (x as number) - (y as number);
+    return (desc ? -c : c) || (b.fbo - a.fbo) || ((b.ordFbo + b.ordFbs) - (a.ordFbo + a.ordFbs));
+  });
+}
+
+export function filterRows(rows: ProductRow[], f: RowFilter, query: string): ProductRow[] {
+  const q = query.trim().toLowerCase();
+  return rows.filter(r =>
+    (!q || r.name.toLowerCase().includes(q) || r.art.toLowerCase().includes(q)) &&
+    (f === 'all' || (f === 'instock' ? r.fbo > 0 : r.fbo === 0 && r.ordFbo + r.ordFbs > 0)));
 }

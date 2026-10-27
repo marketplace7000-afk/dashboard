@@ -162,11 +162,14 @@ async function collectWb(notes: string[]) {
   try {
     const t = await call('https://seller-analytics-api.wildberries.ru/api/v1/warehouse_remains?groupByNm=true&groupBySa=true', { headers: h });
     const id = t?.data?.taskId;
-    for (let i = 0; i < 24; i++) {
+    // Отчёт готовится от 30 с до нескольких минут (27.10 не успел за 2 мин → download 404).
+    let done = false;
+    for (let i = 0; i < 60 && !done; i++) {
       await sleep(5000);
       const s = await call(`https://seller-analytics-api.wildberries.ru/api/v1/warehouse_remains/tasks/${id}/status`, { headers: h });
-      if (s?.data?.status === 'done') break;
+      done = s?.data?.status === 'done';
     }
+    if (!done) throw new Error('отчёт об остатках не готов за 5 минут');
     const rows: any[] = await call(`https://seller-analytics-api.wildberries.ru/api/v1/warehouse_remains/tasks/${id}/download`, { headers: h });
     wbStock = rows.map(x => ({ vendorCode: String(x.vendorCode ?? ''), nmId: Number(x.nmId), warehouses: (x.warehouses ?? []).map((w: any) => ({ warehouseName: String(w.warehouseName), quantity: Number(w.quantity) || 0 })) }));
   } catch (e) { notes.push('WB: остатки не получены — ' + (e as Error).message); }
@@ -277,6 +280,17 @@ export function collectFbo(): Promise<FboBundle> {
     const fbs = await collectFbs(notes, o.fbsByWh);
     const { fbsByWh: _skip, ...ozon } = o;
     const bundle: FboBundle = { at: new Date().toISOString(), ...ozon, ...w, fbs, notes };
+    // Часть, которая в этот раз не пришла, берём из прошлого снимка — иначе один сбой
+    // площадки обнуляет её остатки на странице (27.10 WB вернул 404 и раздел показал 0).
+    const prev = (await cacheGet<FboBundle>(CACHE_KEY))?.data;
+    if (prev) {
+      const keep = (k: 'ozStock' | 'ozSupplies' | 'ozOrders' | 'ozProducts' | 'wbStock' | 'wbCards' | 'wbSupplies' | 'wbOrders', label: string) => {
+        if (!(bundle[k] as unknown[]).length && (prev[k] as unknown[])?.length) { (bundle as any)[k] = prev[k]; notes.push(`${label} — показаны данные прошлого сбора`); }
+      };
+      keep('ozStock', 'Ozon: остатки'); keep('ozOrders', 'Ozon: заказы'); keep('ozProducts', 'Ozon: каталог');
+      keep('wbStock', 'WB: остатки'); keep('wbOrders', 'WB: заказы'); keep('wbCards', 'WB: карточки');
+      if (!bundle.fbs.stock.length && prev.fbs?.stock?.length) { bundle.fbs = prev.fbs; notes.push('Свои склады — показаны данные прошлого сбора'); }
+    }
     // Пустой снимок (обе площадки не ответили) не затирает прежний.
     if (bundle.ozStock.length || bundle.wbStock.length) await cacheSet(CACHE_KEY, bundle, KEEP_MS);
     console.warn(`[fbo] собрано за ${Math.round((Date.now() - t0) / 1000)} с: Ozon складов-строк ${bundle.ozStock.length}, поставок ${bundle.ozSupplies.length}; WB товаров ${bundle.wbStock.length}, поставок ${bundle.wbSupplies.length}; свои склады ${bundle.fbs.stock.length}${notes.length ? ' · ' + notes.join('; ') : ''}`);

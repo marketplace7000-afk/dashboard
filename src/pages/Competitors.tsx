@@ -211,27 +211,35 @@ function CompareReport({ rep }: { rep: Ads2WbReport }) {
   const cur = has(per) ? per : per === 7 ? 30 : 7;
   return (
     <div className="cmp-rep">
-      <button className={`btn ${open ? '' : 'btn-sm'}`} onClick={() => setOpen(o => !o)} aria-expanded={open}>
+      <button className={`btn ${open ? '' : 'btn-primary'}`} onClick={() => setOpen(o => !o)} aria-expanded={open}>
         {open ? 'Скрыть показатели' : 'Показатели сравнения WB'} от {dmy(rep.date)}
       </button>
       {open && !any && <p className="muted cmp-note">Этот набор снят до 27.10 — полный отчёт появится после ночного прохода агента (пока сравнение открыто в кабинете) или со следующим сравнением.</p>}
       {open && any && <>
-        <div className="cmp-rep-per" role="group" aria-label="Период отчёта">
-          {([7, 30] as const).map(x => <button key={x} className={`btn btn-sm ${cur === x ? 'btn-primary' : ''}`} disabled={!has(x)} onClick={() => choose(x)}>{x} дней</button>)}
+        <div className="cmp-rep-bar">
+          <h3>Показатели за</h3>
+          <div className="cmp-rep-per" role="group" aria-label="Период отчёта">
+            {([7, 30] as const).map(x => <button key={x} className={`btn ${cur === x ? 'btn-primary' : ''}`} disabled={!has(x)} onClick={() => choose(x)}>{x} дней</button>)}
+          </div>
         </div>
         <div className="ad2-scroll">
           <table className="ad2-table cmp-rep-table">
+            <colgroup><col className="cmp-rep-lab" />{rep.nms.map(n => <col key={n.nm} />)}</colgroup>
             <thead><tr>
               <th>Показатель</th>
-              {rep.nms.map(n => (
-                <th key={n.nm} className={n.ours ? 'cmp-rep-our' : ''}>
-                  <a href={`https://www.wildberries.ru/catalog/${n.nm}/detail.aspx`} target="_blank" rel="noreferrer" title={n.name}>
-                    {n.photo ? <img src={n.photo} alt="" loading="lazy" onError={e => { e.currentTarget.style.visibility = 'hidden'; }} /> : null}
-                    <span>{n.nm}</span>
-                  </a>
-                  {n.ours && <span className="chip ad2-chipsm cmp-chip-our">наш</span>}
-                </th>
-              ))}
+              {rep.nms.map(n => {
+                const brand = n.d30?.brand || n.d7?.brand;
+                return (
+                  <th key={n.nm} className={n.ours ? 'cmp-rep-our' : ''}>
+                    <a href={`https://www.wildberries.ru/catalog/${n.nm}/detail.aspx`} target="_blank" rel="noreferrer" title={n.name}>
+                      {n.photo ? <img src={n.photo} alt="" loading="lazy" onError={e => { e.currentTarget.style.visibility = 'hidden'; }} /> : null}
+                      <span className="cmp-rep-nm">{n.nm}</span>
+                      {brand && <span className="cmp-rep-brand">{brand}</span>}
+                    </a>
+                    {n.ours && <span className="chip ad2-chipsm cmp-chip-our">наш товар</span>}
+                  </th>
+                );
+              })}
             </tr></thead>
             <tbody>
               {REP_ROWS.map(row => (
@@ -243,7 +251,7 @@ function CompareReport({ rep }: { rep: Ads2WbReport }) {
             </tbody>
           </table>
         </div>
-        <p className="muted cmp-note">Кабинет WB: «Сравнение карточек» → «Показатели», за {cur} дней на дату сравнения. Значения не пересчитываются.</p>
+        <p className="muted cmp-rep-note">Кабинет WB: «Сравнение карточек» → «Показатели», за {cur} дней на дату сравнения. Значения не пересчитываются.</p>
       </>}
     </div>
   );

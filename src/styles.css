@@ -1684,20 +1684,33 @@ code {
 .cmp-pick:has(input:disabled) { color: var(--muted); font-weight: 400; cursor: default; }
 .cmp-pick:has(input:disabled):hover { border-color: var(--border); }
 .cmp-pick input:disabled { cursor: default; }
-/* 27.10: отчёт «Показатели» сравнения WB под таблицей товара */
-.cmp-rep { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+/* 27.10: отчёт «Показатели» сравнения WB под таблицей товара: крупный шрифт, ровные столбцы карточек */
+.cmp-rep { display: flex; flex-direction: column; align-items: stretch; gap: 14px; margin-top: 6px; }
+.cmp-rep > .btn { align-self: flex-start; }
+.cmp-rep-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.cmp-rep-bar h3 { margin: 0; font-size: 21px; }
 .cmp-rep-per { display: flex; gap: 6px; }
-.cmp-rep .ad2-scroll { width: 100%; }
-.cmp-rep-table th, .cmp-rep-table td { white-space: nowrap; text-align: right; }
-.cmp-rep-table tbody th { text-align: left; font-weight: 500; color: var(--muted); position: sticky; left: 0; background: var(--bg, #fff); z-index: 1; }
-.cmp-rep-table thead th { vertical-align: bottom; background: var(--bg, #fff); }
-.cmp-rep-table thead th:first-child { text-align: left; left: 0; z-index: 3; }
-.cmp-rep-table th, .cmp-rep-table td { min-width: 110px; }
-.cmp-rep-table thead th.cmp-rep-our, .cmp-rep-table td.cmp-rep-our { background: var(--accent-soft); }
-.cmp-rep-table thead .cmp-chip-our { display: block; width: fit-content; margin: 4px 0 0 auto; }
-.cmp-rep-table thead th a { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-.cmp-rep-table thead img { width: 32px; height: 42px; object-fit: cover; border-radius: 6px; }
-.cmp-rep-table td.cmp-rep-our { font-weight: 600; }
+.cmp-rep-per .btn { font-size: 17px; padding: 6px 16px; }
+.cmp-rep .ad2-scroll { width: 100%; max-height: none; }
+.cmp-rep-table { table-layout: fixed; min-width: 900px; }
+.cmp-rep-table col.cmp-rep-lab { width: 300px; }
+.sa .ad2-table.cmp-rep-table th, .sa .ad2-table.cmp-rep-table td, .cmp-rep-table th, .cmp-rep-table td { font-size: 19px; padding: 13px 16px; text-align: center; white-space: normal; overflow-wrap: anywhere; vertical-align: middle; }
+.sa .ad2-table.cmp-rep-table tbody th, .cmp-rep-table tbody th { text-align: left; font-weight: 600; color: var(--text); position: sticky; left: 0; z-index: 1; background: var(--bg-2, #f2f4f7); }
+.sa .ad2-table.cmp-rep-table thead th, .cmp-rep-table thead th { position: static; vertical-align: top; background: var(--bg, #fff); color: var(--text); font-weight: 600; }
+.sa .ad2-table.cmp-rep-table thead th:first-child, .cmp-rep-table thead th:first-child { text-align: left; color: var(--muted); font-weight: 500; vertical-align: bottom; position: sticky; left: 0; z-index: 2; }
+.cmp-rep-table thead th a { display: flex; flex-direction: column; align-items: center; gap: 6px; text-decoration: none; color: inherit; }
+.cmp-rep-table thead img { width: 56px; height: 74px; object-fit: cover; border-radius: 8px; }
+.cmp-rep-table thead .cmp-rep-nm { color: var(--accent); }
+.cmp-rep-table thead .cmp-rep-brand { font-size: 16px; font-weight: 500; color: var(--muted); }
+.cmp-rep-table thead .cmp-chip-our { display: inline-block; margin-top: 6px; }
+.cmp-rep-table tbody tr:nth-child(even) td { background: var(--bg-2, #f6f7f9); }
+.sa .ad2-table.cmp-rep-table .cmp-rep-our, .cmp-rep-table .cmp-rep-our, .cmp-rep-table tbody tr:nth-child(even) td.cmp-rep-our { background: var(--accent-soft); }
+.cmp-rep-table td.cmp-rep-our { font-weight: 700; }
+.cmp-rep-note { font-size: 16px; }
+@media (max-width: 760px) {
+  .cmp-rep-table col.cmp-rep-lab { width: 190px; }
+  .sa .ad2-table.cmp-rep-table th, .sa .ad2-table.cmp-rep-table td, .cmp-rep-table th, .cmp-rep-table td { font-size: 16px; padding: 10px; }
+}
 .cmp-compare-s { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 17px; }
 .cmp-compare-last { font-size: 16px; }
 .cmp-refresh { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; flex: 1 1 100%; }

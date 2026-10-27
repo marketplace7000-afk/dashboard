@@ -203,6 +203,24 @@ export type Ads2WbCompare = {
   telegram: boolean;
 };
 
+/**
+ * Отчёт «Сравнение карточек» → «Показатели» (27.10.2026): значения кабинета WB как есть, без пересчётов.
+ * null — WB этот показатель не отдал (на экране «Нет данных»).
+ */
+export type Ads2WbRepRow = {
+  created: string | null; brand: string | null; cardRating: number | null; fbRating: number | null; fbCount: number | null;
+  minPrice: number | null; delivery: { days?: number; hours?: number; mins?: number } | null; avgPos: number | null;
+  /** Статус продвижения: в рекламе, названия акций ([] — без акций), подменный артикул. */
+  ads: boolean | null; promo: string[] | null; subst: boolean;
+  views: number | null; open: number | null; ctr: number | null; cart: number | null; toCart: number | null;
+  orders: number | null; toOrder: number | null; buyouts: number | null; buyoutPct: number | null; cancels: number | null;
+};
+export type Ads2WbReport = {
+  setId: string; date: string;
+  /** Карточки набора, каждая отдельной строкой; d7/d30 — null, если за этот период отчёт не снят. */
+  nms: { nm: string; name: string; photo: string; ours: boolean; d7: Ads2WbRepRow | null; d30: Ads2WbRepRow | null }[];
+};
+
 export type Ads2Competitors = {
   ok: true; mp: Ads2Mp; at: number | null;
   /** Нет снимка — задание ещё не отработало. */
@@ -213,6 +231,8 @@ export type Ads2Competitors = {
   /** Наши товары для выбора при добавлении: артикул и название. */
   catalog: { key: string; name: string }[];
   wbCompare?: Ads2WbCompare;
+  /** Последний отчёт сравнения по каждому нашему товару WB: наш nmId → набор. */
+  wbReports?: Record<string, Ads2WbReport>;
   wb?: {
     period: { start: string; end: string } | null;
     summary: { avgPos: number | null; avgPosDyn: number | null; medianPos: number | null; visibility: number | null; advertised: number | null; total: number | null };

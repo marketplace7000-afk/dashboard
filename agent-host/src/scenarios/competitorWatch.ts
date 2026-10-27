@@ -105,11 +105,18 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
     if (!det) { errors.push(r.error || ('сравнение ' + h.date + ': ' + JSON.stringify(r.json && r.json.additionalErrors || '').slice(0, 120))); continue; }
     const c = x => x && typeof x === 'object' ? x.current : x;
     const dy = x => x && typeof x === 'object' ? x.dynamics : null;
+    // Отчёт «Показатели» как в кабинете (27.10.2026): только значения WB, без пересчётов; нет поля — null.
+    const cv = x => x == null ? null : typeof x === 'object' && 'current' in x ? (x.current == null ? null : x.current) : x;
+    const rep = p => ({ created: p.nmCreated || null, brand: p.brandName || null, cardRating: p.isCardRated === false ? null : cv(p.nmRating),
+      fbRating: cv(p.feedbacksRating), fbCount: cv(p.feedbacksCount), minPrice: cv(p.minPrice), delivery: cv(p.timeToReady), avgPos: cv(p.avgPosition),
+      ads: typeof p.inAdvertising === 'boolean' ? p.inAdvertising : null, promo: p.promo ? (p.promo.inPromo ? (p.promo.promoNames || []) : []) : null, subst: !!p.isSubstitutedSKU,
+      views: cv(p.viewCount), open: cv(p.openCard), ctr: cv(p.CTR), cart: cv(p.addToCart), toCart: cv(p.openToCart), orders: cv(p.orders), toOrder: cv(p.cartToOrder),
+      buyouts: cv(p.buyoutCount), buyoutPct: cv(p.buyoutPercent), cancels: cv(p.cancelCount) });
     compDetails.push({ id: h.ID, date: h.date,
       nms: (det.commonParams || []).map(p => ({ nmId: p.nmId, name: p.nmName, brand: p.brandName, photo: p.mainPhoto,
         minPrice: p.minPrice, medianPrice: p.medianPrice, rating: p.feedbacksRating, feedbacks: c(p.feedbacksCount),
         avgPos: c(p.avgPosition), avgPosDyn: dy(p.avgPosition), openCard: c(p.openCard), orders: c(p.orders), ordersDyn: dy(p.orders),
-        ctr: c(p.CTR), views: c(p.viewCount), buyoutPercent: c(p.buyoutPercent), inAds: !!p.inAdvertising, inPromo: !!(p.promo && p.promo.inPromo) })),
+        ctr: c(p.CTR), views: c(p.viewCount), buyoutPercent: c(p.buyoutPercent), inAds: !!p.inAdvertising, inPromo: !!(p.promo && p.promo.inPromo), rep: rep(p) })),
       queries: (det.searchQueries || []).map(q => ({ text: q.text, freq: c(q.frequency) })) });
     // Тот же набор за 7 дней (26.10.2026: сравнения раз в неделю — «неделя к неделе»). Период лимит не тратит.
     await new Promise(r => setTimeout(r, 1200 + Math.random() * 1000));
@@ -118,7 +125,7 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
     const det7 = r7.json && !r7.json.error && r7.json.data;
     if (det7) compDetails[compDetails.length - 1].nms7 = (det7.commonParams || []).map(p => ({ nmId: p.nmId,
       avgPos: c(p.avgPosition), openCard: c(p.openCard), orders: c(p.orders), ordersDyn: dy(p.orders), ctr: c(p.CTR), ctrDyn: dy(p.CTR), views: c(p.viewCount),
-      addToCart: c(p.addToCart), inAds: !!p.inAdvertising, inPromo: !!(p.promo && p.promo.inPromo) }));
+      addToCart: c(p.addToCart), inAds: !!p.inAdvertising, inPromo: !!(p.promo && p.promo.inPromo), rep: rep(p) }));
     await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500));
   }
   // Позиция и воронка каждой нашей карточки за вчера и позавчера — отчёт за один день

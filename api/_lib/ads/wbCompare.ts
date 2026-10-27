@@ -11,7 +11,7 @@
 import { adsDb } from './store';
 import { createTask, listTasks } from '../agentQueue';
 import { tgSend, tgEscape as esc, tgConfigured, chatId } from '../telegram';
-import type { Ads2WbCompare } from '../../../shared/ads2';
+import type { Ads2WbCompare, Ads2WbReport } from '../../../shared/ads2';
 
 export const WB_COMPARE_MAX_WEEK = 10;
 const SITE = 'https://e-avtovibe.ru/#competitors-wb';
@@ -249,6 +249,32 @@ export function lastCompareFacts(ourNms: Set<string>, maxAgeDays = 10): Map<stri
       if (!ourNms.has(x.nm) || out.has(x.nm)) continue; // строки идут от свежих к старым — первое попадание и есть последнее
       const { name: _n, ...ours } = pick(x);
       out.set(x.nm, { setId, date: x.date, period: has7 ? 7 : 30, ours, comps: parsed.filter(y => y.nm !== x.nm && !ourNms.has(y.nm)).map(pick) });
+    }
+  }
+  return out;
+}
+
+/**
+ * Отчёт «Показатели» последнего набора по каждому нашему товару (27.10.2026): строки как прислал
+ * агент (поле rep), каждая карточка отдельно. Наборы, снятые до 27.10, полей отчёта не имеют — null.
+ */
+export function compareReports(ourNms: Set<string>): Record<string, Ads2WbReport> {
+  const out: Record<string, Ads2WbReport> = {};
+  const rows = db().prepare('SELECT set_id, date, nm, json FROM ad_wb_comp_hist ORDER BY date DESC, at DESC, rowid').all() as any[];
+  const bySet = new Map<string, { date: string; rs: { nm: string; j: any }[] }>();
+  for (const r of rows) {
+    let j: any = {}; try { j = JSON.parse(r.json); } catch { /* битая строка — без данных */ }
+    const s = bySet.get(r.set_id) ?? { date: String(r.date), rs: [] };
+    s.rs.push({ nm: String(r.nm), j });
+    bySet.set(r.set_id, s);
+  }
+  for (const [setId, s] of bySet) { // от свежих к старым — первый набор с нашим товаром и есть последний
+    for (const x of s.rs) {
+      if (!ourNms.has(x.nm) || out[x.nm]) continue;
+      const nms = [...s.rs].sort((a, b) => Number(b.nm === x.nm) - Number(a.nm === x.nm)).map(y => ({
+        nm: y.nm, name: String(y.j.d30?.name ?? ''), photo: String(y.j.d30?.photo ?? ''), ours: ourNms.has(y.nm),
+        d7: y.j.d7?.rep ?? null, d30: y.j.d30?.rep ?? null }));
+      out[x.nm] = { setId, date: s.date, nms };
     }
   }
   return out;

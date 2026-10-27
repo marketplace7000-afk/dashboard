@@ -1684,6 +1684,20 @@ code {
 .cmp-pick:has(input:disabled) { color: var(--muted); font-weight: 400; cursor: default; }
 .cmp-pick:has(input:disabled):hover { border-color: var(--border); }
 .cmp-pick input:disabled { cursor: default; }
+/* 27.10: отчёт «Показатели» сравнения WB под таблицей товара */
+.cmp-rep { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.cmp-rep-per { display: flex; gap: 6px; }
+.cmp-rep .ad2-scroll { width: 100%; }
+.cmp-rep-table th, .cmp-rep-table td { white-space: nowrap; text-align: right; }
+.cmp-rep-table tbody th { text-align: left; font-weight: 500; color: var(--muted); position: sticky; left: 0; background: var(--bg, #fff); z-index: 1; }
+.cmp-rep-table thead th { vertical-align: bottom; background: var(--bg, #fff); }
+.cmp-rep-table thead th:first-child { text-align: left; left: 0; z-index: 3; }
+.cmp-rep-table th, .cmp-rep-table td { min-width: 110px; }
+.cmp-rep-table thead th.cmp-rep-our, .cmp-rep-table td.cmp-rep-our { background: var(--accent-soft); }
+.cmp-rep-table thead .cmp-chip-our { display: block; width: fit-content; margin: 4px 0 0 auto; }
+.cmp-rep-table thead th a { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.cmp-rep-table thead img { width: 32px; height: 42px; object-fit: cover; border-radius: 6px; }
+.cmp-rep-table td.cmp-rep-our { font-weight: 600; }
 .cmp-compare-s { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 17px; }
 .cmp-compare-last { font-size: 16px; }
 .cmp-refresh { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; flex: 1 1 100%; }

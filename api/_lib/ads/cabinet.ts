@@ -15,7 +15,7 @@ import {
 } from '../competitorWatch';
 import { rnpInStockSkus, rnpItems, saveWbCardViews } from '../rnp';
 import { wbImageUrl } from '../wbBasket';
-import { onWbSnapshot, compareState } from './wbCompare';
+import { onWbSnapshot, compareState, compareReports } from './wbCompare';
 
 const KEEP = 30;
 
@@ -715,6 +715,10 @@ function safeCompareState() {
   try { return compareState(); } catch (e) { console.warn('[wb-compare] состояние:', (e as Error).message); return undefined; }
 }
 
+function safeReports(watch: Ads2WatchProduct[]) {
+  try { return compareReports(new Set(watch.map(p => String(p.ourId)).filter(Boolean))); } catch (e) { console.warn('[wb-compare] отчёты:', (e as Error).message); return undefined; }
+}
+
 export function getCompetitors(mp: AdMp): Ads2Competitors {
   const d = db();
   const row = d.prepare('SELECT at, json FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT 1').get(mp) as any;
@@ -722,5 +726,5 @@ export function getCompetitors(mp: AdMp): Ads2Competitors {
   if (!row) return { ok: true, mp, at: null, empty: true, errors: [], refresh, ...buildWatch(mp, null) };
   const data = JSON.parse(row.json);
   const base = { ok: true as const, mp, at: Number(row.at), empty: false, refresh, errors: (data?.errors ?? []).map(String).slice(0, 10), ...buildWatch(mp, data) };
-  return mp === 'wb' ? { ...base, wb: parseWb(data), wbCompare: safeCompareState() } : { ...base, ozon: parseOzon(data, String(process.env.OZON_CLIENT_ID || '').trim()) };
+  return mp === 'wb' ? { ...base, wb: parseWb(data), wbCompare: safeCompareState(), wbReports: safeReports(base.watch) } : { ...base, ozon: parseOzon(data, String(process.env.OZON_CLIENT_ID || '').trim()) };
 }

@@ -17,7 +17,7 @@ import {
   ArrowsClockwiseIcon, MagnifyingGlassIcon, PlusIcon, WarningIcon, WarningOctagonIcon, CheckCircleIcon, XIcon,
 } from '@phosphor-icons/react';
 import { apiGet, apiPost, errText } from '../api/http';
-import type { Ads2Mp, Ads2Competitors, Ads2WatchLink, Ads2WatchProduct, Ads2WbCompare } from '../../shared/ads2';
+import type { Ads2Mp, Ads2Competitors, Ads2WatchLink, Ads2WatchProduct, Ads2WbCompare, Ads2WbReport, Ads2WbRepRow } from '../../shared/ads2';
 import { nf0, nf1, rub, num, pct, ddmm, kRub, when, whenRel, ProductCell, PosDyn, PctDyn, MiniLines } from './ads2ui';
 
 type Sheet = 'watch' | 'market';
@@ -164,8 +164,93 @@ function compareNms(p: Ads2WatchProduct): number[] {
   return comp.length ? [our, ...comp] : [];
 }
 
-function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7, pick }: {
-  p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; showIgnored: boolean; per?: OzPer;
+// ─── Отчёт «Сравнение карточек» → «Показатели» (27.10.2026) ──────────────────
+// Значения кабинета WB как есть: ничего не пересчитываем; чего WB не отдал — «Нет данных».
+const NO = <span className="muted">Нет данных</span>;
+const v0 = (v: number | null | undefined, unit = '') => (v == null || !Number.isFinite(v) ? NO : <>{nf1.format(v)}{unit}</>);
+const dmy = (d: string) => d.split('-').reverse().join('.');
+const REP_ROWS: { label: string; tip?: string; get: (r: Ads2WbRepRow) => React.ReactNode }[] = [
+  { label: 'Дата создания', tip: 'Дата создания карточки', get: r => (r.created ? dmy(r.created) : NO) },
+  { label: 'Бренд', get: r => r.brand || NO },
+  { label: 'Рейтинг карточки', get: r => v0(r.cardRating) },
+  { label: 'Рейтинг по отзывам', get: r => v0(r.fbRating) },
+  { label: 'Количество отзывов', get: r => v0(r.fbCount) },
+  { label: 'Мин. цена со скидкой (по размерам), ₽', get: r => (r.minPrice == null ? NO : rub(r.minPrice)) },
+  { label: 'Среднее время доставки', get: r => {
+    const t = r.delivery;
+    const dd = t?.days ?? 0, hh = t?.hours ?? 0, mm = t?.mins ?? 0;
+    // 0 д 0 ч WB отдаёт, когда времени доставки у него нет.
+    if (!t || (!dd && !hh && !mm)) return NO;
+    return [dd ? `${dd} д` : '', hh ? `${hh} ч` : '', !dd && !hh ? `${mm} мин` : ''].filter(Boolean).join(' ');
+  } },
+  { label: 'Средняя позиция', get: r => v0(r.avgPos) },
+  { label: 'Статус продвижения', tip: 'Реклама, акции и подменный артикул — как в кабинете; названия акций — при наведении', get: r => {
+    if (r.ads == null && r.promo == null) return NO;
+    const tags = [r.ads ? 'Реклама' : '', r.promo?.length ? 'Акция' : '', r.subst ? 'Подменный артикул' : ''].filter(Boolean);
+    return tags.length ? <span title={r.promo?.length ? r.promo.join('\n') : undefined}>{tags.join(', ')}</span> : <span className="muted">нет</span>;
+  } },
+  { label: 'Показы', get: r => v0(r.views) },
+  { label: 'Переходы в карточку, шт', get: r => v0(r.open) },
+  { label: 'CTR, %', get: r => v0(r.ctr, ' %') },
+  { label: 'Добавления в корзину, шт', get: r => v0(r.cart) },
+  { label: 'Конверсия в корзину, %', get: r => v0(r.toCart, ' %') },
+  { label: 'Заказы, шт', get: r => v0(r.orders) },
+  { label: 'Конверсия в заказ, %', get: r => v0(r.toOrder, ' %') },
+  { label: 'Выкупы, шт', get: r => v0(r.buyouts) },
+  { label: 'Процент выкупа, %', get: r => v0(r.buyoutPct, ' %') },
+  { label: 'Отмены, шт', get: r => v0(r.cancels) },
+];
+
+/** Показатели последнего набора: строки — показатели, столбцы — карточки (каждая отдельно), период 7 / 30 дней. */
+function CompareReport({ rep }: { rep: Ads2WbReport }) {
+  const [open, setOpen] = useState(false);
+  const [per, setPer] = useState<7 | 30>(() => { try { return localStorage.getItem('cmp:wbRepPer') === '30' ? 30 : 7; } catch { return 7; } });
+  const choose = (x: 7 | 30) => { setPer(x); try { localStorage.setItem('cmp:wbRepPer', String(x)); } catch { /* приватное окно */ } };
+  const has = (x: 7 | 30) => rep.nms.some(n => (x === 7 ? n.d7 : n.d30));
+  const any = has(7) || has(30);
+  const cur = has(per) ? per : per === 7 ? 30 : 7;
+  return (
+    <div className="cmp-rep">
+      <button className={`btn ${open ? '' : 'btn-sm'}`} onClick={() => setOpen(o => !o)} aria-expanded={open}>
+        {open ? 'Скрыть показатели' : 'Показатели сравнения WB'} от {dmy(rep.date)}
+      </button>
+      {open && !any && <p className="muted cmp-note">Этот набор снят до 27.10 — полный отчёт появится после ночного прохода агента (пока сравнение открыто в кабинете) или со следующим сравнением.</p>}
+      {open && any && <>
+        <div className="cmp-rep-per" role="group" aria-label="Период отчёта">
+          {([7, 30] as const).map(x => <button key={x} className={`btn btn-sm ${cur === x ? 'btn-primary' : ''}`} disabled={!has(x)} onClick={() => choose(x)}>{x} дней</button>)}
+        </div>
+        <div className="ad2-scroll">
+          <table className="ad2-table cmp-rep-table">
+            <thead><tr>
+              <th>Показатель</th>
+              {rep.nms.map(n => (
+                <th key={n.nm} className={n.ours ? 'cmp-rep-our' : ''}>
+                  <a href={`https://www.wildberries.ru/catalog/${n.nm}/detail.aspx`} target="_blank" rel="noreferrer" title={n.name}>
+                    {n.photo ? <img src={n.photo} alt="" loading="lazy" onError={e => { e.currentTarget.style.visibility = 'hidden'; }} /> : null}
+                    <span>{n.nm}</span>
+                  </a>
+                  {n.ours && <span className="chip ad2-chipsm cmp-chip-our">наш</span>}
+                </th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {REP_ROWS.map(row => (
+                <tr key={row.label}>
+                  <th scope="row" title={row.tip}>{row.label}</th>
+                  {rep.nms.map(n => { const r = cur === 7 ? n.d7 : n.d30; return <td key={n.nm} className={n.ours ? 'cmp-rep-our' : ''}>{r ? row.get(r) : NO}</td>; })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="muted cmp-note">Кабинет WB: «Сравнение карточек» → «Показатели», за {cur} дней на дату сравнения. Значения не пересчитываются.</p>
+      </>}
+    </div>
+  );
+}
+
+function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7, pick, report }: {
+  p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; showIgnored: boolean; per?: OzPer; report?: Ads2WbReport;
   pick?: { on: boolean; toggle: () => void }; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
 }) {
   const [adding, setAdding] = useState(false);
@@ -275,6 +360,7 @@ function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7, p
         </div>
       ) : <p className="muted cmp-empty">{p.links.length ? 'Все предложенные отмечены «не наш».' : 'Конкурентов пока нет.'} Добавьте своего: «+ Конкурент».</p>}
       {hidden > 0 && <div className="muted cmp-note">Скрыто «не наших»: {hidden}</div>}
+      {report && <CompareReport rep={report} />}
     </div>
   );
 }
@@ -401,7 +487,8 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
       )}
       {list.length === 0 && <div className="card muted">{all || needle || onlyPending ? 'Ничего не найдено.' : 'Привязок пока нет. Предложения появятся после ночного прохода агента; своего конкурента можно привязать в «Все товары».'}</div>}
       {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} per={per} showIgnored={showIgnored} onData={onData} setToast={setToast}
-        pick={mp === 'wb' && d.wbCompare ? { on: picks.has(p.key), toggle: () => togglePick(p.key) } : undefined} />)}
+        pick={mp === 'wb' && d.wbCompare ? { on: picks.has(p.key), toggle: () => togglePick(p.key) } : undefined}
+        report={mp === 'wb' && p.ourId ? d.wbReports?.[p.ourId] : undefined} />)}
       {list.length > more && <button className="btn" onClick={() => setMore(m => m + 20)}>Показать ещё ({list.length - more})</button>}
     </>
   );

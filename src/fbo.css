@@ -1,65 +1,78 @@
 /* ── «Остатки FBO» (src/pages/Fbo.tsx) — в стиле А: токены .sa (--sa-*, --bg, --accent…).
-   27.10.2026: таблица «один товар — одна строка», кластеры строкой сверху. ── */
-.fbo { --fbo-fbs: #c3cbd6; --fbo-cols: minmax(260px, 1.9fr) 112px minmax(170px, 1.3fr) minmax(190px, 1.3fr) 120px minmax(170px, 1.25fr) minmax(170px, 1.15fr) 24px; }
+   27.10.2026: таблица «один товар — одна строка», кластеры строкой сверху.
+   27.10.2026 (вечер): по просьбе владельца всё крупнее — текст 19, цифры 30, фото 84×112,
+   строки выше; на экранах уже 1700 px строка товара укладывается в 2 яруса с подписями. ── */
+.fbo {
+  --fbo-fbs: #c3cbd6;
+  --fbo-t: 19px;      /* основной текст таблицы */
+  --fbo-s: 17px;      /* подписи, вторые строки */
+  --fbo-num: 30px;    /* главные цифры строки */
+  font-size: var(--fbo-t);
+}
 .fbo .bad { color: var(--bad); }
 .fbo .r { text-align: right; }
+.fbo .muted { color: var(--muted); }
 .fbo-top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
-.fbo-sub { color: var(--muted); font-size: var(--sa-cap); max-width: 80ch; }
-.fbo-upd { display: flex; align-items: center; gap: 12px; font-size: var(--sa-small); }
-.fbo-note { margin-top: 12px; background: #fff7e6; border: 1px solid #f1d9a6; color: #7a5a12; border-radius: var(--sa-r-s); padding: 10px 14px; font-size: var(--sa-small); }
+.fbo-sub { color: var(--muted); font-size: var(--fbo-t); max-width: 90ch; }
+.fbo-upd { display: flex; align-items: center; gap: 14px; font-size: var(--fbo-s); }
+.fbo-upd .btn { font-size: var(--fbo-s); padding: 9px 16px; }
+.fbo-note { margin-top: 14px; background: #fff7e6; border: 1px solid #f1d9a6; color: #7a5a12; border-radius: var(--sa-r-s); padding: 12px 16px; font-size: var(--fbo-s); }
 
-.fbo-controls, .fbo-tools { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-.fbo-controls { margin: 18px 0 14px; }
-.fbo-tools { margin: 16px 0 12px; }
-.fbo-seg { display: inline-flex; flex-wrap: wrap; background: var(--bg-3); border-radius: var(--sa-r-m); padding: 4px; gap: 2px; }
-.fbo-seg button { border: 0; background: transparent; padding: 9px 18px; border-radius: var(--sa-r-s); font-size: var(--sa-cap); color: var(--muted); cursor: pointer; }
+.fbo-controls, .fbo-tools { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.fbo-controls { margin: 22px 0 16px; }
+.fbo-tools { margin: 20px 0 14px; }
+.fbo-seg { display: inline-flex; flex-wrap: wrap; background: var(--bg-3); border-radius: var(--sa-r-m); padding: 5px; gap: 3px; }
+.fbo-seg button { border: 0; background: transparent; padding: 11px 22px; border-radius: var(--sa-r-s); font-size: var(--fbo-t); color: var(--muted); cursor: pointer; }
 .fbo-seg button[aria-pressed="true"] { background: var(--bg); color: var(--text); box-shadow: var(--sa-shadow); font-weight: 600; }
-.fbo-seg--sm button { padding: 7px 14px; font-size: var(--sa-small); }
-.fbo-search { flex: 1 1 240px; max-width: 360px; border: 1px solid var(--border); border-radius: var(--sa-r-m); padding: 9px 14px; font-size: var(--sa-cap); background: var(--bg); color: var(--text); }
-.fbo-sort { display: inline-flex; align-items: center; gap: 8px; font-size: var(--sa-small); color: var(--muted); }
-.fbo-sort select { font: inherit; font-size: var(--sa-small); color: var(--text); border: 1px solid var(--border); border-radius: var(--sa-r-s); padding: 7px 10px; background: var(--bg); }
-.fbo-count { margin-left: auto; font-size: var(--sa-small); }
-.fbo-seg button:focus-visible, .fbo-search:focus-visible, .fbo-sort select:focus-visible, .fbo-chip:focus-visible, .fbo-tr:focus-visible, .fbo-stopped summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fbo-seg--sm button { padding: 9px 16px; font-size: var(--fbo-s); }
+.fbo-search { flex: 1 1 280px; max-width: 420px; border: 1px solid var(--border); border-radius: var(--sa-r-m); padding: 12px 16px; font-size: var(--fbo-t); background: var(--bg); color: var(--text); }
+.fbo-sort { display: inline-flex; align-items: center; gap: 10px; font-size: var(--fbo-s); color: var(--muted); }
+.fbo-sort select { font: inherit; font-size: var(--fbo-s); color: var(--text); border: 1px solid var(--border); border-radius: var(--sa-r-s); padding: 9px 12px; background: var(--bg); }
+.fbo-count { margin-left: auto; font-size: var(--fbo-s); }
+.fbo-seg button:focus-visible, .fbo-search:focus-visible, .fbo-sort select:focus-visible, .fbo-chip:focus-visible, .fbo-tr:focus-visible, .fbo-stopped summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
 /* Кластеры строкой */
-.fbo-clbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m); box-shadow: var(--sa-shadow); }
-.fbo-chip { display: inline-flex; align-items: baseline; gap: 8px; border: 1px solid var(--border); background: var(--bg); border-radius: 999px; padding: 6px 14px; font-size: var(--sa-small); color: var(--text); cursor: pointer; }
+.fbo-clbar { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m); box-shadow: var(--sa-shadow); }
+.fbo-chip { display: inline-flex; align-items: baseline; gap: 9px; border: 1px solid var(--border); background: var(--bg); border-radius: 999px; padding: 9px 18px; font-size: var(--fbo-s); color: var(--text); cursor: pointer; }
 .fbo-chip:hover { border-color: var(--accent); }
 .fbo-chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
-.fbo-chip .q { font-weight: 600; }
+.fbo-chip .q { font-weight: 700; font-size: var(--fbo-t); }
 .fbo-chip .q.zero { color: var(--bad); }
-.fbo-chip .o { color: var(--muted); font-size: 13px; }
-.fbo-chip[aria-pressed="true"] .q.zero, .fbo-chip[aria-pressed="true"] .o { color: #fff; opacity: .85; }
+.fbo-chip .o { color: var(--muted); font-size: 15px; }
+.fbo-chip[aria-pressed="true"] .q.zero, .fbo-chip[aria-pressed="true"] .o { color: #fff; opacity: .9; }
 
 /* Таблица товаров */
-.fbo-table { background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m); box-shadow: var(--sa-shadow); overflow-x: auto; }
-.fbo-tr { display: grid; grid-template-columns: var(--fbo-cols); gap: 16px; align-items: start; padding: 12px 16px; border-bottom: 1px solid var(--bg-3); min-width: 1180px; }
+.fbo-table { background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m); box-shadow: var(--sa-shadow); }
+.fbo-tr {
+  display: grid; gap: 18px; align-items: start; padding: 18px 20px; border-bottom: 1px solid var(--border);
+  grid-template-columns: minmax(280px, 1.6fr) 124px minmax(170px, 1fr) minmax(190px, 1.1fr) 140px minmax(170px, 1fr) minmax(180px, 1fr) 26px;
+}
 .fbo-tr > * { min-width: 0; overflow-wrap: anywhere; }
-.fbo-th { position: sticky; top: 0; z-index: 1; background: var(--bg-2); font-size: var(--sa-small); color: var(--muted); font-weight: 500; padding: 10px 16px; align-items: end; }
+.fbo-th { position: sticky; top: 0; z-index: 2; background: var(--bg-2); font-size: var(--fbo-s); color: var(--muted); font-weight: 500; padding: 14px 20px; align-items: end; border-radius: var(--sa-r-m) var(--sa-r-m) 0 0; }
 .fbo-tr:not(.fbo-th) { cursor: pointer; }
-.fbo-tr:not(.fbo-th):hover { background: #f7f9fc; }
-.fbo-tr.open { background: var(--accent-soft); border-bottom-color: transparent; }
+.fbo-tr:not(.fbo-th):hover { background: #f3f7fd; }
+.fbo-tr.open { background: var(--accent-soft) !important; border-bottom-color: transparent; }
 .fbo-table > :last-child { border-bottom: 0; }
 
-.c-prod { display: grid; grid-template-columns: 56px 1fr; gap: 12px; align-items: start; }
-.c-prod .ph { width: 56px; height: 74px; border-radius: var(--sa-r-s); background: var(--bg-3) center/cover no-repeat; }
-.c-prod .pt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.c-prod .art { font-size: var(--sa-small); font-weight: 600; color: var(--text); }
-.c-prod .nm { font-size: var(--sa-small); color: var(--muted); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.c-num { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
-.c-num b { font-size: var(--sa-em); font-weight: 600; line-height: 1.1; }
-.c-num .sub { font-size: 13px; color: var(--muted); }
-.c-num .sub.bad { color: var(--bad); }
-.c-list { display: flex; flex-direction: column; gap: 3px; font-size: var(--sa-small); }
-.c-list .kv { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.c-prod { display: grid; grid-template-columns: 84px 1fr; gap: 16px; align-items: start; }
+.c-prod .ph { width: 84px; height: 112px; border-radius: var(--sa-r-s); background: var(--bg-3) center/cover no-repeat; }
+.c-prod .pt { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.c-prod .art { font-size: var(--fbo-t); font-weight: 700; color: var(--text); line-height: 1.25; }
+.c-prod .nm { font-size: var(--fbo-s); color: var(--muted); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.c-num { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.c-num b { font-size: var(--fbo-num); font-weight: 700; line-height: 1.05; }
+.c-num .sub { font-size: var(--fbo-s); color: var(--muted); line-height: 1.3; text-align: right; }
+.c-num .sub.bad { color: var(--bad); font-weight: 600; }
+.c-list { display: flex; flex-direction: column; gap: 6px; font-size: var(--fbo-t); line-height: 1.3; }
+.c-list .kv { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .c-list .kv > span { min-width: 0; }
-.c-list .kv b { font-weight: 600; white-space: nowrap; }
-.c-list .kv.tot { border-top: 1px dashed var(--border); padding-top: 3px; }
-.c-list .more { color: var(--muted); font-size: 13px; }
-.c-exp { color: var(--muted); padding-top: 2px; }
+.c-list .kv b { font-weight: 700; white-space: nowrap; }
+.c-list .kv.tot { border-top: 1px dashed var(--border); padding-top: 6px; }
+.c-list .more { color: var(--muted); font-size: var(--fbo-s); }
+.c-exp { color: var(--muted); padding-top: 4px; }
 
-.fbo-st { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; border-radius: 999px; padding: 2px 9px; }
-.fbo-st::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.fbo-st { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fbo-s); font-weight: 600; border-radius: 999px; padding: 3px 12px; line-height: 1.35; }
+.fbo-st::before { content: ""; flex: none; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
 .fbo-st.go { color: var(--good); background: #e6f4ea; }
 .fbo-st.soon { color: var(--warn); background: #fdf1e2; }
 .fbo-st.idle { color: #4b5563; background: var(--bg-3); }
@@ -67,35 +80,59 @@
 .fbo-st.done { color: var(--accent); background: var(--accent-soft); }
 
 /* Раскрытие строки */
-.fbo-detail { padding: 4px 16px 18px 84px; background: var(--accent-soft); border-bottom: 1px solid var(--bg-3); min-width: 1180px; }
-.fbo-dgrid { display: grid; grid-template-columns: 1fr 1.2fr 1.6fr; gap: 16px; align-items: start; }
-.fbo-dt { width: 100%; border-collapse: collapse; background: var(--bg); border-radius: var(--sa-r-s); overflow: hidden; font-size: var(--sa-small); }
-.fbo-dt th { text-align: left; font-weight: 500; color: var(--muted); background: var(--bg-2); padding: 7px 10px; white-space: nowrap; }
-.fbo-dt td { padding: 7px 10px; border-top: 1px solid var(--bg-3); vertical-align: top; }
+.fbo-detail { padding: 6px 22px 24px 122px; background: var(--accent-soft); border-bottom: 1px solid var(--border); overflow-x: auto; }
+.fbo-dgrid { display: grid; grid-template-columns: 1fr 1.2fr 1.6fr; gap: 18px; align-items: start; }
+.fbo-dt { width: 100%; border-collapse: collapse; background: var(--bg); border-radius: var(--sa-r-s); overflow: hidden; font-size: var(--fbo-s); }
+.fbo-dt th { text-align: left; font-weight: 500; color: var(--muted); background: var(--bg-2); padding: 10px 12px; white-space: nowrap; font-size: 16px; }
+.fbo-dt td { padding: 10px 12px; border-top: 1px solid var(--bg-3); vertical-align: top; line-height: 1.35; }
 .fbo-dt td.k { font-weight: 600; }
 .fbo-dt .r { text-align: right; }
-.fbo-dt td > div + div { margin-top: 4px; }
+.fbo-dt td > div + div { margin-top: 6px; }
 .fbo-dt tr.click { cursor: pointer; }
-.fbo-dt tr.click:hover td { background: #f7f9fc; }
-.fbo-dt--wide { font-size: var(--sa-cap); }
-.fbo-dt--wide th { font-size: var(--sa-small); }
-.fbo-dt .bar-h, .fbo-dt .bar-c { width: 34%; }
+.fbo-dt tr.click:hover td { background: #f3f7fd; }
+.fbo-dt--wide { font-size: var(--fbo-t); }
+.fbo-dt--wide th { font-size: var(--fbo-s); padding: 12px 14px; }
+.fbo-dt--wide td { padding: 12px 14px; }
+.fbo-dt .bar-h, .fbo-dt .bar-c { width: 32%; }
 
 /* Вкладки «Где покупают», «Поставки», «Ваши склады» */
-.fbo-box { background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m); box-shadow: var(--sa-shadow); padding: 18px 20px; margin-top: 14px; overflow-x: auto; }
-.fbo-box .lead { margin: 0 0 14px; color: var(--muted); font-size: var(--sa-small); max-width: 90ch; }
-.fbo-box .lead b { color: var(--bad); font-weight: 600; }
-.fbo-bar { position: relative; display: block; height: 12px; background: var(--bg-2); border-radius: 6px; overflow: hidden; }
-.fbo-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 6px; }
+.fbo-box { background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m); box-shadow: var(--sa-shadow); padding: 22px 24px; margin-top: 16px; overflow-x: auto; }
+.fbo-box .lead { margin: 0 0 16px; color: var(--muted); font-size: var(--fbo-s); max-width: 95ch; line-height: 1.45; }
+.fbo-box .lead b { color: var(--bad); font-weight: 700; }
+.fbo-bar { position: relative; display: block; height: 16px; background: var(--bg-2); border-radius: 8px; overflow: hidden; }
+.fbo-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 8px; }
 .fbo-bar i.fbs { background: var(--fbo-fbs); }
-.fbo-legend { font-size: var(--sa-small); color: var(--muted); margin-top: 10px; display: flex; gap: 18px; flex-wrap: wrap; }
-.fbo-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
-.fbo-stopped { margin-top: 10px; padding: 12px 18px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m); font-size: var(--sa-small); color: var(--muted); }
-.fbo-stopped summary { cursor: pointer; color: var(--text); font-weight: 600; }
-.fbo-stopped p { margin: 8px 0 0; max-width: 90ch; }
-.fbo-empty { background: var(--bg); border: 1px dashed var(--border); border-radius: var(--sa-r-m); padding: 32px; color: var(--muted); margin-top: 14px; }
+.fbo-legend { font-size: var(--fbo-s); color: var(--muted); margin-top: 12px; display: flex; gap: 22px; flex-wrap: wrap; }
+.fbo-legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 7px; vertical-align: -2px; }
+.fbo-stopped { margin-top: 12px; padding: 14px 20px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m); font-size: var(--fbo-s); color: var(--muted); }
+.fbo-stopped summary { cursor: pointer; color: var(--text); font-weight: 600; font-size: var(--fbo-t); }
+.fbo-stopped p { margin: 10px 0 0; max-width: 95ch; }
+.fbo-empty { background: var(--bg); border: 1px dashed var(--border); border-radius: var(--sa-r-m); padding: 36px; color: var(--muted); margin-top: 16px; font-size: var(--fbo-t); }
 
-@media (max-width: 760px) {
+/* Экран уже ~1700 px (с меню слева таблице меньше ~1450 px — 7 колонок крупным шрифтом не влезают): строка в 2 яруса — фото и название слева,
+   справа 3 + 3 блока с собственными подписями (шапка таблицы скрыта). */
+@media (max-width: 1700px) {
+  .fbo-th { display: none; }
+  .fbo-tr {
+    grid-template-columns: minmax(280px, 1.5fr) minmax(150px, .8fr) minmax(200px, 1.2fr) minmax(220px, 1.3fr) 30px;
+    grid-template-areas: "prod fbo where going exp" "prod ord buy fbs exp";
+    row-gap: 18px;
+  }
+  .fbo-tr [data-area="prod"] { grid-area: prod; }
+  .fbo-tr [data-area="fbo"] { grid-area: fbo; }
+  .fbo-tr [data-area="where"] { grid-area: where; }
+  .fbo-tr [data-area="going"] { grid-area: going; }
+  .fbo-tr [data-area="ord"] { grid-area: ord; }
+  .fbo-tr [data-area="buy"] { grid-area: buy; }
+  .fbo-tr [data-area="fbs"] { grid-area: fbs; }
+  .fbo-tr [data-area="exp"] { grid-area: exp; }
+  .fbo-tr [data-l]::before { content: attr(data-l); display: block; font-size: 15px; font-weight: 500; color: var(--muted); margin-bottom: 4px; text-align: left; }
+  .c-num { align-items: flex-start; }
+  .c-num .sub { text-align: left; }
+  .fbo-detail { padding-left: 22px; }
+}
+@media (max-width: 900px) {
+  .fbo-tr { grid-template-columns: 1fr 1fr 30px; grid-template-areas: "prod prod exp" "fbo ord exp" "where going exp" "buy fbs exp"; }
   .fbo-count { margin-left: 0; }
   .fbo-dgrid { grid-template-columns: 1fr; }
 }

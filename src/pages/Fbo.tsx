@@ -193,21 +193,21 @@ function ItemsTable({ rows, isOz, cluster, open, onToggle }: {
           <Fragment key={r.art}>
             <div className={`fbo-tr ${isOpen ? 'open' : ''}`} role="row" tabIndex={0} aria-expanded={isOpen}
               onClick={() => onToggle(r.art)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(r.art); } }}>
-              <span className="c-prod" role="cell">
+              <span className="c-prod" role="cell" data-area="prod">
                 <span className="ph" style={r.img ? { backgroundImage: `url("${r.img}")` } : undefined} />
                 <span className="pt">
                   <span className="art">{r.art}</span>
                   <span className="nm" title={r.name}>{r.name}</span>
                 </span>
               </span>
-              <span className="c-num r" role="cell">
+              <span className="c-num r" role="cell" data-area="fbo" data-l={`FBO ${here}`}>
                 <b className={r.fbo ? '' : 'bad'}>{fmt(r.fbo)}</b>
                 <span className={`sub ${r.days !== null && r.days < 14 ? 'bad' : ''}`}>
                   {r.days === null ? (r.fbo ? 'нет заказов FBO' : '') : `хватит на ${fmt(r.days)} дн`}
                 </span>
               </span>
-              <span className="c-list" role="cell">{r.where.length ? list(r.where, 3) : <span className="muted">—</span>}</span>
-              <span className="c-list" role="cell">
+              <span className="c-list" role="cell" data-area="where" data-l={cluster && isOz ? 'Склады кластера' : 'Где лежит FBO'}>{r.where.length ? list(r.where, 3) : <span className="muted">—</span>}</span>
+              <span className="c-list" role="cell" data-area="going" data-l="Едет в поставках">
                 {r.lines.length
                   ? <>
                       {r.going > 0 && <div className="kv"><span>едет / готовится</span><b>+{fmt(r.going)}</b></div>}
@@ -215,19 +215,19 @@ function ItemsTable({ rows, isOz, cluster, open, onToggle }: {
                     </>
                   : <span className="muted">—</span>}
               </span>
-              <span className="c-num r" role="cell">
+              <span className="c-num r" role="cell" data-area="ord" data-l={`Заказы 30 дн${cluster && isOz ? ' сюда' : ''}`}>
                 <b>{fmt(orders)}</b>
                 <span className="sub">FBO {fmt(r.ordFbo)} · FBS {fmt(r.ordFbs)}</span>
                 {isOz && orders > 0 && <span className={`sub ${farP >= 50 ? 'bad' : ''}`}>издалека {farP}%</span>}
               </span>
-              <span className="c-list" role="cell">{r.buyers.length ? list(r.buyers, 3, v => `${pct(v, totalBuy)}%`) : <span className="muted">заказов не было</span>}</span>
-              <span className="c-list" role="cell">
+              <span className="c-list" role="cell" data-area="buy" data-l={isOz ? 'Кластеры покупателей' : 'Округа покупателей'}>{r.buyers.length ? list(r.buyers, 3, v => `${pct(v, totalBuy)}%`) : <span className="muted">заказов не было</span>}</span>
+              <span className="c-list" role="cell" data-area="fbs" data-l="FBS на ваших складах">
                 {r.fbs.length
                   ? <>{r.fbs.slice(0, 4).map(([k, v]) => <div key={k} className="kv"><span>{k}</span><b className={v < 0 ? 'bad' : ''}>{fmt(v)}</b></div>)}
                       {r.fbs.length > 1 && <div className="kv tot"><span>всего</span><b>{fmt(r.fbsTotal)}</b></div>}</>
                   : <span className="muted">нет</span>}
               </span>
-              <span className="c-exp" role="cell" aria-hidden>{isOpen ? <CaretDownIcon size={18} /> : <CaretRightIcon size={18} />}</span>
+              <span className="c-exp" role="cell" data-area="exp" aria-hidden>{isOpen ? <CaretDownIcon size={24} /> : <CaretRightIcon size={24} />}</span>
             </div>
             {isOpen && <RowDetail r={r} isOz={isOz} />}
           </Fragment>
@@ -241,9 +241,11 @@ function SupplyBadges({ lines }: { lines: { s: Supply; q: number }[] }) {
   // Одинаковые статусы склеиваем: «Готова к отгрузке ×3 · +45».
   const by = new Map<string, { s: Supply; q: number; n: number }>();
   for (const l of lines) { const k = l.s.status.short ?? l.s.status.label; const v = by.get(k) ?? { s: l.s, q: 0, n: 0 }; v.q += l.q; v.n++; by.set(k, v); }
-  return <>{[...by.values()].sort((a, b) => KIND_ORDER[a.s.status.kind] - KIND_ORDER[b.s.status.kind]).map(v => (
+  const all = [...by.values()].sort((a, b) => KIND_ORDER[a.s.status.kind] - KIND_ORDER[b.s.status.kind]);
+  // В строке — три главных статуса, остальное в раскрытии (иначе строка вытягивается).
+  return <>{all.slice(0, 3).map(v => (
     <div key={v.s.status.short ?? v.s.status.label} className="kv"><span className={`fbo-st ${v.s.status.kind}`} title={v.s.status.label}>{v.s.status.short ?? v.s.status.label}{v.n > 1 ? ` ×${v.n}` : ''}</span><b>+{fmt(v.q)}</b></div>
-  ))}</>;
+  ))}{all.length > 3 && <div className="more">ещё {all.length - 3} — по клику</div>}</>;
 }
 
 /** Раскрытие строки: по каждому кластеру/региону — лежит, заказы, издалека, поставки. */

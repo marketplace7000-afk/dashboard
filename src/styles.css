@@ -2284,3 +2284,27 @@ code {
 .sa .cmp-gone-t { font-size: var(--sa-em); font-weight: 600; }
 .sa .cmp-gone-p, .sa .cmp-gone-row { font-size: var(--sa-small); }
 .sa .cmp-gone-row { border-radius: var(--sa-r-s); }
+
+/* 27.10: «Конкуренты» — крупнее шрифт во всём разделе (шкала темы на ступень выше) и ровные таблицы «Позиции и рынок» */
+.sa .cmp { --sa-small: 17px; --sa-cap: 18px; --sa-body: 20px; --sa-em: 22px; --sa-h2: 26px; }
+.sa .cmp .ad2-prod img, .sa .cmp .ad2-noimg { width: 48px; height: 64px; }
+.sa .cmp .ad2-prod-t { font-size: 18px; gap: 2px; }
+.sa .cmp .ad2-prod-t .muted { font-size: 16px; }
+.sa .cmp .ad2-prod-t > * { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.sa .cmp .ad2-table th { color: var(--text); font-weight: 600; }
+.sa .cmp .ad2-cmpnm { max-width: 300px; }
+.sa .cmp .ad2-cmpnm img { width: 34px; height: 44px; }
+.cmp-mkt { table-layout: fixed; min-width: 1100px; }
+.cmp-mkt th, .cmp-mkt td { white-space: normal; overflow-wrap: anywhere; }
+.cmp-mkt th.ad2-num, .cmp-mkt td.ad2-num { text-align: center !important; }
+.cmp-mkt td .chip { margin: 2px 4px 2px 0; display: inline-block; }
+@media (max-width: 760px) {
+  .sa .cmp { --sa-small: 15px; --sa-cap: 16px; --sa-body: 17px; --sa-em: 19px; --sa-h2: 21px; }
+  .sa .cmp .ad2-prod-t { font-size: 16px; }
+  .sa .cmp .ad2-prod-t .muted { font-size: 14px; }
+}
+/* «Привязка конкурентов»: шире колонка товара, цифры по центру, заголовки переносятся — таблица влезает без прокрутки на широком экране */
+.sa .cmp .cmp-table .cmp-col-prod { min-width: 340px; max-width: 420px; }
+.sa .cmp .cmp-table th { white-space: normal; vertical-align: bottom; line-height: 1.25; }
+.sa .cmp .cmp-table th.ad2-num, .sa .cmp .cmp-table td.ad2-num { text-align: center !important; }
+.sa .cmp .cmp-table td, .sa .cmp .cmp-table th { padding-left: 10px; padding-right: 10px; }

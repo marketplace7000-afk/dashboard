@@ -533,7 +533,8 @@ function MarketSheet({ d, mp }: { d: Ads2Competitors; mp: Ads2Mp }) {
             </div>
           </div>
           <div className="ad2-scroll">
-            <table className="ad2-table">
+            <table className="ad2-table cmp-mkt">
+              <colgroup><col style={{ width: '27%' }} />{[0, 1, 2, 3, 4, 5].map(k => <col key={k} style={{ width: '9%' }} />)}<col style={{ width: '19%' }} /></colgroup>
               <thead><tr><th>Товар</th><th className="ad2-num">Позиция</th><th className="ad2-num">Показы</th><th className="ad2-num">CTR</th><th className="ad2-num">Переходы</th><th className="ad2-num">Заказы</th><th className="ad2-num">Видимость</th><th>Что мешает в поиске (по WB)</th></tr></thead>
               <tbody>
                 {items.map(i => (
@@ -598,7 +599,8 @@ function MarketSheet({ d, mp }: { d: Ads2Competitors; mp: Ads2Mp }) {
             <h2>{c.name}: топ рынка за неделю <span className="muted cmp-of">{c.ours.length ? `· наших в топ-50: ${c.ours.length}` : '· наших в топ-50 нет'}</span></h2>
             <p className="muted cmp-lead">Средние по категории: в корзину из поиска {pct(c.benchmark.convSearch)}, из карточки {pct(c.benchmark.convPdp)}, ДРР {pct(c.benchmark.drr)}.{c.updateDate ? ` Данные Ozon на ${c.updateDate.slice(0, 10)}.` : ''}</p>
             <div className="ad2-scroll">
-              <table className="ad2-table">
+              <table className="ad2-table cmp-mkt">
+                <colgroup>{[5, 27, 12, 8, 11, 8, 11, 7, 11].map((w, k) => <col key={k} style={{ width: w + '%' }} />)}</colgroup>
                 <thead><tr><th className="ad2-num">#</th><th>Товар</th><th>Продавец</th><th className="ad2-num">Цена</th><th className="ad2-num">Выручка</th><th className="ad2-num">Продано</th><th className="ad2-num">В корзину: поиск / карточка</th><th className="ad2-num">ДРР</th><th className="ad2-num">Дней в акциях / трафаретах</th></tr></thead>
                 <tbody>
                   {rows.map(x => (

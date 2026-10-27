@@ -2,7 +2,8 @@
    27.10.2026: таблица «один товар — одна строка», кластеры строкой сверху.
    27.10.2026 (вечер): по просьбе владельца всё крупнее — текст 19, цифры 30, фото 84×112,
    строки выше; на экранах уже 1700 px строка товара укладывается в 2 яруса с подписями.
-   28.10.2026: столбцы — товар, FBO, FBS по складам, «хватит на», едет, заказы 7 / 30 дн, статусы поставок справа. ── */
+   28.10.2026: столбцы — товар, FBO, FBS по складам, едет, «хватит на», заказы 7 / 30 дн, статусы поставок справа;
+   цифры по центру столбца, количество у складов и статусов — рядом с названием. ── */
 .fbo {
   --fbo-fbs: #c3cbd6;
   --fbo-t: 19px;      /* основной текст таблицы */
@@ -46,9 +47,10 @@
 .fbo-table { background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m); box-shadow: var(--sa-shadow); }
 .fbo-tr {
   display: grid; gap: 18px; align-items: start; padding: 18px 20px; border-bottom: 1px solid var(--border);
-  grid-template-columns: minmax(260px, 1.5fr) 110px minmax(190px, 1fr) 150px 140px 150px 150px minmax(200px, 1.1fr) 26px;
+  grid-template-columns: minmax(260px, 1.5fr) 120px minmax(190px, 1fr) 150px 150px 130px 130px minmax(190px, 1fr) 26px;
 }
 .fbo-tr > * { min-width: 0; overflow-wrap: anywhere; }
+.fbo-th .c { text-align: center; }
 .fbo-th { position: sticky; top: 0; z-index: 2; background: var(--bg-2); font-size: var(--fbo-s); color: var(--muted); font-weight: 500; padding: 14px 20px; align-items: end; border-radius: var(--sa-r-m) var(--sa-r-m) 0 0; }
 .fbo-tr:not(.fbo-th) { cursor: pointer; }
 .fbo-tr:not(.fbo-th):hover { background: #f3f7fd; }
@@ -60,9 +62,9 @@
 .c-prod .pt { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .c-prod .art { font-size: var(--fbo-t); font-weight: 700; color: var(--text); line-height: 1.25; }
 .c-prod .nm { font-size: var(--fbo-s); color: var(--muted); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.c-num { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.c-num { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
 .c-num b { font-size: var(--fbo-num); font-weight: 700; line-height: 1.05; }
-.c-num .sub { font-size: var(--fbo-s); color: var(--muted); line-height: 1.3; text-align: right; }
+.c-num .sub { font-size: var(--fbo-s); color: var(--muted); line-height: 1.3; text-align: center; }
 .c-num .sub.bad { color: var(--bad); font-weight: 600; }
 .c-list { display: flex; flex-direction: column; gap: 6px; font-size: var(--fbo-t); line-height: 1.3; }
 .c-list .kv { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
@@ -70,7 +72,14 @@
 .c-list .kv b { font-weight: 700; white-space: nowrap; }
 .c-list .kv.tot { border-top: 1px dashed var(--border); padding-top: 6px; }
 .c-list .more { color: var(--muted); font-size: var(--fbo-s); }
+/* FBS: общее число по центру, под ним склады ровным столбцом — название и количество рядом. */
+.c-fbs { align-items: center; }
 .c-fbs .big { font-size: var(--fbo-num); font-weight: 700; line-height: 1.05; margin-bottom: 4px; }
+.fbs-grid { display: inline-grid; grid-template-columns: auto auto; column-gap: 14px; row-gap: 5px; align-items: baseline; }
+.fbs-grid b { font-weight: 700; text-align: right; white-space: nowrap; }
+.fbs-grid > span { white-space: nowrap; }
+/* Статусы: количество сразу за плашкой, без пробела во всю ширину. */
+.c-list[data-area="st"] .kv { justify-content: flex-start; gap: 10px; }
 .c-num b small { font-size: var(--fbo-s); font-weight: 600; }
 /* Заказы: разбивка FBO / FBS — основным размером, а не подписью (просьба владельца 28.10). */
 .c-ord .sub { font-size: var(--fbo-t); color: var(--text); }
@@ -122,7 +131,7 @@
   .fbo-th { display: none; }
   .fbo-tr {
     grid-template-columns: minmax(260px, 1.5fr) minmax(130px, .7fr) minmax(190px, 1.1fr) minmax(150px, .8fr) minmax(150px, .8fr) 30px;
-    grid-template-areas: "prod fbo fbs days going exp" "prod ord7 ord30 st st exp";
+    grid-template-areas: "prod fbo fbs going days exp" "prod ord7 ord30 st st exp";
     row-gap: 18px;
   }
   .fbo-tr [data-area="prod"] { grid-area: prod; }
@@ -135,8 +144,7 @@
   .fbo-tr [data-area="st"] { grid-area: st; }
   .fbo-tr [data-area="exp"] { grid-area: exp; }
   .fbo-tr [data-l]::before { content: attr(data-l); display: block; font-size: 15px; font-weight: 500; color: var(--muted); margin-bottom: 4px; text-align: left; }
-  .c-num { align-items: flex-start; }
-  .c-num .sub { text-align: left; }
+  .fbo-tr .c-num[data-l]::before, .fbo-tr .c-fbs[data-l]::before { text-align: center; }
   .fbo-detail { padding-left: 22px; }
 }
 /* Окно до ~1350 px (у владельца 1150 при масштабе 83 %): три блока в ярусе, ярусов три —
@@ -144,14 +152,15 @@
 @media (max-width: 1350px) {
   .fbo-tr {
     grid-template-columns: minmax(220px, 1.3fr) repeat(3, minmax(130px, 1fr)) 30px;
-    grid-template-areas: "prod fbo fbs days exp" "prod going ord7 ord30 exp" "prod st st st exp";
+    grid-template-areas: "prod fbo fbs going exp" "prod days ord7 ord30 exp" "prod st st st exp";
   }
   /* Статусы во всю ширину — в строку, а не столбиком. */
   .fbo-tr [data-area="st"] { flex-direction: row; flex-wrap: wrap; column-gap: 22px; }
   .fbo-tr [data-area="st"]::before { flex-basis: 100%; }
+  .fbs-grid { font-size: var(--fbo-s); column-gap: 10px; }
 }
 @media (max-width: 900px) {
-  .fbo-tr { grid-template-columns: 1fr 1fr 30px; grid-template-areas: "prod prod exp" "fbo fbs exp" "days going exp" "ord7 ord30 exp" "st st exp"; }
+  .fbo-tr { grid-template-columns: 1fr 1fr 30px; grid-template-areas: "prod prod exp" "fbo fbs exp" "going days exp" "ord7 ord30 exp" "st st exp"; }
   .fbo-count { margin-left: 0; }
   .fbo-dgrid { grid-template-columns: 1fr; }
 }

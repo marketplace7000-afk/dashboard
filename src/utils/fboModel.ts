@@ -27,7 +27,8 @@ export type FboBundle = {
 
 export type Mp = 'o' | 'w';
 export type Kind = 'go' | 'soon' | 'idle' | 'stuck' | 'done';
-export type Status = { kind: Kind; label: string; note: string; short?: string };
+/** inStock — товар поставки уже принят и лежит в остатке FBO (акт ещё не подписан): в «едет» не считаем (28.10.2026). */
+export type Status = { kind: Kind; label: string; note: string; short?: string; inStock?: boolean };
 
 /** Короткие названия длинных кластеров для таблицы (полные — в подсказках и подробностях). */
 const SHORT_PLACE: Record<string, string> = {
@@ -67,8 +68,9 @@ function ozStatus(s: FboBundle['ozSupplies'][number], now: number): Status {
     case 'ACCEPTANCE_AT_STORAGE_WAREHOUSE': return { kind: 'go', label: 'Приёмка на складе', short: 'Приёмка', note: `привезли ${slot}` };
     case 'ACCEPTED_AT_SUPPLY_WAREHOUSE': return { kind: 'go', label: 'Принята в точке отгрузки', short: 'Сдана', note: `сдана ${slot}` };
     case 'READY_TO_SUPPLY': return { kind: 'soon', label: 'Готова к отгрузке', short: 'К отгрузке', note: `отгрузка ${slot}` };
-    case 'REPORTS_CONFIRMATION_AWAITING': return { kind: 'soon', label: 'Принята, ждёт подтверждения акта', short: 'Ждёт акта', note: 'подтвердите акт приёмки в кабинете Ozon' };
-    case 'REPORT_REJECTED': return { kind: 'stuck', label: 'Акт приёмки оспорен', short: 'Акт оспорен', note: 'идёт разбор расхождений' };
+    // Проверено 28.10 по снимку: товар таких поставок уже в остатке кластера (BOARD-JSK-X08, Краснодар: 20 в поставке = 20 на FBO).
+    case 'REPORTS_CONFIRMATION_AWAITING': return { kind: 'soon', label: 'Принята, ждёт подтверждения акта', short: 'Ждёт акта', note: 'подтвердите акт приёмки в кабинете Ozon', inStock: true };
+    case 'REPORT_REJECTED': return { kind: 'stuck', label: 'Акт приёмки оспорен', short: 'Акт оспорен', note: 'идёт разбор расхождений', inStock: true };
     case 'DATA_FILLING': return { kind: 'idle', label: 'Заполняется', note: `слот ${slot}, ещё не отправлена` };
     default: return { kind: 'idle', label: s.state, note: '' };
   }
@@ -156,6 +158,7 @@ export function clustersOf(src: Source): ClusterRow[] {
   const get = (n: string) => { if (!map.has(n)) map.set(n, { name: n, q: 0, whs: new Map(), go: 0, soon: 0, idle: 0, done: 0, ord: 0 }); return map.get(n)!; };
   for (const r of src.stock) { const c = get(r.cluster); c.q += r.q; c.whs.set(r.wh, (c.whs.get(r.wh) ?? 0) + r.q); }
   for (const s of src.supplies) {
+    if (s.status.inStock) continue; // уже в остатке кластера
     const c = get(s.cluster); const n = s.items.reduce((a, i) => a + i.q, 0);
     c[s.status.kind === 'stuck' ? 'go' : s.status.kind] += n;
   }
@@ -203,7 +206,7 @@ export type ProductRow = {
   buyers: [string, number][];
   /** Поставки в выбранный кластер (или все), без черновиков в сумме «едет». */
   lines: { s: Supply; q: number }[]; going: number;
-  /** Сколько поставок сейчас едет или готовится (без черновиков и принятых). */
+  /** Сколько поставок сейчас едет или готовится (без черновиков, принятых и «ждёт акта»). */
   goingN: number;
   /** Свои склады (FBS) из таблицы «Склад»: склад → шт. */
   fbs: [string, number][]; fbsTotal: number;
@@ -271,7 +274,8 @@ export function productRows(src: Source, D: FboBundle, cluster: string | null): 
         const m = fromMap.get(o.key) ?? new Map(); m.set(o.from, (m.get(o.from) ?? 0) + o.q); fromMap.set(o.key, m);
       }
     }
-    for (const l of sups) { const p = place(l.s.cluster); p.lines.push(l); if (l.s.status.kind !== 'idle' && l.s.status.kind !== 'done') p.going += l.q; }
+    const isGoing = (st: Status) => st.kind !== 'idle' && st.kind !== 'done' && !st.inStock;
+    for (const l of sups) { const p = place(l.s.cluster); p.lines.push(l); if (isGoing(l.s.status)) p.going += l.q; }
     for (const p of places.values()) {
       p.whs = [...(whMap.get(p.key) ?? new Map())].sort((a, b) => b[1] - a[1]);
       p.from = [...(fromMap.get(p.key) ?? new Map())].sort((a, b) => b[1] - a[1]);
@@ -301,7 +305,7 @@ export function productRows(src: Source, D: FboBundle, cluster: string | null): 
       art, name: inf.name || name || art, img: inf.img || img,
       fbo, where, ordFbo, ordFbs, far, buyers, ord7Fbo, ord7Fbs,
       lines: scopeLines, going,
-      goingN: new Set(scopeLines.filter(l => l.s.status.kind !== 'idle' && l.s.status.kind !== 'done').map(l => l.s.id)).size,
+      goingN: new Set(scopeLines.filter(l => isGoing(l.s.status)).map(l => l.s.id)).size,
       fbs: fbsRows, fbsTotal,
       fboDays, fbsDays,
       days: cluster ? fboDays : daysOf(fbo + Math.max(0, fbsTotal), rateFbo + rateFbs),

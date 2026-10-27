@@ -10,6 +10,8 @@
  * 28.10.2026 по просьбе владельца — меньше цифр в строке, порядок столбцов:
  * товар → FBO всего → FBS всего (по складам) → запас в днях (FBO + FBS вместе) →
  * едет в поставках → заказы 7 дн → заказы 30 дн → статусы поставок (справа).
+ * 28.10 вечером: «Едет» перед «Хватит на», цифры по центру, разбивки FBO / FBS — двумя строками,
+ * у FBS и статусов количество рядом с названием, а не через всю ширину.
  * «Где лежит FBO», кластеры покупателей и «издалека» — в раскрытии строки.
  */
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
@@ -178,18 +180,18 @@ function ItemsTable({ rows, isOz, cluster, open, onToggle }: {
     <div className="fbo-table" role="table">
       <div className="fbo-tr fbo-th" role="row">
         <span role="columnheader">Товар</span>
-        <span role="columnheader" className="r">FBO {here}</span>
-        <span role="columnheader">FBS всего</span>
-        <span role="columnheader" className="r" title={daysHint}>Хватит на</span>
-        <span role="columnheader" className="r">Едет в поставках</span>
-        <span role="columnheader" className="r">Заказы 7 дн</span>
-        <span role="columnheader" className="r">Заказы 30 дн</span>
+        <span role="columnheader" className="c">FBO {here}</span>
+        <span role="columnheader" className="c">FBS всего</span>
+        <span role="columnheader" className="c" title="Поставки в пути и готовые к отгрузке. «Ждёт акта» не считается: этот товар уже принят и лежит в FBO">Едет в поставках</span>
+        <span role="columnheader" className="c" title={daysHint}>Хватит на</span>
+        <span role="columnheader" className="c">Заказы 7 дн</span>
+        <span role="columnheader" className="c">Заказы 30 дн</span>
         <span role="columnheader">Статусы поставок</span>
         <span role="columnheader" aria-label="Подробнее" />
       </div>
       {rows.map(r => {
         const isOpen = open.has(r.art);
-        const draftsOnly = r.lines.length > 0 && r.going === 0;
+        const draftsOnly = r.going === 0 && r.lines.some(l => l.s.status.kind === 'idle');
         return (
           <Fragment key={r.art}>
             <div className={`fbo-tr ${isOpen ? 'open' : ''}`} role="row" tabIndex={0} aria-expanded={isOpen}
@@ -201,36 +203,43 @@ function ItemsTable({ rows, isOz, cluster, open, onToggle }: {
                   <span className="nm" title={r.name}>{r.name}</span>
                 </span>
               </span>
-              <span className="c-num r" role="cell" data-area="fbo" data-l={`FBO ${here}`}>
+              <span className="c-num" role="cell" data-area="fbo" data-l={`FBO ${here}`}>
                 <b className={r.fbo ? '' : 'bad'}>{fmt(r.fbo)}</b>
               </span>
               <span className="c-list c-fbs" role="cell" data-area="fbs" data-l="FBS всего">
                 <b className={`big ${r.fbsTotal > 0 ? '' : 'muted'}`}>{fmt(r.fbsTotal)}</b>
-                {r.fbs.slice(0, 5).map(([k, v]) => <div key={k} className="kv"><span>{k}</span><b className={v < 0 ? 'bad' : ''}>{fmt(v)}</b></div>)}
+                {r.fbs.length > 0 && (
+                  <span className="fbs-grid">
+                    {r.fbs.slice(0, 5).map(([k, v]) => <Fragment key={k}><span>{k}</span><b className={v < 0 ? 'bad' : ''}>{fmt(v)}</b></Fragment>)}
+                  </span>
+                )}
                 {r.fbs.length > 5 && <div className="more">ещё {r.fbs.length - 5}</div>}
               </span>
-              <span className="c-num r" role="cell" data-area="days" data-l="Хватит на" title={daysHint}>
-                {r.days === null
-                  ? <b className="muted">—</b>
-                  : <b className={r.days < 14 ? 'bad' : ''}>{fmt(r.days)} <small>дн</small></b>}
-                <span className="sub">
-                  {cluster
-                    ? <>FBS {r.fbsDays === null ? '—' : `${fmt(r.fbsDays)} дн`} (все склады)</>
-                    : <>FBO {r.fboDays === null ? '—' : `${fmt(r.fboDays)} дн`} · FBS {r.fbsDays === null ? '—' : `${fmt(r.fbsDays)} дн`}</>}
-                </span>
-              </span>
-              <span className="c-num r" role="cell" data-area="going" data-l="Едет в поставках">
+              <span className="c-num" role="cell" data-area="going" data-l="Едет в поставках">
                 {r.going > 0
                   ? <><b>+{fmt(r.going)}</b><span className="sub">в {fmt(r.goingN)} {plural(r.goingN, 'поставке', 'поставках', 'поставках')}</span></>
                   : <><b className="muted">—</b>{draftsOnly && <span className="sub">только черновик</span>}</>}
               </span>
-              <span className="c-num c-ord r" role="cell" data-area="ord7" data-l="Заказы 7 дн">
-                <b>{fmt(r.ord7Fbo + r.ord7Fbs)}</b>
-                <span className="sub">FBO {fmt(r.ord7Fbo)} · FBS {fmt(r.ord7Fbs)}</span>
+              <span className="c-num" role="cell" data-area="days" data-l="Хватит на" title={daysHint}>
+                {r.days === null
+                  ? <b className="muted">—</b>
+                  : <b className={r.days < 14 ? 'bad' : ''}>{fmt(r.days)} <small>дн</small></b>}
+                {cluster
+                  ? <span className="sub">FBS {r.fbsDays === null ? '—' : `${fmt(r.fbsDays)} дн`} (все склады)</span>
+                  : <>
+                      <span className="sub">FBO {r.fboDays === null ? '—' : `${fmt(r.fboDays)} дн`}</span>
+                      <span className="sub">FBS {r.fbsDays === null ? '—' : `${fmt(r.fbsDays)} дн`}</span>
+                    </>}
               </span>
-              <span className="c-num c-ord r" role="cell" data-area="ord30" data-l={`Заказы 30 дн${cluster && isOz ? ' сюда' : ''}`}>
+              <span className="c-num c-ord" role="cell" data-area="ord7" data-l="Заказы 7 дн">
+                <b>{fmt(r.ord7Fbo + r.ord7Fbs)}</b>
+                <span className="sub">FBO {fmt(r.ord7Fbo)}</span>
+                <span className="sub">FBS {fmt(r.ord7Fbs)}</span>
+              </span>
+              <span className="c-num c-ord" role="cell" data-area="ord30" data-l={`Заказы 30 дн${cluster && isOz ? ' сюда' : ''}`}>
                 <b>{fmt(r.ordFbo + r.ordFbs)}</b>
-                <span className="sub">FBO {fmt(r.ordFbo)} · FBS {fmt(r.ordFbs)}</span>
+                <span className="sub">FBO {fmt(r.ordFbo)}</span>
+                <span className="sub">FBS {fmt(r.ordFbs)}</span>
               </span>
               <span className="c-list" role="cell" data-area="st" data-l="Статусы поставок">
                 {r.lines.length ? <SupplyBadges lines={r.lines} /> : <span className="muted">—</span>}

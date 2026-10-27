@@ -1677,8 +1677,13 @@ code {
 .cmp-check { display: inline-flex; align-items: center; gap: 6px; font-size: 17px; color: var(--muted); white-space: nowrap; cursor: pointer; }
 .cmp-check input { width: 16px; height: 16px; }
 /* 26.10: недельные сравнения WB — галочка у товара и панель запуска */
-.cmp-pick { margin-left: auto; color: var(--text); font-weight: 600; }
+.cmp-pick { margin-left: auto; color: var(--text); font-weight: 600; gap: 10px; padding: 8px 14px; min-height: 44px; border: 1px solid var(--border); border-radius: 10px; user-select: none; }
+.cmp-pick:hover { border-color: var(--accent); }
+.cmp-pick:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.cmp-pick input { width: 24px; height: 24px; margin: 0; cursor: pointer; accent-color: var(--accent); }
 .cmp-pick:has(input:disabled) { color: var(--muted); font-weight: 400; cursor: default; }
+.cmp-pick:has(input:disabled):hover { border-color: var(--border); }
+.cmp-pick input:disabled { cursor: default; }
 .cmp-compare-s { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 17px; }
 .cmp-compare-last { font-size: 16px; }
 .cmp-refresh { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; flex: 1 1 100%; }

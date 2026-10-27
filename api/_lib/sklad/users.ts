@@ -17,7 +17,7 @@
  * разделов только «Склад» (фулфилменты, закупщики), сервер закрывает всё,
  * кроме /api/sklad/*; остальным меню показывает только отмеченное.
  */
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { getSkladDb } from './db';
 import { audit } from './audit';
 
@@ -106,6 +106,47 @@ export function verifyPassword(pw: string, stored: string | null): boolean {
 /** Хеш-заглушка для несуществующих логинов (см. loginWithPassword). */
 const DUMMY_HASH = hashPassword(randomBytes(12).toString('base64'));
 
+// ─── Пароли для просмотра владельцем ───────────────────────────────────────
+// Владелец хочет видеть, какой пароль выдал, и пересылать его заново. Хеш
+// (pass_hash) для этого не годится, поэтому рядом лежит копия, зашифрованная
+// AES-256-GCM ключом из AUTH_SECRET (его нет в базе — один украденный файл
+// базы паролей не раскрывает). Сменится AUTH_SECRET — копии не прочитать,
+// тогда владелец просто выдаёт новый пароль.
+function vaultKey(): Buffer | null {
+  const secret = process.env.AUTH_SECRET || process.env.AUTH_PASSWORD;
+  return secret ? createHash('sha256').update(`av-pass-vault:${secret}`).digest() : null;
+}
+
+function sealPassword(pw: string): string | null {
+  const key = vaultKey();
+  if (!key) return null;
+  const iv = randomBytes(12);
+  const c = createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([c.update(pw, 'utf8'), c.final()]);
+  return `gcm$${iv.toString('base64')}$${c.getAuthTag().toString('base64')}$${enc.toString('base64')}`;
+}
+
+function openPassword(stored: string | null): string | null {
+  const key = vaultKey();
+  if (!stored || !key) return null;
+  const [algo, iv, tag, enc] = stored.split('$');
+  if (algo !== 'gcm' || !iv || !tag || !enc) return null;
+  try {
+    const d = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
+    d.setAuthTag(Buffer.from(tag, 'base64'));
+    return Buffer.concat([d.update(Buffer.from(enc, 'base64')), d.final()]).toString('utf8');
+  } catch { return null; }
+}
+
+/** Выданные пароли по id учётки — только для «Доступов» владельца. null — не сохранён. */
+export function issuedPasswords(): Record<number, string | null> {
+  const out: Record<number, string | null> = {};
+  for (const r of getSkladDb().prepare('SELECT id, pass_enc FROM users').all() as Array<{ id: number; pass_enc: string | null }>) {
+    out[r.id] = openPassword(r.pass_enc);
+  }
+  return out;
+}
+
 export function validatePassword(pw: string): string | null {
   if (pw.length < 8) return 'Пароль — не короче 8 символов';
   return null;
@@ -184,6 +225,8 @@ export type UserInput = {
   active?: boolean; warehouseIds?: number[];
   /** Свои разделы; null — вернуть набор по роли. */
   sections?: string[] | null;
+  /** Выкинуть человека со всех устройств, ничего больше не меняя. */
+  logoutAll?: boolean;
 };
 
 function clean(input: UserInput, isNew: boolean): { error?: string } {
@@ -232,10 +275,10 @@ export function createUser(input: UserInput, by: AuthUser): { user?: UserView; e
   const now = Date.now();
   try {
     d.exec('BEGIN IMMEDIATE');
-    const r = d.prepare(`INSERT INTO users (login, name, role, pass_hash, tg_id, active, sections, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`).run(
+    const r = d.prepare(`INSERT INTO users (login, name, role, pass_hash, pass_enc, tg_id, active, sections, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`).run(
       String(input.login).trim(), String(input.name).trim(), input.role,
-      hashPassword(input.password), null,
+      hashPassword(input.password), sealPassword(input.password), null,
       storedSections(input.role as Role, input.sections), now, now,
     );
     const id = Number(r.lastInsertRowid);
@@ -282,10 +325,14 @@ export function updateUser(id: number, input: UserInput, by: AuthUser): { user?:
     put('sections', 'sections', before.sections, next);
   }
   // Смена пароля, роли или выключение — старые сессии этого человека гасим.
-  const killSessions = !!input.password || (input.role && input.role !== before.role) || input.active === false
+  const killSessions = !!input.password || !!input.logoutAll || (input.role && input.role !== before.role) || input.active === false
     || diff.sections !== undefined
     || (input.warehouseIds !== undefined && JSON.stringify([...new Set(input.warehouseIds)].sort()) !== JSON.stringify(warehouseIdsOf(id)));
-  if (input.password) { set.push('pass_hash = ?'); args.push(hashPassword(input.password)); diff.password = ['***', '***']; }
+  if (input.password) {
+    set.push('pass_hash = ?', 'pass_enc = ?'); args.push(hashPassword(input.password), sealPassword(input.password));
+    diff.password = ['***', '***'];
+  }
+  if (input.logoutAll) diff.sessions = ['все устройства', 'выход'];
   if (killSessions) set.push('token_ver = token_ver + 1');
   try {
     d.exec('BEGIN IMMEDIATE');

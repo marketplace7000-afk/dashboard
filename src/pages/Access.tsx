@@ -2,18 +2,23 @@
  * «Доступы» — учётные записи сотрудников (только владелец).
  *
  * Владелец сам придумывает логин (можно почту) и пароль и передаёт их
- * человеку — без писем и подтверждений. Роль задаёт набор разделов, его
- * можно поправить галочками. Выключение или смена пароля сразу выбрасывает
- * человека из кабинета. Вход владельца по общему паролю не меняется.
+ * человеку — без писем и подтверждений. Выданный пароль виден здесь же
+ * (хранится зашифрованным), его можно скопировать и переслать заново. Роль
+ * задаёт набор разделов, его можно поправить галочками. Выключение, смена
+ * пароля или «Выйти на всех устройствах» сразу выбрасывает человека из
+ * кабинета. Кнопка в карточке «Вход владельца» выкидывает всех, кто вошёл
+ * по общему паролю владельца.
  * Сервер: api/_lib/access.ts.
  */
 import { useEffect, useState } from 'react';
-import { PlusIcon, WarningIcon, CopyIcon, ArrowsClockwiseIcon, XIcon } from '@phosphor-icons/react';
+import { PlusIcon, WarningIcon, CopyIcon, ArrowsClockwiseIcon, XIcon, EyeIcon, EyeSlashIcon, SignOutIcon } from '@phosphor-icons/react';
 import { apiGet, apiPost, errText } from '../api/http';
 
 type Role = 'owner' | 'manager' | 'buyer' | 'warehouse';
 type User = {
   id: number; login: string; name: string; role: Role; active: boolean; hasPassword: boolean;
+  /** Выданный пароль; null — выдан до 27.10.2026 (не сохранялся) или не прочитать. */
+  password: string | null;
   sections: string[]; customSections: boolean; createdAt: number; lastLoginAt: number | null;
 };
 type Data = {
@@ -32,6 +37,8 @@ const ROLE_HINT: Record<Role, string> = {
   buyer: 'Только раздел «Склад»: товары и закупки.',
   warehouse: 'Только раздел «Склад» и только свои склады, без цен.',
 };
+
+const loginText = (login: string, password: string) => `Вход в кабинет Avto Vibe: https://e-avtovibe.ru\nЛогин: ${login}\nПароль: ${password}`;
 
 /** Пароль, который легко продиктовать: без похожих символов (0/O, 1/l). */
 function genPassword(): string {
@@ -62,18 +69,20 @@ export function Access() {
         <div className="flex-between acc-head">
           <div>
             <h2>Доступы сотрудников</h2>
-            <p className="muted">Вы сами придумываете логин и пароль и передаёте их человеку. Он входит на e-avtovibe.ru с этим логином и паролем. Ваш вход не меняется — только пароль, без логина.</p>
+            <p className="muted">Вы сами придумываете логин и пароль и передаёте их человеку. Он входит на e-avtovibe.ru с этим логином и паролем. Пароль виден в таблице — нажмите на глаз или «Скопировать», чтобы переслать заново.</p>
           </div>
           <button className="btn btn-primary" onClick={() => setEdit('new')}><PlusIcon size={16} /> Добавить человека</button>
         </div>
       </div>
+
+      <OwnerCard onError={setError} />
 
       {issued && <IssuedCard {...issued} onClose={() => setIssued(null)} />}
 
       <div className="card sk-table-card">
         <div className="sk-scroll">
           <table className="sk-table">
-            <thead><tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Разделы</th><th>Вход</th><th>Последний вход</th></tr></thead>
+            <thead><tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Разделы</th><th>Пароль</th><th>Последний вход</th></tr></thead>
             <tbody>
               {data.users.map(u => (
                 <tr key={u.id} className={u.active ? '' : 'sk-row-muted'} onClick={() => setEdit(u)}>
@@ -81,7 +90,7 @@ export function Access() {
                   <td className="sk-mono">{u.login}</td>
                   <td>{roleLabel(u.role)}</td>
                   <td className="muted sk-name">{u.role === 'owner' ? 'все' : u.customSections ? u.sections.map(label).join(', ') : 'по роли'}</td>
-                  <td>{u.hasPassword ? 'пароль' : '—'}</td>
+                  <td onClick={ev => ev.stopPropagation()}><PasswordCell login={u.login} password={u.password} hasPassword={u.hasPassword} /></td>
                   <td className="muted">{fmt(u.lastLoginAt)}</td>
                 </tr>
               ))}
@@ -117,7 +126,7 @@ export function Access() {
 
 /** Карточка «что передать человеку» — показывается один раз после выдачи пароля. */
 function IssuedCard({ name, login, password, onClose }: { name: string; login: string; password: string; onClose: () => void }) {
-  const text = `Вход в кабинет Avto Vibe: https://e-avtovibe.ru\nЛогин: ${login}\nПароль: ${password}`;
+  const text = loginText(login, password);
   const [copied, setCopied] = useState(false);
   return (
     <div className="card acc-issued">
@@ -125,7 +134,45 @@ function IssuedCard({ name, login, password, onClose }: { name: string; login: s
       <pre className="acc-pre">{text}</pre>
       <div className="row gap-8">
         <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(text).then(() => setCopied(true)).catch(() => setCopied(false))}><CopyIcon size={14} /> {copied ? 'Скопировано' : 'Скопировать'}</button>
-        <span className="muted sk-hint">Пароль показывается только сейчас — сохранить его на сайте нельзя. Забудет — выдайте новый.</span>
+        <span className="muted sk-hint">Пароль сохранён — его всегда можно посмотреть в таблице ниже.</span>
+      </div>
+    </div>
+  );
+}
+
+/** Пароль в таблице: скрыт точками, глаз — показать, кнопка — скопировать логин и пароль. */
+function PasswordCell({ login, password, hasPassword }: { login: string; password: string | null; hasPassword: boolean }) {
+  const [show, setShow] = useState(false);
+  const [copied, setCopied] = useState(false);
+  if (!password) return <span className="muted" title="Пароль выдан до того, как их стали сохранять. Откройте учётку и задайте новый — тогда он будет виден здесь.">{hasPassword ? 'не сохранён' : '—'}</span>;
+  return (
+    <span className="row gap-8 acc-pw">
+      <span className="sk-mono">{show ? password : '••••••••••'}</span>
+      <button className="acc-icon" type="button" title={show ? 'Скрыть' : 'Показать пароль'} onClick={() => setShow(!show)}>{show ? <EyeSlashIcon size={16} /> : <EyeIcon size={16} />}</button>
+      <button className="acc-icon" type="button" title="Скопировать логин и пароль" onClick={() => navigator.clipboard?.writeText(loginText(login, password)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}>
+        <CopyIcon size={16} />{copied && <span className="acc-copied">скопировано</span>}
+      </button>
+    </span>
+  );
+}
+
+/** Вход по общему паролю владельца: выкинуть всех, кто в нём сидит (кроме себя). */
+function OwnerCard({ onError }: { onError: (e: string) => void }) {
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const kick = async () => {
+    if (!confirm('Выкинуть всех, кто сейчас вошёл по паролю владельца? Вы останетесь в кабинете. Чтобы они не вошли снова, пароль владельца тоже нужно сменить.')) return;
+    setBusy(true);
+    try { await apiPost('/api/access/logout-owner', {}); setDone(true); } catch (e) { onError(err(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="card">
+      <div className="flex-between acc-head">
+        <div>
+          <b>Вход владельца</b>
+          <p className="muted">Общий пароль владельца (без логина) даёт полный доступ. Не передавайте его сотрудникам — каждому выдайте свою учётку ниже. После смены пароля владельца все, кто входил по старому, вылетают сами.</p>
+        </div>
+        <button className="btn" onClick={kick} disabled={busy || done}><SignOutIcon size={16} /> {done ? 'Все вышли' : 'Выкинуть всех, кто вошёл по паролю владельца'}</button>
       </div>
     </div>
   );
@@ -145,6 +192,12 @@ function UserModal({ data, user, onClose, onSaved }: { data: Data; user: User | 
   const editable = f.role === 'manager' || f.role === 'buyer';
   const set = (k: 'name' | 'login' | 'password') => (ev: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: ev.target.value });
   const toggle = (s: string) => setF({ ...f, touched: true, sections: f.sections.includes(s) ? f.sections.filter(x => x !== s) : [...f.sections, s] });
+
+  const logoutAll = async () => {
+    if (!user || !confirm(`Выкинуть ${user.name} со всех устройств? Логин и пароль не меняются — войти снова можно с ними же.`)) return;
+    setBusy(true); setE(null);
+    try { await apiPost(`/api/access/${user.id}`, { logoutAll: true }); onSaved(user, null); } catch (ex) { setE(err(ex)); } finally { setBusy(false); }
+  };
 
   const save = async () => {
     setBusy(true); setE(null);
@@ -175,7 +228,7 @@ function UserModal({ data, user, onClose, onSaved }: { data: Data; user: User | 
           <div className="field">
             <label className="field-label">{user ? 'Новый пароль' : 'Пароль'}</label>
             <div className="row gap-8">
-              <input className="input sk-mono" value={f.password} onChange={set('password')} placeholder={user ? 'пусто — оставить прежний' : ''} autoComplete="new-password" />
+              <input className="input sk-mono" value={f.password} onChange={set('password')} placeholder={user ? (user.password ? `сейчас: ${user.password}` : 'пусто — оставить прежний') : ''} autoComplete="new-password" />
               <button className="btn btn-sm" type="button" title="Придумать пароль" onClick={() => setF({ ...f, password: genPassword() })}><ArrowsClockwiseIcon size={14} /></button>
             </div>
           </div>
@@ -196,6 +249,7 @@ function UserModal({ data, user, onClose, onSaved }: { data: Data; user: User | 
         <div className="row gap-8 sk-actions">
           <button className="btn btn-primary" onClick={save} disabled={busy}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
           <button className="btn" onClick={onClose}>Отмена</button>
+          {user && <button className="btn" onClick={logoutAll} disabled={busy} title="Логин и пароль не меняются"><SignOutIcon size={14} /> Выйти на всех устройствах</button>}
         </div>
       </div>
     </div>

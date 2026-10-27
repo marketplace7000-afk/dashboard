@@ -33,13 +33,34 @@ function safeEq(a: string, b: string): boolean {
  * выключение пользователя гасят его сессии сразу. Без uid — вход по общему
  * паролю AUTH_PASSWORD (владелец), как было до «Склада».
  */
-export type SessionPayload = { iat: number; exp: number; uid?: number; ver?: number };
+export type SessionPayload = { iat: number; exp: number; uid?: number; ver?: number; pv?: string; ov?: number };
+
+/**
+ * Сессия по общему паролю привязана к самому паролю (pv) и к счётчику
+ * «выйти везде» (ov, kv owner_session_ver). Раньше её подписывал только
+ * AUTH_SECRET, и смена AUTH_PASSWORD не выкидывала тех, кто уже вошёл:
+ * cookie жила ещё 7 дней (27.10.2026 — сотрудники сидели под паролем владельца).
+ */
+function ownerPasswordTag(secret: string): string {
+  return hmac(`owner-pw:${process.env.AUTH_PASSWORD ?? ''}`, secret).slice(0, 22);
+}
+
+export function ownerSessionVersion(): number {
+  try { return Number(require('./sklad/db').kvGet('owner_session_ver') ?? 0) || 0; } catch { return 0; }
+}
+
+/** «Выйти везде» для входа по общему паролю. Возвращает новую версию. */
+export function bumpOwnerSessionVersion(): number {
+  const next = ownerSessionVersion() + 1;
+  require('./sklad/db').kvSet('owner_session_ver', String(next));
+  return next;
+}
 
 export function signSession(secret: string, user?: { uid: number; ver: number }): string {
   const payload: SessionPayload = {
     iat: Date.now(),
     exp: Date.now() + TTL_DAYS * 86_400_000,
-    ...(user ? { uid: user.uid, ver: user.ver } : {}),
+    ...(user ? { uid: user.uid, ver: user.ver } : { pv: ownerPasswordTag(secret), ov: ownerSessionVersion() }),
   };
   const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = hmac(data, secret);
@@ -129,6 +150,10 @@ export function requireAuth(req: VercelRequest, res: VercelResponse): boolean {
       return false;
     }
     (req as any).__avUser = user;
+  } else if (session.pv !== ownerPasswordTag(secret) || (session.ov ?? 0) !== ownerSessionVersion()) {
+    // Пароль владельца сменили или нажали «выйти везде» — старый вход недействителен.
+    res.status(401).json({ error: 'unauthorized' });
+    return false;
   }
   return true;
 }

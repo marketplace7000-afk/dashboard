@@ -247,6 +247,9 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (mp, ext_id)
   );
   `,
+  // 7 — пароль сотрудника в зашифрованном виде, чтобы владелец мог его
+  // посмотреть в «Доступах» (users.ts, sealPassword). Вход сверяет pass_hash.
+  `ALTER TABLE users ADD COLUMN pass_enc TEXT;`,
 ];
 
 export function kvGet(key: string): string | null {

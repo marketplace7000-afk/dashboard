@@ -3,9 +3,10 @@
  * Только для владельца. Не зависит от раздела «Склад» (тот может быть в
  * архиве — api/_lib/sklad/archive.ts), хотя учётки живут в той же базе.
  *
- *   GET  /api/access          → { users, roles, sections, archivedSklad }
+ *   GET  /api/access          → { users (+ выданный пароль), roles, sections, archivedSklad }
  *   POST /api/access          → создать { login, name, role, password, sections? }
- *   POST /api/access/:id      → изменить (те же поля + active)
+ *   POST /api/access/:id      → изменить (те же поля + active, logoutAll)
+ *   POST /api/access/logout-owner → выкинуть всех, кто вошёл по паролю владельца
  *   GET  /api/access/journal  → журнал изменений учёток
  *
  * Пока «Склад» в архиве, роли «Закупщик» и «Сотрудник склада» (им открыт
@@ -19,7 +20,7 @@ export async function handleAccess(req: VercelRequest, res: VercelResponse, rest
   try {
     const users = await import('./sklad/users');
     const { SKLAD_ARCHIVED } = await import('./sklad/archive');
-    const { listAudit } = await import('./sklad/audit');
+    const { listAudit, audit } = await import('./sklad/audit');
     const body = () => (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {}));
     const roles = users.ROLES.filter(r => !SKLAD_ARCHIVED || r === 'owner' || r === 'manager');
     const sections = users.SECTIONS.filter(s => !SKLAD_ARCHIVED || s !== 'sklad');
@@ -29,13 +30,23 @@ export async function handleAccess(req: VercelRequest, res: VercelResponse, rest
     };
     const [a] = rest;
 
+    if (req.method === 'POST' && a === 'logout-owner') {
+      // Выкинуть всех, кто вошёл по общему паролю владельца; того, кто нажал, оставляем.
+      const { bumpOwnerSessionVersion, signSession, setSessionCookie } = await import('./auth');
+      bumpOwnerSessionVersion();
+      if (user.id === null) setSessionCookie(res, signSession(process.env.AUTH_SECRET || process.env.AUTH_PASSWORD || ''));
+      audit(user, 'user', 'owner', 'update', { sessions: ['вход по паролю владельца', 'выход на всех устройствах'] });
+      return res.status(200).json({ ok: true });
+    }
+
     if (req.method !== 'POST') {
       if (a === 'journal') {
         return res.status(200).json({ ok: true, journal: listAudit({ entity: 'user', limit: 200 }) });
       }
+      const passwords = users.issuedPasswords();
       return res.status(200).json({
         ok: true,
-        users: users.listUsers().map(u => ({ ...u, sections: u.sections.filter(s => sections.includes(s)) })),
+        users: users.listUsers().map(u => ({ ...u, password: passwords[u.id] ?? null, sections: u.sections.filter(s => sections.includes(s)) })),
         roles: roles.map(r => ({ value: r, label: users.ROLE_LABEL[r], sections: users.ROLE_SECTIONS[r].filter(s => sections.includes(s)) })),
         sections: sections.map(s => ({ value: s, label: users.SECTION_LABEL[s] })),
         archivedSklad: SKLAD_ARCHIVED,

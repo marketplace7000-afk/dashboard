@@ -1969,6 +1969,10 @@ code {
 .acc-pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 8px 0; font-size: 15px; white-space: pre-wrap; }
 .acc-x { background: transparent; border: none; cursor: pointer; color: var(--muted); }
 .acc-journal { margin-top: 10px; }
+.acc-pw { flex-wrap: nowrap; white-space: nowrap; }
+.acc-icon { background: transparent; border: none; cursor: pointer; color: var(--muted); padding: 2px; display: inline-flex; align-items: center; gap: 4px; }
+.acc-icon:hover { color: var(--text); }
+.acc-copied { font-size: 12px; color: var(--good); }
 
 /* ═══ Телефон: исправления по прожарке 20.10.2026 ═══════════════════════════
    Липкая строка WB/Ozon (.rnp-tabs) на узком экране ложилась поверх вкладок

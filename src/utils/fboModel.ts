@@ -1,5 +1,5 @@
 /**
- * «Остатки FBO» — расчёты страницы (без отрисовки). Снимок приходит с сервера
+ * «Остатки» (до 28.10.2026 — «Остатки FBO») — расчёты страницы (без отрисовки). Снимок приходит с сервера
  * (api/_lib/fboStocks.ts), здесь он раскладывается по кластерам Ozon / регионам WB.
  *
  * Правила (согласованы с владельцем 20–26.10.2026):
@@ -16,11 +16,11 @@ export type FboBundle = {
   ozClusters: { name: string; macro: number; wh: string[] }[];
   ozSupplies: { num: string; state: string; slot?: string; drop?: string; macro: number; items: { art: string; q: number; name?: string; icon?: string }[] }[];
   ozProducts: { art: string; name: string; img: string }[];
-  ozOrders: { art: string; to: string; from: string; fbs: boolean; q: number }[];
+  ozOrders: { art: string; to: string; from: string; fbs: boolean; q: number; w7?: boolean }[];
   wbStock: { vendorCode: string; nmId: number; warehouses: { warehouseName: string; quantity: number }[] }[];
   wbCards: { nm: number; art: string; name: string; img: string }[];
   wbSupplies: { id: number; status: number; created?: string; date?: string | null; fact?: string | null; wh: string; items: { art: string; nm: number; q: number; acc: number }[] }[];
-  wbOrders: { art: string; okrug?: string; country?: string; fbs: boolean; q: number }[];
+  wbOrders: { art: string; okrug?: string; country?: string; fbs: boolean; q: number; w7?: boolean }[];
   fbs: { wh: { id: number; name: string; own: boolean; way: number }[]; stock: { art: string; wh: number; q: number }[]; ord: { mp: 'w' | 'o'; art: string; wh: number; q: number }[] };
   notes: string[];
 };
@@ -38,7 +38,8 @@ const SHORT_PLACE: Record<string, string> = {
 export const shortPlace = (s: string) => SHORT_PLACE[s] ?? s;
 export type StockRow = { art: string; name?: string; wh: string; cluster: string; q: number };
 export type Supply = { id: string; cluster: string; status: Status; sortDate?: string; from?: string; to?: string; items: { art: string; q: number; name?: string; img?: string }[] };
-export type Order = { art: string; q: number; key: string; from?: string; fbs: boolean };
+/** w7 — заказ за последние 7 дней (снимки до 28.10.2026 этого не знают — там 0). */
+export type Order = { art: string; q: number; key: string; from?: string; fbs: boolean; w7: boolean };
 export type Source = {
   mp: Mp; noun: 'кластер' | 'регион';
   stock: StockRow[]; supplies: Supply[]; orders: Order[];
@@ -108,7 +109,7 @@ export function buildOzon(D: FboBundle): Source {
       from: s.drop ? prettyOzon(s.drop.replace(/_КРОССДОКИНГ|_ХАБ(_ДО)?/g, '')) : '',
       items: s.items.map(i => ({ art: i.art, q: i.q, name: i.name, img: i.icon })),
     })),
-    orders: D.ozOrders.filter(o => o.to).map(o => ({ art: o.art, q: o.q, key: o.to, from: o.from, fbs: o.fbs })),
+    orders: D.ozOrders.filter(o => o.to).map(o => ({ art: o.art, q: o.q, key: o.to, from: o.from, fbs: o.fbs, w7: !!o.w7 })),
     info: art => { const p = prod.get(art.toUpperCase()); return { name: p?.name, img: p?.img }; },
   };
 }
@@ -143,7 +144,7 @@ export function buildWb(D: FboBundle): Source {
       to: s.wh.replace(/: .*/, ''),
       items: s.items.map(i => ({ art: i.art || byNm.get(i.nm)?.art || 'WB ' + i.nm, q: s.status === 5 && i.acc ? i.acc : i.q })),
     })),
-    orders: D.wbOrders.map(o => ({ art: o.art, q: o.q, fbs: o.fbs, key: (o.okrug && OKRUG[o.okrug]) || o.okrug || o.country || 'Не указан' })),
+    orders: D.wbOrders.map(o => ({ art: o.art, q: o.q, fbs: o.fbs, w7: !!o.w7, key: (o.okrug && OKRUG[o.okrug]) || o.okrug || o.country || 'Не указан' })),
     info: art => { const c = card.get(art.toUpperCase()); return { name: c?.name, img: c?.img }; },
   };
 }
@@ -185,6 +186,7 @@ export const KIND_ORDER: Record<Kind, number> = { stuck: 0, go: 1, soon: 2, idle
 export type PlaceRow = {
   key: string; stock: number; whs: [string, number][];
   ordFbo: number; ordFbs: number; far: number; from: [string, number][];
+  ord7Fbo: number; ord7Fbs: number;
   going: number; lines: { s: Supply; q: number }[];
 };
 
@@ -194,28 +196,37 @@ export type ProductRow = {
   fbo: number;
   /** Где лежит FBO: кластер (при «все») или склад (при выбранном кластере) → шт. */
   where: [string, number][];
-  /** Заказы за 30 дней в выбранном кластере (или все). */
+  /** Заказы за 30 и за 7 дней в выбранном кластере (или все). */
   ordFbo: number; ordFbs: number; far: number;
+  ord7Fbo: number; ord7Fbs: number;
   /** Где покупают: кластер/округ покупателя → шт (по всем заказам товара). */
   buyers: [string, number][];
   /** Поставки в выбранный кластер (или все), без черновиков в сумме «едет». */
   lines: { s: Supply; q: number }[]; going: number;
+  /** Сколько поставок сейчас едет или готовится (без черновиков и принятых). */
+  goingN: number;
   /** Свои склады (FBS) из таблицы «Склад»: склад → шт. */
   fbs: [string, number][]; fbsTotal: number;
-  /** На сколько дней хватит FBO при темпе заказов FBO за 30 дней. */
-  days: number | null;
+  /**
+   * Запас в днях при темпе заказов за 30 дней (28.10.2026, просьба владельца — один прогноз по FBO и FBS):
+   *  fboDays — FBO этой площадки ÷ её заказы FBO;
+   *  fbsDays — свои склады ÷ заказы FBS обеих площадок (склады общие для WB и Ozon);
+   *  days — всё вместе: (FBO + FBS) ÷ (заказы FBO + заказы FBS обеих площадок).
+   * При выбранном кластере FBS к кластеру не относится — days считается только по FBO кластера.
+   */
+  days: number | null; fboDays: number | null; fbsDays: number | null;
   /** Раскрытие строки: по каждому кластеру/региону. */
   places: PlaceRow[];
 };
 
-export type SortKey = 'fbo' | 'orders' | 'fbs' | 'far' | 'days' | 'name';
+export type SortKey = 'fbo' | 'orders' | 'orders7' | 'fbs' | 'days' | 'going' | 'name';
 export type RowFilter = 'all' | 'instock' | 'short';
 
 const up = (s: string) => s.toUpperCase();
 
 export function productRows(src: Source, D: FboBundle, cluster: string | null): ProductRow[] {
   const inCl = (c: string) => !cluster || c === cluster;
-  const ffName = new Map(D.fbs.wh.map(w => [w.id, w.own ? `${w.name} (свой)` : `ФФ ${w.name}`]));
+  const ffName = new Map(D.fbs.wh.map(w => [w.id, w.own ? w.name : `ФФ ${w.name}`]));
   const acc = new Map<string, { art: string; name?: string; img?: string }>();
   const touch = (art: string, name?: string, img?: string) => {
     const k = up(art); const v = acc.get(k) ?? { art };
@@ -236,7 +247,7 @@ export function productRows(src: Source, D: FboBundle, cluster: string | null): 
     // По местам (кластер/регион) — для раскрытия.
     const places = new Map<string, PlaceRow>();
     const place = (key: string) => {
-      if (!places.has(key)) places.set(key, { key, stock: 0, whs: [], ordFbo: 0, ordFbs: 0, far: 0, from: [], going: 0, lines: [] });
+      if (!places.has(key)) places.set(key, { key, stock: 0, whs: [], ordFbo: 0, ordFbs: 0, far: 0, from: [], ord7Fbo: 0, ord7Fbs: 0, going: 0, lines: [] });
       return places.get(key)!;
     };
     const whMap = new Map<string, Map<string, number>>(), fromMap = new Map<string, Map<string, number>>();
@@ -245,11 +256,16 @@ export function productRows(src: Source, D: FboBundle, cluster: string | null): 
       const m = whMap.get(r.cluster) ?? new Map(); m.set(r.wh, (m.get(r.wh) ?? 0) + r.q); whMap.set(r.cluster, m);
     }
     const wbBuyers = new Map<string, number>();
-    let wbFbo = 0, wbFbs = 0;
+    let wbFbo = 0, wbFbs = 0, wb7Fbo = 0, wb7Fbs = 0;
     for (const o of orders) {
-      if (src.mp === 'w') { wbBuyers.set(o.key, (wbBuyers.get(o.key) ?? 0) + o.q); if (o.fbs) wbFbs += o.q; else wbFbo += o.q; continue; }
+      if (src.mp === 'w') {
+        wbBuyers.set(o.key, (wbBuyers.get(o.key) ?? 0) + o.q);
+        if (o.fbs) { wbFbs += o.q; if (o.w7) wb7Fbs += o.q; } else { wbFbo += o.q; if (o.w7) wb7Fbo += o.q; }
+        continue;
+      }
       const p = place(o.key);
       if (o.fbs) p.ordFbs += o.q; else p.ordFbo += o.q;
+      if (o.w7) { if (o.fbs) p.ord7Fbs += o.q; else p.ord7Fbo += o.q; }
       if (o.from && o.from !== o.key) {
         p.far += o.q;
         const m = fromMap.get(o.key) ?? new Map(); m.set(o.from, (m.get(o.from) ?? 0) + o.q); fromMap.set(o.key, m);
@@ -266,6 +282,7 @@ export function productRows(src: Source, D: FboBundle, cluster: string | null): 
     const sum = (f: (p: PlaceRow) => number) => scope.reduce((a, p) => a + f(p), 0);
     const fbo = sum(p => p.stock), far = sum(p => p.far), going = sum(p => p.going);
     const ordFbo = src.mp === 'w' ? wbFbo : sum(p => p.ordFbo), ordFbs = src.mp === 'w' ? wbFbs : sum(p => p.ordFbs);
+    const ord7Fbo = src.mp === 'w' ? wb7Fbo : sum(p => p.ord7Fbo), ord7Fbs = src.mp === 'w' ? wb7Fbs : sum(p => p.ord7Fbs);
     const where: [string, number][] = cluster
       ? (places.get(cluster)?.whs ?? [])
       : [...places.values()].filter(p => p.stock > 0).map(p => [p.key, p.stock] as [string, number]).sort((a, b) => b[1] - a[1]);
@@ -273,12 +290,21 @@ export function productRows(src: Source, D: FboBundle, cluster: string | null): 
       .filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
     const fbsRows = D.fbs.stock.filter(r => up(r.art) === k && r.q !== 0).sort((a, b) => b.q - a.q).map(r => [ffName.get(r.wh) ?? '?', r.q] as [string, number]);
     const inf = src.info(art);
+    const fbsTotal = fbsRows.reduce((a, r) => a + r[1], 0);
+    // Свои склады общие для WB и Ozon: к заказам FBS этой площадки добавляем FBS-заказы другой (по таблице «Склад»).
+    const otherFbs = D.fbs.ord.filter(o => o.mp !== src.mp && up(o.art) === k).reduce((a, o) => a + o.q, 0);
+    const rateFbo = ordFbo / 30, rateFbs = (ordFbs + otherFbs) / 30;
+    const daysOf = (stock: number, rate: number) => (rate > 0 ? Math.round(stock / rate) : null);
+    const fboDays = daysOf(fbo, rateFbo), fbsDays = daysOf(Math.max(0, fbsTotal), rateFbs);
+    const scopeLines = scope.flatMap(p => p.lines).sort((a, b) => KIND_ORDER[a.s.status.kind] - KIND_ORDER[b.s.status.kind]);
     return {
       art, name: inf.name || name || art, img: inf.img || img,
-      fbo, where, ordFbo, ordFbs, far, buyers,
-      lines: scope.flatMap(p => p.lines).sort((a, b) => KIND_ORDER[a.s.status.kind] - KIND_ORDER[b.s.status.kind]), going,
-      fbs: fbsRows, fbsTotal: fbsRows.reduce((a, r) => a + r[1], 0),
-      days: ordFbo > 0 ? Math.round(fbo / (ordFbo / 30)) : null,
+      fbo, where, ordFbo, ordFbs, far, buyers, ord7Fbo, ord7Fbs,
+      lines: scopeLines, going,
+      goingN: new Set(scopeLines.filter(l => l.s.status.kind !== 'idle' && l.s.status.kind !== 'done').map(l => l.s.id)).size,
+      fbs: fbsRows, fbsTotal,
+      fboDays, fbsDays,
+      days: cluster ? fboDays : daysOf(fbo + Math.max(0, fbsTotal), rateFbo + rateFbs),
       places: [...places.values()].sort((a, b) => (b.stock + b.ordFbo + b.ordFbs) - (a.stock + a.ordFbo + a.ordFbs)),
     };
   });
@@ -289,8 +315,9 @@ export function sortRows(rows: ProductRow[], key: SortKey, desc: boolean): Produ
     switch (key) {
       case 'fbo': return r.fbo;
       case 'orders': return r.ordFbo + r.ordFbs;
+      case 'orders7': return r.ord7Fbo + r.ord7Fbs;
       case 'fbs': return r.fbsTotal;
-      case 'far': return r.ordFbo + r.ordFbs ? r.far / (r.ordFbo + r.ordFbs) : -1;
+      case 'going': return r.going;
       case 'days': return r.days ?? (desc ? -1 : Infinity);
       case 'name': return r.name.toLowerCase();
     }

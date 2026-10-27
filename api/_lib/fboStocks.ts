@@ -36,11 +36,12 @@ export type FboBundle = {
   ozClusters: { name: string; macro: number; wh: string[] }[];
   ozSupplies: { num: string; state: string; slot?: string; drop?: string; macro: number; items: { art: string; q: number; name?: string; icon?: string }[] }[];
   ozProducts: { art: string; name: string; img: string }[];
-  ozOrders: { art: string; to: string; from: string; fbs: boolean; q: number }[];
+  /** w7 — заказ за последние 7 дней (28.10.2026, для столбца «Заказы 7 дн»); у старых снимков поля нет. */
+  ozOrders: { art: string; to: string; from: string; fbs: boolean; q: number; w7?: boolean }[];
   wbStock: { vendorCode: string; nmId: number; warehouses: { warehouseName: string; quantity: number }[] }[];
   wbCards: { nm: number; art: string; name: string; img: string }[];
   wbSupplies: { id: number; status: number; created?: string; date?: string | null; fact?: string | null; wh: string; items: { art: string; nm: number; q: number; acc: number }[] }[];
-  wbOrders: { art: string; okrug?: string; country?: string; fbs: boolean; q: number }[];
+  wbOrders: { art: string; okrug?: string; country?: string; fbs: boolean; q: number; w7?: boolean }[];
   fbs: {
     wh: { id: number; name: string; own: boolean; way: number }[];
     stock: { art: string; wh: number; q: number }[];
@@ -104,14 +105,16 @@ async function collectOzon(notes: string[]) {
   } catch (e) { notes.push('Ozon: поставки не получены — ' + (e as Error).message); }
 
   // Заказы за 30 дней с кластером покупателя: FBO (v3, курсор) и FBS (v4).
-  const raw: { art: string; to: string; from: string; fbs: boolean; q: number }[] = [];
+  const raw: { art: string; to: string; from: string; fbs: boolean; q: number; w7: boolean }[] = [];
+  const since7 = Date.now() - 7 * 864e5;
+  const isW7 = (p: any) => Date.parse(p?.in_process_at ?? p?.created_at ?? '') >= since7;
   try {
     let cursor: string | undefined;
     for (let i = 0; i < 100; i++) {
       const r = await oz('v3/posting/fbo/list', { dir: 'ASC', filter: { since: since30, to: now }, limit: 100, with: { financial_data: true }, ...(cursor ? { cursor } : { offset: 0 }) });
       for (const p of (r.postings ?? [])) {
         if (p.status === 'cancelled') continue;
-        for (const pr of (p.products ?? [])) raw.push({ art: String(pr.offer_id), to: p.financial_data?.cluster_to ?? '', from: p.financial_data?.cluster_from ?? '', fbs: false, q: Number(pr.quantity) || 1 });
+        for (const pr of (p.products ?? [])) raw.push({ art: String(pr.offer_id), to: p.financial_data?.cluster_to ?? '', from: p.financial_data?.cluster_from ?? '', fbs: false, q: Number(pr.quantity) || 1, w7: isW7(p) });
       }
       cursor = r.cursor;
       if (!r.has_next || !cursor) break;
@@ -127,7 +130,7 @@ async function collectOzon(notes: string[]) {
       if (/Нижнекамск/i.test(wh)) continue; // самовыкупы (mp_wh_ignored в «Складе»)
       for (const pr of (p.products ?? [])) {
         const q = Number(pr.quantity) || 1;
-        raw.push({ art: String(pr.offer_id), to: p.financial_data?.cluster_to ?? '', from: p.financial_data?.cluster_from ?? '', fbs: true, q });
+        raw.push({ art: String(pr.offer_id), to: p.financial_data?.cluster_to ?? '', from: p.financial_data?.cluster_from ?? '', fbs: true, q, w7: isW7(p) });
         fbsByWh.push({ art: String(pr.offer_id), wh, q });
       }
     }
@@ -135,7 +138,7 @@ async function collectOzon(notes: string[]) {
   const agg = new Map<string, FboBundle['ozOrders'][number]>();
   for (const o of raw) {
     if (!o.to) continue;
-    const k = `${o.art}|${o.to}|${o.from}|${o.fbs}`;
+    const k = `${o.art}|${o.to}|${o.from}|${o.fbs}|${o.w7}`;
     const v = agg.get(k) ?? { ...o, q: 0 };
     v.q += o.q; agg.set(k, v);
   }
@@ -209,11 +212,14 @@ async function collectWb(notes: string[]) {
   try {
     const ord: any[] = await call(`https://statistics-api.wildberries.ru/api/v1/supplier/orders?dateFrom=${since30}`, { headers: h });
     const agg = new Map<string, FboBundle['wbOrders'][number]>();
+    const since7 = Date.now() - 7 * 864e5;
     for (const x of ord) {
       if (x.isCancel) continue;
       const fbs = x.warehouseType === 'Склад продавца';
-      const k = `${x.supplierArticle}|${x.oblastOkrugName || x.countryName}|${fbs}`;
-      const v = agg.get(k) ?? { art: String(x.supplierArticle), okrug: x.oblastOkrugName, country: x.countryName, fbs, q: 0 };
+      // Дата заказа WB — московское время без пояса; разница в 3 часа на границе недели не важна.
+      const w7 = Date.parse(String(x.date ?? '')) >= since7;
+      const k = `${x.supplierArticle}|${x.oblastOkrugName || x.countryName}|${fbs}|${w7}`;
+      const v = agg.get(k) ?? { art: String(x.supplierArticle), okrug: x.oblastOkrugName, country: x.countryName, fbs, q: 0, w7 };
       v.q++; agg.set(k, v);
     }
     wbOrders = [...agg.values()];

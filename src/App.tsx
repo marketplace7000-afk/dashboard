@@ -56,7 +56,7 @@ const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   // «Рука на пульсе» — по дням и товарам из API площадок (11.10.2026), замена РнП «Культуры Аналитики».
   { key: 'rnp',         Icon: PulseIcon,           label: 'РНП' },
   // 26.10.2026: остатки на складах площадок по кластерам, поставки, где покупают.
-  { key: 'fbo',         Icon: PackageIcon,         label: 'Остатки FBO' },
+  { key: 'fbo',         Icon: PackageIcon,         label: 'Остатки' },
   { key: 'ads',         Icon: MegaphoneIcon,       label: 'Реклама' },
   // 15.10.2026: конкуренты — отдельный раздел (привязка, позиции и рынок, советник по продажам).
   { key: 'competitors', Icon: BinocularsIcon,      label: 'Конкуренты' },
@@ -79,7 +79,7 @@ const TITLES: Record<Page, string> = {
   reviews: 'Отзывы и вопросы',
   chats: 'Чаты с покупателями',
   rnp: 'Рука на пульсе (РНП)',
-  fbo: 'Остатки FBO по складам',
+  fbo: 'Остатки',
   ads: 'Реклама',
   competitors: 'Конкуренты',
   collectors: 'Сборщики · агенты на ПК',

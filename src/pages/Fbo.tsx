@@ -1,11 +1,16 @@
 /**
- * «Остатки FBO» — остатки на складах маркетплейсов по кластерам Ozon и регионам WB,
+ * «Остатки» (до 28.10.2026 — «Остатки FBO») — остатки на складах маркетплейсов по кластерам Ozon и регионам WB,
  * поставки, где покупают и свои склады (FBS). Снимок собирает сервер
  * (api/_lib/fboStocks.ts) раз в 3 часа; расчёты — utils/fboModel.ts.
  *
  * 27.10.2026 по просьбе владельца: вместо карточек — таблица «один товар — одна строка»
  * (слева фото, артикул, название; справа остатки, поставки, заказы, FBS), кластеры —
  * строкой сверху, подробности по кластерам — по клику на строку.
+ *
+ * 28.10.2026 по просьбе владельца — меньше цифр в строке, порядок столбцов:
+ * товар → FBO всего → FBS всего (по складам) → запас в днях (FBO + FBS вместе) →
+ * едет в поставках → заказы 7 дн → заказы 30 дн → статусы поставок (справа).
+ * «Где лежит FBO», кластеры покупателей и «издалека» — в раскрытии строки.
  */
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowsClockwiseIcon, CaretDownIcon, CaretRightIcon } from '@phosphor-icons/react';
@@ -21,10 +26,11 @@ type View = 'items' | 'demand' | 'supplies' | 'fbs';
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: 'fbo', label: 'по остатку FBO' },
-  { key: 'orders', label: 'по заказам' },
-  { key: 'days', label: 'по запасу в днях' },
   { key: 'fbs', label: 'по остатку FBS' },
-  { key: 'far', label: 'по доле «издалека»' },
+  { key: 'days', label: 'по запасу в днях' },
+  { key: 'going', label: 'по количеству в поставках' },
+  { key: 'orders7', label: 'по заказам за 7 дней' },
+  { key: 'orders', label: 'по заказам за 30 дней' },
   { key: 'name', label: 'по названию' },
 ];
 
@@ -68,7 +74,7 @@ export function Fbo() {
   if (!D || !S) {
     return (
       <div className="card">
-        <h2>Остатки FBO</h2>
+        <h2>Остатки</h2>
         <p className="muted">{resp.collecting
           ? 'Собираю данные с Ozon, WB и таблицы «Склад» — это занимает 2–4 минуты. Страница обновится сама.'
           : 'Данных пока нет.'}</p>
@@ -89,7 +95,7 @@ export function Fbo() {
   return (
     <div className="fbo">
       <div className="fbo-top">
-        <div className="fbo-sub">Остатки на складах маркетплейса по {isOz ? 'кластерам' : 'регионам'}, поставки, заказы за 30 дней и остатки на ваших складах (FBS).</div>
+        <div className="fbo-sub">Остатки на складах {isOz ? 'Ozon' : 'WB'} (FBO) и на ваших складах (FBS), запас в днях, поставки и заказы за 7 и 30 дней. Нажмите на товар — откроются кластеры, покупатели и поставки.</div>
         <div className="fbo-upd">
           <span className="muted">Данные на {at}</span>
           <button className="btn btn-sm" onClick={refresh} disabled={resp.collecting} title="Собрать данные заново">
@@ -125,7 +131,7 @@ export function Fbo() {
           </div>
           <label className="fbo-sort">Сортировка
             <select value={sort} onChange={e => setSort(e.target.value as SortKey)}>
-              {SORTS.filter(s => isOz || s.key !== 'far').map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+              {SORTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
           </label>
           <span className="muted fbo-count">{fmt(rows.length)} {plural(rows.length, 'товар', 'товара', 'товаров')}</span>
@@ -160,35 +166,30 @@ function ClusterBar({ src, cluster, onPick }: { src: Source; cluster: string | n
   );
 }
 
-const list = (xs: [string, number][], max: number, fmtV: (v: number) => string = fmt) => (
-  <>
-    {xs.slice(0, max).map(([k, v]) => <div key={k} className="kv"><span title={k}>{shortPlace(k)}</span><b>{fmtV(v)}</b></div>)}
-    {xs.length > max && <div className="more">ещё {xs.length - max}</div>}
-  </>
-);
-
 function ItemsTable({ rows, isOz, cluster, open, onToggle }: {
   rows: ProductRow[]; isOz: boolean; cluster: string | null; open: Set<string>; onToggle: (art: string) => void;
 }) {
   if (!rows.length) return <div className="fbo-empty">Ничего не нашлось. Измените поиск, фильтр или кластер.</div>;
   const here = cluster ? (isOz ? 'в кластере' : 'в регионе') : 'всего';
+  const daysHint = cluster
+    ? 'Запас FBO в выбранном кластере при темпе заказов FBO за 30 дней. Свои склады к кластеру не относятся — их запас подписан ниже отдельно.'
+    : 'Сколько дней хватит всего товара: (FBO + свои склады) ÷ заказы за 30 дней. Свои склады общие для WB и Ozon, поэтому для них берутся FBS-заказы обеих площадок.';
   return (
     <div className="fbo-table" role="table">
       <div className="fbo-tr fbo-th" role="row">
         <span role="columnheader">Товар</span>
         <span role="columnheader" className="r">FBO {here}</span>
-        <span role="columnheader">{cluster && isOz ? 'Склады кластера' : `Где лежит FBO`}</span>
-        <span role="columnheader">Едет в поставках</span>
-        <span role="columnheader" className="r">Заказы 30 дн{cluster && isOz ? ' сюда' : ''}</span>
-        <span role="columnheader">{isOz ? 'Кластеры покупателей' : 'Округа покупателей'}</span>
-        <span role="columnheader">FBS на ваших складах</span>
+        <span role="columnheader">FBS всего</span>
+        <span role="columnheader" className="r" title={daysHint}>Хватит на</span>
+        <span role="columnheader" className="r">Едет в поставках</span>
+        <span role="columnheader" className="r">Заказы 7 дн</span>
+        <span role="columnheader" className="r">Заказы 30 дн</span>
+        <span role="columnheader">Статусы поставок</span>
         <span role="columnheader" aria-label="Подробнее" />
       </div>
       {rows.map(r => {
         const isOpen = open.has(r.art);
-        const orders = r.ordFbo + r.ordFbs;
-        const farP = pct(r.far, orders);
-        const totalBuy = r.buyers.reduce((a, b) => a + b[1], 0);
+        const draftsOnly = r.lines.length > 0 && r.going === 0;
         return (
           <Fragment key={r.art}>
             <div className={`fbo-tr ${isOpen ? 'open' : ''}`} role="row" tabIndex={0} aria-expanded={isOpen}
@@ -202,30 +203,37 @@ function ItemsTable({ rows, isOz, cluster, open, onToggle }: {
               </span>
               <span className="c-num r" role="cell" data-area="fbo" data-l={`FBO ${here}`}>
                 <b className={r.fbo ? '' : 'bad'}>{fmt(r.fbo)}</b>
-                <span className={`sub ${r.days !== null && r.days < 14 ? 'bad' : ''}`}>
-                  {r.days === null ? (r.fbo ? 'нет заказов FBO' : '') : `хватит на ${fmt(r.days)} дн`}
+              </span>
+              <span className="c-list c-fbs" role="cell" data-area="fbs" data-l="FBS всего">
+                <b className={`big ${r.fbsTotal > 0 ? '' : 'muted'}`}>{fmt(r.fbsTotal)}</b>
+                {r.fbs.slice(0, 5).map(([k, v]) => <div key={k} className="kv"><span>{k}</span><b className={v < 0 ? 'bad' : ''}>{fmt(v)}</b></div>)}
+                {r.fbs.length > 5 && <div className="more">ещё {r.fbs.length - 5}</div>}
+              </span>
+              <span className="c-num r" role="cell" data-area="days" data-l="Хватит на" title={daysHint}>
+                {r.days === null
+                  ? <b className="muted">—</b>
+                  : <b className={r.days < 14 ? 'bad' : ''}>{fmt(r.days)} <small>дн</small></b>}
+                <span className="sub">
+                  {cluster
+                    ? <>FBS {r.fbsDays === null ? '—' : `${fmt(r.fbsDays)} дн`} (все склады)</>
+                    : <>FBO {r.fboDays === null ? '—' : `${fmt(r.fboDays)} дн`} · FBS {r.fbsDays === null ? '—' : `${fmt(r.fbsDays)} дн`}</>}
                 </span>
               </span>
-              <span className="c-list" role="cell" data-area="where" data-l={cluster && isOz ? 'Склады кластера' : 'Где лежит FBO'}>{r.where.length ? list(r.where, 3) : <span className="muted">—</span>}</span>
-              <span className="c-list" role="cell" data-area="going" data-l="Едет в поставках">
-                {r.lines.length
-                  ? <>
-                      {r.going > 0 && <div className="kv"><span>едет / готовится</span><b>+{fmt(r.going)}</b></div>}
-                      <SupplyBadges lines={r.lines} />
-                    </>
-                  : <span className="muted">—</span>}
+              <span className="c-num r" role="cell" data-area="going" data-l="Едет в поставках">
+                {r.going > 0
+                  ? <><b>+{fmt(r.going)}</b><span className="sub">в {fmt(r.goingN)} {plural(r.goingN, 'поставке', 'поставках', 'поставках')}</span></>
+                  : <><b className="muted">—</b>{draftsOnly && <span className="sub">только черновик</span>}</>}
               </span>
-              <span className="c-num r" role="cell" data-area="ord" data-l={`Заказы 30 дн${cluster && isOz ? ' сюда' : ''}`}>
-                <b>{fmt(orders)}</b>
+              <span className="c-num c-ord r" role="cell" data-area="ord7" data-l="Заказы 7 дн">
+                <b>{fmt(r.ord7Fbo + r.ord7Fbs)}</b>
+                <span className="sub">FBO {fmt(r.ord7Fbo)} · FBS {fmt(r.ord7Fbs)}</span>
+              </span>
+              <span className="c-num c-ord r" role="cell" data-area="ord30" data-l={`Заказы 30 дн${cluster && isOz ? ' сюда' : ''}`}>
+                <b>{fmt(r.ordFbo + r.ordFbs)}</b>
                 <span className="sub">FBO {fmt(r.ordFbo)} · FBS {fmt(r.ordFbs)}</span>
-                {isOz && orders > 0 && <span className={`sub ${farP >= 50 ? 'bad' : ''}`}>издалека {farP}%</span>}
               </span>
-              <span className="c-list" role="cell" data-area="buy" data-l={isOz ? 'Кластеры покупателей' : 'Округа покупателей'}>{r.buyers.length ? list(r.buyers, 3, v => `${pct(v, totalBuy)}%`) : <span className="muted">заказов не было</span>}</span>
-              <span className="c-list" role="cell" data-area="fbs" data-l="FBS на ваших складах">
-                {r.fbs.length
-                  ? <>{r.fbs.slice(0, 4).map(([k, v]) => <div key={k} className="kv"><span>{k}</span><b className={v < 0 ? 'bad' : ''}>{fmt(v)}</b></div>)}
-                      {r.fbs.length > 1 && <div className="kv tot"><span>всего</span><b>{fmt(r.fbsTotal)}</b></div>}</>
-                  : <span className="muted">нет</span>}
+              <span className="c-list" role="cell" data-area="st" data-l="Статусы поставок">
+                {r.lines.length ? <SupplyBadges lines={r.lines} /> : <span className="muted">—</span>}
               </span>
               <span className="c-exp" role="cell" data-area="exp" aria-hidden>{isOpen ? <CaretDownIcon size={24} /> : <CaretRightIcon size={24} />}</span>
             </div>
@@ -251,9 +259,17 @@ function SupplyBadges({ lines }: { lines: { s: Supply; q: number }[] }) {
 /** Раскрытие строки: по каждому кластеру/региону — лежит, заказы, издалека, поставки. */
 function RowDetail({ r, isOz }: { r: ProductRow; isOz: boolean }) {
   const places = r.places.filter(p => p.stock || p.ordFbo || p.ordFbs || p.lines.length);
+  const orders = r.ordFbo + r.ordFbs;
+  const totalBuy = r.buyers.reduce((a, b) => a + b[1], 0);
   return (
     <div className="fbo-detail" role="row">
       <div role="cell">
+        {/* То, что 28.10 убрано из строки, — сводкой над подробностями. */}
+        <div className="fbo-dsum">
+          <span><b>Где лежит FBO:</b> {r.where.length ? r.where.map(([k, v]) => `${shortPlace(k)} ${fmt(v)}`).join(', ') : 'нигде'}</span>
+          <span><b>{isOz ? 'Кластеры покупателей' : 'Округа покупателей'} за 30 дн:</b> {r.buyers.length ? r.buyers.slice(0, 6).map(([k, v]) => `${shortPlace(k)} ${pct(v, totalBuy)}%`).join(', ') : 'заказов не было'}</span>
+          {isOz && orders > 0 && <span><b>Издалека:</b> {pct(r.far, orders)}% заказов везли из другого кластера</span>}
+        </div>
         {isOz ? (
           <table className="fbo-dt">
             <thead><tr><th>Кластер</th><th className="r">Лежит FBO</th><th>Склады</th><th className="r">Заказы FBO</th><th className="r">Заказы FBS</th><th className="r">Издалека</th><th>Откуда везли</th><th>Поставки сюда</th></tr></thead>

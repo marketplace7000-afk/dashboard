@@ -120,9 +120,16 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
       queries: (det.searchQueries || []).map(q => ({ text: q.text, freq: c(q.frequency) })) });
     // Тот же набор за 7 дней (26.10.2026: сравнения раз в неделю — «неделя к неделе»). Период лимит не тратит.
     await new Promise(r => setTimeout(r, 1200 + Math.random() * 1000));
-    const r7 = await j('/v4/competitor-comparison/nms/detail', { period: { start: d(6), end: d(0) }, id: h.ID,
-      searchQueriesRequest: { limit: 5, offset: 0, orderBy: { field: 'frequency', mode: 'desc', nmID: scope[0] }, scopeNmIDs: scope }, sizeDetails: true });
+    const body7 = { period: { start: d(6), end: d(0) }, id: h.ID,
+      searchQueriesRequest: { limit: 5, offset: 0, orderBy: { field: 'frequency', mode: 'desc', nmID: scope[0] }, scopeNmIDs: scope }, sizeDetails: true };
+    let r7 = await j('/v4/competitor-comparison/nms/detail', body7);
+    // 27.10.2026: второй запрос подряд кабинет иногда не отдаёт — одна повторная попытка через паузу.
+    if (!(r7.json && !r7.json.error && r7.json.data)) {
+      await new Promise(r => setTimeout(r, 4000 + Math.random() * 2000));
+      r7 = await j('/v4/competitor-comparison/nms/detail', body7);
+    }
     const det7 = r7.json && !r7.json.error && r7.json.data;
+    if (!det7) errors.push('сравнение ' + h.date + ' за 7 дней: ' + (r7.error || JSON.stringify(r7.json && (r7.json.additionalErrors || r7.json.errorText) || '').slice(0, 120)));
     if (det7) compDetails[compDetails.length - 1].nms7 = (det7.commonParams || []).map(p => ({ nmId: p.nmId,
       avgPos: c(p.avgPosition), openCard: c(p.openCard), orders: c(p.orders), ordersDyn: dy(p.orders), ctr: c(p.CTR), ctrDyn: dy(p.CTR), views: c(p.viewCount),
       addToCart: c(p.addToCart), inAds: !!p.inAdvertising, inPromo: !!(p.promo && p.promo.inPromo), rep: rep(p) }));

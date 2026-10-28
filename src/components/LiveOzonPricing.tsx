@@ -47,9 +47,12 @@ type OzKnobs = Partial<Pick<OzonCalcInput, 'price' | 'cost' | 'spp' | 'drr' | 'c
 type Row = OzonPriceRow & { name?: string; primary_image?: string };
 
 function pickRecommendBase(r: OzonPriceRow): { src: 'ozon' | 'external' | 'self' | null; min: number } {
-  const o = +r.price_indexes.ozon_index_data?.min_price || 0;
-  const e = +r.price_indexes.external_index_data?.min_price || 0;
-  const s = +r.price_indexes.self_marketplaces_index_data?.min_price || 0;
+  // 28.10.2026: Ozon стал присылать price_indexes: null (у товаров без индекса цен) —
+  // обращение к полю валило весь раздел «Цены» («reading 'ozon_index_data'»).
+  const pi = r.price_indexes;
+  const o = +(pi?.ozon_index_data?.min_price ?? 0) || 0;
+  const e = +(pi?.external_index_data?.min_price ?? 0) || 0;
+  const s = +(pi?.self_marketplaces_index_data?.min_price ?? 0) || 0;
   const candidates: { src: 'ozon' | 'external' | 'self'; min: number }[] = [];
   if (o > 0) candidates.push({ src: 'ozon', min: o });
   if (e > 0) candidates.push({ src: 'external', min: e });

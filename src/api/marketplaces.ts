@@ -241,7 +241,7 @@ export type OzonPriceRow = {
     ozon_index_data: { min_price: number; price_index_value: number };
     external_index_data: { min_price: number; price_index_value: number };
     self_marketplaces_index_data: { min_price: number; price_index_value: number };
-  };
+  } | null;   // 28.10.2026: у части товаров Ozon присылает null
   acquiring: number;
 };
 

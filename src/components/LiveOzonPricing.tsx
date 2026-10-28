@@ -137,7 +137,9 @@ export function LiveOzonPricing() {
     const byId = productInfoIndex(bundle);
     return bundle.prices.map((p) => {
       const meta = byId.get(p.product_id) as OzonProductInfo | undefined;
-      return { ...p, name: meta?.name, primary_image: meta?.primary_image };
+      // Пустые блоки от Ozon не должны ронять раздел (28.10.2026, см. pickRecommendBase).
+      return { ...p, price: p.price ?? ({} as Row['price']), commissions: p.commissions ?? ({} as Row['commissions']),
+        offer_id: p.offer_id ?? '', name: meta?.name, primary_image: meta?.primary_image };
     });
   }, [bundle]);
 

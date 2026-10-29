@@ -1711,6 +1711,8 @@ code {
   .cmp-rep-table col.cmp-rep-lab { width: 190px; }
   .sa .ad2-table.cmp-rep-table th, .sa .ad2-table.cmp-rep-table td, .cmp-rep-table th, .cmp-rep-table td { font-size: 16px; padding: 10px; }
 }
+.cmp-compare-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.cmp-plan { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 14px; border-radius: 10px; background: var(--accent-soft); font-size: 17px; }
 .cmp-compare-s { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 17px; }
 .cmp-compare-last { font-size: 16px; }
 .cmp-refresh { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; flex: 1 1 100%; }

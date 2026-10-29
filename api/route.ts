@@ -366,9 +366,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           // Недельные сравнения WB: менеджер выбрал товары (наш + до 4 конкурентов) — агент создаст наборы в кабинете.
           if (b.action === 'compare') {
             const { requestCompare } = await import('./_lib/ads/wbCompare');
-            const r = requestCompare(b.items, 'panel');
+            const r = requestCompare(b.items, 'panel', b.when === 'friday' ? 'friday' : 'now');
             if (!r.ok) return res.status(400).json(r);
             return res.status(200).json({ ...getCompetitors('wb'), compareQueued: r });
+          }
+          if (b.action === 'compare_cancel') {
+            const { cancelPlanned } = await import('./_lib/ads/wbCompare');
+            const r = cancelPlanned();
+            if (!r.ok) return res.status(400).json(r);
+            return res.status(200).json(getCompetitors('wb'));
+          }
+          // Отметки «В сравнение» — на сервере, общие для всех менеджеров.
+          if (b.action === 'compare_pick') {
+            const { setPick, clearPicks } = await import('./_lib/ads/wbCompare');
+            if (b.clear) clearPicks(); else setPick(b.key, b.on !== false, 'panel');
+            return res.status(200).json(getCompetitors('wb'));
           }
           const r = editWatch(b);
           if (!r.ok) return res.status(400).json(r);

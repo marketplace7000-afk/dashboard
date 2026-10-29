@@ -251,7 +251,7 @@ function CompareReport({ rep }: { rep: Ads2WbReport }) {
             </tbody>
           </table>
         </div>
-        <p className="muted cmp-rep-note">Кабинет WB: «Сравнение карточек» → «Показатели», за {cur} дней на дату сравнения. Значения не пересчитываются.</p>
+        <p className="muted cmp-rep-note">Кабинет WB: «Сравнение карточек» → «Показатели», за {cur} дней{(cur === 7 ? rep.per7 : rep.per30) ? ` — с ${dmy((cur === 7 ? rep.per7 : rep.per30)!.start)} по ${dmy((cur === 7 ? rep.per7 : rep.per30)!.end)}` : ' на дату сравнения'}. Значения не пересчитываются.</p>
       </>}
     </div>
   );
@@ -373,7 +373,10 @@ function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7, p
   );
 }
 
-/** Недельные сравнения WB (26.10.2026): счётчики лимита и кнопка запуска — агент создаст наборы в кабинете сам. */
+/**
+ * Недельные сравнения WB (26.10.2026): счётчики лимита и запуск — агент создаст наборы в кабинете сам.
+ * С 29.10.2026 основной путь — «Запланировать на пятницу 08:30»: в недельный период входит весь четверг.
+ */
 function ComparePanel({ st, picked, onClear, onData, setToast }: {
   st: Ads2WbCompare; picked: Ads2WatchProduct[]; onClear: () => void; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
 }) {
@@ -384,35 +387,60 @@ function ComparePanel({ st, picked, onClear, onData, setToast }: {
   const weekLeft = Math.max(0, st.maxWeek - st.weekUsed);
   const over = charged > weekLeft ? `на этой неделе можно ещё ${weekLeft}`
     : st.limitLeft != null && charged > st.limitLeft ? `в лимите WB осталось ${st.limitLeft} — докупите сравнения в кабинете` : '';
-  const run = async () => {
+  const friday = st.fridayAt ?? null;
+  const fri = (ms: number) => `пт ${when(ms)}`;
+  const errMsg = (e: unknown) => errText(e).replace(/^сервер ответил \d+: /, '');
+  const run = async (mode: 'friday' | 'now') => {
     if (!items.length || over) return;
     const free = items.length - charged;
-    const msg = `Запустить сравнения WB: ${items.length} шт.?\nИз лимита спишется ${charged}${free ? ` (${free} — бесплатно, сравнивали в последние 72 часа)` : ''}.\nАгент создаст их в кабинете WB, снимет данные и пришлёт итог в Telegram.`;
+    const what = mode === 'friday' && friday
+      ? `Запланировать сравнения WB на ${fri(friday)}: ${items.length} шт.?\nВ период войдёт вся неделя по четверг включительно. До пятницы план можно отменить.`
+      : `Запустить сравнения WB сейчас: ${items.length} шт.?\nСегодняшний день в период не войдёт — только целые дни по вчера.`;
+    const msg = `${what}\nИз лимита спишется ${charged}${free ? ` (${free} — бесплатно, сравнивали в последние 72 часа)` : ''}.\nАгент создаст их в кабинете WB, снимет данные и пришлёт итог в Telegram.`;
     if (!window.confirm(msg)) return;
     setBusy(true);
     try {
-      const r = await apiPost<Ads2Competitors>('/api/ads2/competitors', { mp: 'wb', action: 'compare', items });
+      const r = await apiPost<Ads2Competitors>('/api/ads2/competitors', { mp: 'wb', action: 'compare', items, when: mode });
       onData(r.data);
-      onClear();
-      setToast({ ok: true, text: 'Сравнения запущены — агент создаст их в кабинете WB за несколько минут, итог придёт в Telegram' });
-    } catch (e) { setToast({ ok: false, text: 'Не запустилось: ' + errText(e).replace(/^сервер ответил \d+: /, '') }); }
+      setToast({ ok: true, text: mode === 'friday' && friday ? `Запланировано на ${fri(friday)} — агент создаст сравнения сам, итог придёт в Telegram` : 'Сравнения запущены — агент создаст их в кабинете WB за несколько минут, итог придёт в Telegram' });
+    } catch (e) { setToast({ ok: false, text: 'Не получилось: ' + errMsg(e) }); }
+    finally { setBusy(false); }
+  };
+  const cancel = async () => {
+    if (!window.confirm('Отменить запланированные сравнения? Лимит не тратится, товары можно выбрать заново.')) return;
+    setBusy(true);
+    try { const r = await apiPost<Ads2Competitors>('/api/ads2/competitors', { mp: 'wb', action: 'compare_cancel' }); onData(r.data); setToast({ ok: true, text: 'План отменён' }); }
+    catch (e) { setToast({ ok: false, text: 'Не отменилось: ' + errMsg(e) }); }
     finally { setBusy(false); }
   };
   const lr = st.lastRun;
-  const lrText = !lr ? '' : lr.status === 'queued' ? 'идёт…' : lr.status === 'failed' ? `не получилось — ${lr.message ?? ''}` : (lr.message ?? `${lr.total} шт.`);
+  const lrText = !lr ? '' : lr.status === 'queued' ? (st.planned ? 'запланирован' : 'идёт…') : lr.status === 'cancelled' ? 'отменён'
+    : lr.status === 'failed' ? `не получилось — ${lr.message ?? ''}` : (lr.message ?? `${lr.total} шт.`);
+  const blocked = busy || st.running || !!st.planned || !items.length || !!over;
+  const why = over || (st.planned ? 'Сравнения уже запланированы — отмените план, чтобы поменять товары' : st.running ? 'Сравнения уже идут' : !items.length ? 'Отметьте товары галочкой «В сравнение»' : '');
+  const cnt = items.length ? ` (${items.length})` : '';
   return (
     <section className="card cmp-card cmp-compare">
       <div className="cmp-head">
         <h2>Сравнения WB на этой неделе</h2>
-        <button className="btn btn-primary" disabled={busy || st.running || !items.length || !!over} onClick={run}
-          title={over || (st.running ? 'Сравнения уже идут' : !items.length ? 'Отметьте товары галочкой «В сравнение»' : '')}>
-          {st.running ? 'Агент создаёт сравнения…' : `Запустить сравнения${items.length ? ` (${items.length})` : ''}`}
-        </button>
+        <div className="cmp-compare-btns">
+          {friday && <button className="btn btn-primary" disabled={blocked} onClick={() => void run('friday')} title={why}>Запланировать на пятницу 08:30{cnt}</button>}
+          <button className={`btn ${friday ? '' : 'btn-primary'}`} disabled={blocked} onClick={() => void run('now')} title={why || 'Создать сразу — период по вчерашний день'}>
+            {st.running ? 'Агент создаёт сравнения…' : `Запустить сейчас${friday ? '' : cnt}`}
+          </button>
+        </div>
       </div>
       <p className="muted cmp-lead">
-        Отметьте у товаров «В сравнение» — в набор пойдут наш товар и до 4 подтверждённых конкурентов. Агент сам создаст сравнения в кабинете WB,
-        снимет CTR, позиции и заказы за 7 и 30 дней и пришлёт итог в Telegram. Каждое сравнение — 1 из лимита; те же карточки в течение 72 часов — бесплатно.
+        Отметьте у товаров «В сравнение» (отметки видят все менеджеры) — в набор пойдут наш товар и до 4 подтверждённых конкурентов.
+        По плану агент создаёт сравнения в пятницу в 08:30, чтобы в неделю вошёл весь четверг: 7 дней — с прошлой пятницы по четверг, 30 дней — по четверг.
+        Итог придёт в Telegram. Каждое сравнение — 1 из лимита; те же карточки в течение 72 часов — бесплатно.
       </p>
+      {st.planned && (
+        <div className="cmp-plan">
+          <span>🗓 Запланировано на <b>{fri(st.planned.at)}</b>: {st.planned.keys.length} шт. — <span className="muted">{st.planned.keys.join(', ')}</span></span>
+          <button className="btn btn-sm" disabled={busy} onClick={() => void cancel()}>Отменить план</button>
+        </div>
+      )}
       <div className="cmp-compare-s">
         <span>Выбрано: <b>{items.length}</b>{charged !== items.length ? <span className="muted"> (спишется {charged})</span> : null}</span>
         <span>На этой неделе: <b>{st.weekUsed}</b> из {st.maxWeek}</span>
@@ -436,10 +464,13 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
   const pickPer = (v: OzPer) => { setPer(v); try { localStorage.setItem('cmp:ozPer', String(v)); } catch { /* приватное окно */ } };
   const withLinks = d.watch.filter(p => p.links.length > 0);
   const gone = d.watch.filter(p => p.our?.hidden);
-  // Выбор товаров для недельных сравнений WB — помним до запуска (менеджер отмечает в течение дня).
-  const [picks, setPicks] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem('cmp:wbPick') || '[]')); } catch { return new Set(); } });
-  const savePicks = (x: Set<string>) => { setPicks(x); try { localStorage.setItem('cmp:wbPick', JSON.stringify([...x])); } catch { /* приватное окно */ } };
-  const togglePick = (key: string) => { const x = new Set(picks); if (x.has(key)) x.delete(key); else x.add(key); savePicks(x); };
+  // Выбор товаров для недельных сравнений WB — на сервере (29.10.2026): отметки видят все менеджеры и не теряются.
+  const picks = useMemo(() => new Set(d.wbCompare?.picks ?? []), [d.wbCompare?.picks]);
+  const sendPick = (body: Record<string, unknown>) => {
+    apiPost<Ads2Competitors>('/api/ads2/competitors', { mp: 'wb', action: 'compare_pick', ...body }).then(r => onData(r.data))
+      .catch(e => setToast({ ok: false, text: 'Отметка не сохранилась: ' + errText(e).replace(/^сервер ответил \d+: /, '') }));
+  };
+  const togglePick = (key: string) => sendPick({ key, on: !picks.has(key) });
   const picked = mp === 'wb' ? d.watch.filter(p => picks.has(p.key) && compareNms(p).length) : [];
   const pendingOf = (p: Ads2WatchProduct) => p.links.filter(l => l.status === 'suggested').length;
   const pending = d.watch.reduce((s, p) => s + pendingOf(p), 0);
@@ -480,7 +511,7 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
           <label className="cmp-check"><input type="checkbox" checked={showIgnored} onChange={e => setShowIgnored(e.target.checked)} /> показывать «не наших»</label>
         </div>
       </section>
-      {mp === 'wb' && d.wbCompare && <ComparePanel st={d.wbCompare} picked={picked} onClear={() => savePicks(new Set())} onData={onData} setToast={setToast} />}
+      {mp === 'wb' && d.wbCompare && <ComparePanel st={d.wbCompare} picked={picked} onClear={() => sendPick({ clear: true })} onData={onData} setToast={setToast} />}
       {/* Плашку «Не видны покупателям» на листе Ozon владелец попросил убрать (22.10.2026). */}
       {mp === 'wb' && gone.length > 0 && (
         <section className="card cmp-gone-card" role="alert">

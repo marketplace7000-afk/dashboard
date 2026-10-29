@@ -99,8 +99,18 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
   const sets = ((hist.json && hist.json.data) || []).filter(h => h && h.status && h.status.available).slice(0, 80);
   for (const h of sets) {
     const scope = (h.nms || []).map(n => n.nmID);
-    const r = await j('/v4/competitor-comparison/nms/detail', { period: { start: d(29), end: d(0) }, id: h.ID,
-      searchQueriesRequest: { limit: 5, offset: 0, orderBy: { field: 'frequency', mode: 'desc', nmID: scope[0] }, scopeNmIDs: scope }, sizeDetails: true });
+    // Период — целые дни до дня создания набора (29.10.2026): набор от пятницы — с прошлой пятницы по четверг.
+    // Привязка к дате набора, а не к сегодня: ночные перечитывания дают ту же неделю, цифры не «уезжают».
+    const ad = n => h.date ? new Date(Date.parse(h.date + 'T00:00:00Z') - n * 86400000).toISOString().slice(0, 10) : d(n);
+    const q = { limit: 5, offset: 0, orderBy: { field: 'frequency', mode: 'desc', nmID: scope[0] }, scopeNmIDs: scope };
+    let per30 = { start: ad(30), end: ad(1) }, per7 = { start: ad(7), end: ad(1) };
+    let r = await j('/v4/competitor-comparison/nms/detail', { period: per30, id: h.ID, searchQueriesRequest: q, sizeDetails: true });
+    if (!(r.json && !r.json.error && r.json.data)) {
+      // Наборы до 29.10 созданы на период «по день создания» — для них прежний период.
+      await new Promise(r => setTimeout(r, 1500 + Math.random() * 1000));
+      per30 = { start: d(29), end: d(0) }; per7 = { start: d(6), end: d(0) };
+      r = await j('/v4/competitor-comparison/nms/detail', { period: per30, id: h.ID, searchQueriesRequest: q, sizeDetails: true });
+    }
     const det = r.json && !r.json.error && r.json.data;
     if (!det) { errors.push(r.error || ('сравнение ' + h.date + ': ' + JSON.stringify(r.json && r.json.additionalErrors || '').slice(0, 120))); continue; }
     const c = x => x && typeof x === 'object' ? x.current : x;
@@ -112,7 +122,7 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
       ads: typeof p.inAdvertising === 'boolean' ? p.inAdvertising : null, promo: p.promo ? (p.promo.inPromo ? (p.promo.promoNames || []) : []) : null, subst: !!p.isSubstitutedSKU,
       views: cv(p.viewCount), open: cv(p.openCard), ctr: cv(p.CTR), cart: cv(p.addToCart), toCart: cv(p.openToCart), orders: cv(p.orders), toOrder: cv(p.cartToOrder),
       buyouts: cv(p.buyoutCount), buyoutPct: cv(p.buyoutPercent), cancels: cv(p.cancelCount) });
-    compDetails.push({ id: h.ID, date: h.date,
+    compDetails.push({ id: h.ID, date: h.date, per30: per30, per7: per7,
       nms: (det.commonParams || []).map(p => ({ nmId: p.nmId, name: p.nmName, brand: p.brandName, photo: p.mainPhoto,
         minPrice: p.minPrice, medianPrice: p.medianPrice, rating: p.feedbacksRating, feedbacks: c(p.feedbacksCount),
         avgPos: c(p.avgPosition), avgPosDyn: dy(p.avgPosition), openCard: c(p.openCard), orders: c(p.orders), ordersDyn: dy(p.orders),
@@ -120,8 +130,7 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
       queries: (det.searchQueries || []).map(q => ({ text: q.text, freq: c(q.frequency) })) });
     // Тот же набор за 7 дней (26.10.2026: сравнения раз в неделю — «неделя к неделе»). Период лимит не тратит.
     await new Promise(r => setTimeout(r, 1200 + Math.random() * 1000));
-    const body7 = { period: { start: d(6), end: d(0) }, id: h.ID,
-      searchQueriesRequest: { limit: 5, offset: 0, orderBy: { field: 'frequency', mode: 'desc', nmID: scope[0] }, scopeNmIDs: scope }, sizeDetails: true };
+    const body7 = { period: per7, id: h.ID, searchQueriesRequest: q, sizeDetails: true };
     let r7 = await j('/v4/competitor-comparison/nms/detail', body7);
     // 27.10.2026: второй запрос подряд кабинет иногда не отдаёт — одна повторная попытка через паузу.
     if (!(r7.json && !r7.json.error && r7.json.data)) {
@@ -165,7 +174,7 @@ const WB_CREATE = (auth: Record<string, string>, sets: { key: string; nmIDs: num
     try {
       const r = await fetch(H + '/v4/competitor-comparison/nms', { method: 'POST', credentials: 'include',
         headers: Object.assign({}, A, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ period: { start: d(29), end: d(0) }, nmIDs: s.nmIDs,
+        body: JSON.stringify({ period: { start: d(30), end: d(1) }, nmIDs: s.nmIDs,
           searchQueriesRequest: { limit: 5, offset: 0, orderBy: { field: 'frequency', mode: 'desc', nmID: s.nmIDs[0] }, scopeNmIDs: s.nmIDs },
           sizeDetails: true }) });
       const t = await r.text();

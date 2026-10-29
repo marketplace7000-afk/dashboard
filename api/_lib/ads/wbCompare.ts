@@ -9,7 +9,7 @@
  * (обновляется 15-го), докупается в кабинете; не больше 10 в неделю — правило владельца.
  */
 import { adsDb } from './store';
-import { createTask, listTasks } from '../agentQueue';
+import { createTask, listTasks, cancelTask } from '../agentQueue';
 import { tgSend, tgEscape as esc, tgConfigured, chatId } from '../telegram';
 import type { Ads2WbCompare, Ads2WbReport } from '../../../shared/ads2';
 
@@ -26,6 +26,8 @@ function db(): any {
         id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, by TEXT NOT NULL, sets TEXT NOT NULL,
         task_id INTEGER, status TEXT NOT NULL, result TEXT, done_at INTEGER);
       CREATE TABLE IF NOT EXISTS ad_tg_sent (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      -- Отмеченные «В сравнение» товары (29.10.2026): общие для всех менеджеров до запуска.
+      CREATE TABLE IF NOT EXISTS ad_wb_compare_pick (key TEXT PRIMARY KEY, at INTEGER NOT NULL, by TEXT NOT NULL);
       -- История наборов по неделям: что было у нас и у конкурентов на дату сравнения (7 и 30 дней).
       CREATE TABLE IF NOT EXISTS ad_wb_comp_hist (
         set_id TEXT NOT NULL, date TEXT NOT NULL, nm TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL,
@@ -40,6 +42,16 @@ function weekStart(now = Date.now()): number {
   const m = new Date(now + MSK);
   const day = (m.getUTCDay() + 6) % 7;
   return Date.UTC(m.getUTCFullYear(), m.getUTCMonth(), m.getUTCDate() - day) - MSK;
+}
+
+/**
+ * Пятничный запуск (29.10.2026, решение владельца): сравнения создаются в пятницу в 08:30 МСК,
+ * чтобы в недельный период целиком вошёл четверг (период — с прошлой пятницы по четверг).
+ * null — слот этой недели уже прошёл (пятница после 08:30 и выходные): тогда только «запустить сейчас».
+ */
+export function fridaySlot(now = Date.now()): number | null {
+  const t = weekStart(now) + 4 * 86_400_000 + (8 * 60 + 30) * 60_000;
+  return now < t ? t : null;
 }
 
 function latestLimits(): { left: number | null; free: number[][] } {
@@ -57,7 +69,7 @@ const sameSet = (a: number[], b: number[]) => a.length === b.length && [...a].so
 
 function weekUsed(): number {
   let n = 0;
-  for (const r of db().prepare("SELECT sets, result, status FROM ad_wb_compare_run WHERE at >= ? AND status != 'failed'").all(weekStart()) as any[]) {
+  for (const r of db().prepare("SELECT sets, result, status FROM ad_wb_compare_run WHERE at >= ? AND status NOT IN ('failed', 'cancelled')").all(weekStart()) as any[]) {
     try {
       const res = r.result ? JSON.parse(r.result) : null;
       n += res?.created != null ? Number(res.created) : JSON.parse(r.sets).length;
@@ -79,11 +91,39 @@ export function compareState(): Ads2WbCompare {
     let res: any = null; try { res = last.result ? JSON.parse(last.result) : null; } catch { /* пусто */ }
     lastRun = { id: last.id, at: last.at, status: last.status, total: JSON.parse(last.sets).length, created: res?.created ?? null, message: res?.message ?? null, doneAt: last.done_at ?? null };
   }
-  return { maxWeek: WB_COMPARE_MAX_WEEK, weekUsed: weekUsed(), limitLeft: lim.left, freeSets: lim.free, running: !!openTask(), lastRun, telegram: tgConfigured() };
+  const open = openTask();
+  const planned = open && open.status === 'queued' && Number(open.scheduled_for) > Date.now()
+    ? { runId: Number(open.params?.compare_run) || 0, at: Number(open.scheduled_for), keys: (open.params.compare as any[]).map(s => String(s.key)) } : null;
+  const picks = (db().prepare('SELECT key FROM ad_wb_compare_pick ORDER BY at').all() as any[]).map(r => String(r.key));
+  return { maxWeek: WB_COMPARE_MAX_WEEK, weekUsed: weekUsed(), limitLeft: lim.left, freeSets: lim.free, running: !!open && !planned, planned, picks,
+    fridayAt: fridaySlot(), lastRun, telegram: tgConfigured() };
+}
+
+/** Отметить / снять «В сравнение» (видно всем менеджерам). */
+export function setPick(key: unknown, on: boolean, by: string): void {
+  const k = String(key ?? '').slice(0, 80);
+  if (!k) return;
+  if (!on) db().prepare('DELETE FROM ad_wb_compare_pick WHERE key = ?').run(k);
+  else db().prepare('INSERT OR REPLACE INTO ad_wb_compare_pick (key, at, by) VALUES (?, ?, ?)').run(k, Date.now(), by);
+}
+export function clearPicks(): void { db().prepare('DELETE FROM ad_wb_compare_pick').run(); }
+
+/** Отменить запланированный запуск, пока агент его не взял, — лимит не тратится. */
+export function cancelPlanned(): { ok: true } | { ok: false; error: string } {
+  const open = openTask();
+  if (!open) return { ok: false, error: 'запланированных сравнений нет' };
+  if (open.status !== 'queued') return { ok: false, error: 'агент уже создаёт сравнения — отменить нельзя' };
+  const runId = Number(open.params?.compare_run);
+  // Сначала запуск, потом задание: closeStaleRuns иначе принял бы отмену за сбой и написал в чат.
+  if (runId) db().prepare("UPDATE ad_wb_compare_run SET status = 'cancelled', done_at = ? WHERE id = ?").run(Date.now(), runId);
+  cancelTask(open.id);
+  return { ok: true };
 }
 
 /** Запуск сравнений менеджером: [{key, nmIDs:[наш, конкуренты…]}]. */
-export function requestCompare(items: unknown, by: string): { ok: true; runId: number; taskId: number; charged: number } | { ok: false; error: string } {
+export function requestCompare(items: unknown, by: string, mode: 'friday' | 'now' = 'now'): { ok: true; runId: number; taskId: number; charged: number; at: number } | { ok: false; error: string } {
+  const at = mode === 'friday' ? fridaySlot() : Date.now();
+  if (at == null) return { ok: false, error: 'пятница 08:30 этой недели уже прошла — запустите сравнения сейчас' };
   if (!Array.isArray(items) || !items.length) return { ok: false, error: 'не выбрано ни одного товара' };
   const sets: { key: string; nmIDs: number[] }[] = [];
   for (const it of items as any[]) {
@@ -92,7 +132,8 @@ export function requestCompare(items: unknown, by: string): { ok: true; runId: n
     if (ids.length > 5) return { ok: false, error: `${it?.key ?? 'товар'}: в одно сравнение WB помещается 5 карточек` };
     sets.push({ key: String(it?.key ?? ids[0]).slice(0, 80), nmIDs: ids });
   }
-  if (openTask()) return { ok: false, error: 'сравнения уже запущены — дождитесь окончания' };
+  const busy = openTask();
+  if (busy) return { ok: false, error: busy.status === 'queued' && Number(busy.scheduled_for) > Date.now() ? 'сравнения уже запланированы — отмените план, чтобы поменять товары' : 'сравнения уже запущены — дождитесь окончания' };
   const lim = latestLimits();
   const charged = sets.filter(s => !lim.free.some(f => sameSet(f, s.nmIDs))).length;
   const used = weekUsed();
@@ -100,10 +141,11 @@ export function requestCompare(items: unknown, by: string): { ok: true; runId: n
   if (lim.left != null && charged > lim.left) return { ok: false, error: `в лимите WB осталось ${lim.left}, выбрано ${charged} — докупите сравнения в кабинете («Сравнение карточек» → «Купить»)` };
   const d = db();
   const runId = Number(d.prepare("INSERT INTO ad_wb_compare_run (at, by, sets, status) VALUES (?, ?, ?, 'queued')").run(Date.now(), by, JSON.stringify(sets)).lastInsertRowid);
-  const t = createTask('competitor_watch', { marketplace: 'wb', compare: sets, compare_run: runId }, by, { priority: 5 });
+  const t = createTask('competitor_watch', { marketplace: 'wb', compare: sets, compare_run: runId }, by, { priority: 5, scheduledFor: at });
   if (!t) { d.prepare("UPDATE ad_wb_compare_run SET status = 'failed', result = ? WHERE id = ?").run(JSON.stringify({ message: 'очередь агентов недоступна' }), runId); return { ok: false, error: 'очередь агентов недоступна' }; }
   d.prepare('UPDATE ad_wb_compare_run SET task_id = ? WHERE id = ?').run(t.id, runId);
-  return { ok: true, runId, taskId: t.id, charged };
+  clearPicks();
+  return { ok: true, runId, taskId: t.id, charged, at };
 }
 
 const pct = (v: number | null | undefined) => v == null ? '–' : `${(Math.round(v * 10) / 10).toString().replace('.', ',')}%`;
@@ -140,7 +182,7 @@ export function onWbSnapshot(data: any, at: number): void {
   const ins = d.prepare('INSERT OR REPLACE INTO ad_wb_comp_hist (set_id, date, nm, at, json) VALUES (?, ?, ?, ?, ?)');
   for (const set of data?.compDetails ?? []) {
     const w7 = new Map((set.nms7 ?? []).map((x: any) => [String(x.nmId), x]));
-    for (const x of set.nms ?? []) ins.run(String(set.id), String(set.date ?? ''), String(x.nmId), at, JSON.stringify({ d30: x, d7: w7.get(String(x.nmId)) ?? null }));
+    for (const x of set.nms ?? []) ins.run(String(set.id), String(set.date ?? ''), String(x.nmId), at, JSON.stringify({ d30: x, d7: w7.get(String(x.nmId)) ?? null, p30: set.per30 ?? null, p7: set.per7 ?? null }));
   }
   const runId = Number(data?.compareRun);
   if (!runId || !Array.isArray(data?.compareCreated)) return;
@@ -190,24 +232,33 @@ function closeStaleRuns(): void {
   }
 }
 
-/** Напоминания по четвергам (МСК): 09:30 всегда, 14:00 — если сравнения на неделе ещё не запускали. */
+/**
+ * Напоминания по четвергам (МСК): 09:30 всегда, 14:00 — если на неделе ещё ничего не запланировано.
+ * Пятница 08:50 — если запланированное агент так и не взял (ПК выключен или спит).
+ */
 async function tick(): Promise<void> {
   try { closeStaleRuns(); } catch (e) { console.warn('[wb-compare] проверка запусков:', (e as Error).message); }
   if (!tgConfigured()) return;
   const m = new Date(Date.now() + MSK);
-  if (m.getUTCDay() !== 4) return;
   const hm = m.getUTCHours() * 60 + m.getUTCMinutes();
   const week = new Date(weekStart() + MSK).toISOString().slice(0, 10);
   const d = db();
   const sent = (k: string) => !!d.prepare('SELECT 1 FROM ad_tg_sent WHERE key = ?').get(k);
   const mark = (k: string) => d.prepare('INSERT OR IGNORE INTO ad_tg_sent (key, at) VALUES (?, ?)').run(k, Date.now());
+  if (m.getUTCDay() === 5 && hm >= 8 * 60 + 50 && hm < 12 * 60 && !sent(`late:${week}`)) {
+    const open = openTask();
+    if (open && open.status === 'queued') {
+      if (await tgSend('⚠️ Сравнения WB запланированы на 08:30, но агент их ещё не взял — проверьте, что ПК с агентом включён («3 Проверить агента»). Как только агент выйдет на связь, он создаст сравнения сам.')) mark(`late:${week}`);
+    }
+  }
+  if (m.getUTCDay() !== 4) return;
   const st = compareState();
   const head = `В лимите WB осталось: <b>${st.limitLeft ?? '–'}</b> · на этой неделе можно до ${st.maxWeek}${st.weekUsed ? ` (уже ${st.weekUsed})` : ''}.`;
-  const how = `Откройте <a href="${SITE}">«Конкуренты» → WB</a>, проверьте конкурентов у нужных товаров, отметьте «В сравнение» и нажмите «Запустить сравнения».`;
+  const how = `Откройте <a href="${SITE}">«Конкуренты» → WB</a>, проверьте конкурентов у нужных товаров, отметьте «В сравнение» и нажмите «Запланировать на пятницу 08:30» — агент создаст сравнения в пятницу утром, чтобы в неделю вошёл весь четверг.`;
   if (hm >= 9 * 60 + 30 && hm < 13 * 60 && !sent(`remind1:${week}`)) {
     if (await tgSend(`📌 <b>Четверг — время сравнений WB.</b>\n${head}\n${how}`)) mark(`remind1:${week}`);
-  } else if (hm >= 14 * 60 && hm < 18 * 60 && !sent(`remind2:${week}`) && !st.weekUsed && !st.running) {
-    if (await tgSend(`⏰ Напоминание: сравнения WB на этой неделе ещё не запускали.\n${head}\n${how}`)) mark(`remind2:${week}`);
+  } else if (hm >= 14 * 60 && hm < 18 * 60 && !sent(`remind2:${week}`) && !st.weekUsed && !st.running && !st.planned) {
+    if (await tgSend(`⏰ Напоминание: сравнения WB на этой неделе ещё не запланированы.\n${head}\n${how}`)) mark(`remind2:${week}`);
   }
   if (st.limitLeft != null && st.limitLeft < 7 && !sent(`lowlimit:${week}`) && hm >= 9 * 60 + 30) {
     if (await tgSend(`⚠️ В лимите сравнений WB осталось ${st.limitLeft} — меньше недельной нормы. Докупить: кабинет WB → «Сравнение карточек» → «Купить». Лимит тарифа обновляется 15-го.`)) mark(`lowlimit:${week}`);
@@ -217,7 +268,7 @@ async function tick(): Promise<void> {
 export function scheduleWbCompare(): void {
   void chatId();
   setInterval(() => { void tick(); }, 60_000).unref();
-  console.log('[wb-compare] напоминания по четвергам 09:30 / 14:00 МСК' + (tgConfigured() ? '' : ' — токен Telegram не задан'));
+  console.log('[wb-compare] напоминания по четвергам 09:30 / 14:00 МСК, запуск в пятницу 08:30' + (tgConfigured() ? '' : ' — токен Telegram не задан'));
 }
 
 
@@ -274,7 +325,8 @@ export function compareReports(ourNms: Set<string>): Record<string, Ads2WbReport
       const nms = [...s.rs].sort((a, b) => Number(b.nm === x.nm) - Number(a.nm === x.nm)).map(y => ({
         nm: y.nm, name: String(y.j.d30?.name ?? ''), photo: String(y.j.d30?.photo ?? ''), ours: ourNms.has(y.nm),
         d7: y.j.d7?.rep ?? null, d30: y.j.d30?.rep ?? null }));
-      out[x.nm] = { setId, date: s.date, nms };
+      const p = s.rs[0]?.j ?? {};
+      out[x.nm] = { setId, date: s.date, per7: p.p7 ?? null, per30: p.p30 ?? null, nms };
     }
   }
   return out;

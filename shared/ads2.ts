@@ -199,6 +199,12 @@ export type Ads2WbCompare = {
   /** Наборы, которые можно открыть заново без списания (72 часа с прошлого сравнения тех же карточек). */
   freeSets: number[][];
   running: boolean;
+  /** Запланированный пятничный запуск (агент ещё не взял): когда и какие товары. */
+  planned?: { runId: number; at: number; keys: string[] } | null;
+  /** Товары, отмеченные «В сравнение» (на сервере, общие для всех). */
+  picks?: string[];
+  /** Слот «пятница 08:30» этой недели; null — уже прошёл. */
+  fridayAt?: number | null;
   lastRun: { id: number; at: number; status: string; total: number; created: number | null; message: string | null; doneAt: number | null } | null;
   telegram: boolean;
 };
@@ -217,6 +223,8 @@ export type Ads2WbRepRow = {
 };
 export type Ads2WbReport = {
   setId: string; date: string;
+  /** Период отчёта (с 29.10.2026 — целые дни до дня создания набора); null у старых наборов. */
+  per7?: { start: string; end: string } | null; per30?: { start: string; end: string } | null;
   /** Карточки набора, каждая отдельной строкой; d7/d30 — null, если за этот период отчёт не снят. */
   nms: { nm: string; name: string; photo: string; ours: boolean; d7: Ads2WbRepRow | null; d30: Ads2WbRepRow | null }[];
 };

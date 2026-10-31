@@ -16,6 +16,7 @@ import {
 import { rnpInStockSkus, rnpItems, saveWbCardViews } from '../rnp';
 import { wbImageUrl } from '../wbBasket';
 import { onWbSnapshot, compareState, compareReports } from './wbCompare';
+import { saveCompQueries } from '../cards';
 
 const KEEP = 30;
 
@@ -255,6 +256,13 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
     delete data.funnelViews;   // в снимке кабинета не храним — они уже в РНП
   }
   if (mp === 'wb') saveCompLast(data.compDetails, at);
+  // Запросы сравнений с цифрами по карточкам — в свою таблицу; снимок кабинета остаётся прежнего размера (5 запросов, без цифр).
+  if (mp === 'wb') {
+    try { saveCompQueries(data.compDetails, at); } catch (e) { console.warn('[cards] запросы сравнения не записаны:', (e as Error)?.message); }
+    for (const s of Array.isArray(data.compDetails) ? data.compDetails : []) {
+      if (Array.isArray(s?.queries)) s.queries = s.queries.slice(0, 5).map((q: any) => ({ text: q.text, freq: q.freq }));
+    }
+  }
   // Недельные сравнения WB: история наборов, итог запуска менеджера и сообщение в чат.
   if (mp === 'wb') { try { onWbSnapshot(data, at); } catch (e) { console.warn('[wb-compare] итог не записан:', (e as Error).message); } }
   d.prepare('INSERT INTO ad_cabinet_snapshot (mp, at, json) VALUES (?, ?, ?)').run(mp, at, JSON.stringify(data));

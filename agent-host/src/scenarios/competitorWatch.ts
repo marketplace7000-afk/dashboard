@@ -115,6 +115,7 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
     if (!det) { errors.push(r.error || ('сравнение ' + h.date + ': ' + JSON.stringify(r.json && r.json.additionalErrors || '').slice(0, 120))); continue; }
     const c = x => x && typeof x === 'object' ? x.current : x;
     const dy = x => x && typeof x === 'object' ? x.dynamics : null;
+    const mapQuery = q => ({ text: q.text, freq: c(q.frequency), nms: (q.nms || []).map(n => ({ nmId: n.nmId, shown: typeof n.isShownInSearch === 'boolean' ? n.isShownInSearch : null, pos: c(n.avgPosition), open: c(n.openCard), cart: c(n.addToCart), orders: c(n.orders) })) });
     // Отчёт «Показатели» как в кабинете (27.10.2026): только значения WB, без пересчётов; нет поля — null.
     const cv = x => x == null ? null : typeof x === 'object' && 'current' in x ? (x.current == null ? null : x.current) : x;
     const rep = p => ({ created: p.nmCreated || null, brand: p.brandName || null, cardRating: p.isCardRated === false ? null : cv(p.nmRating),
@@ -127,7 +128,13 @@ const WB_COLLECT = (auth: Record<string, string>) => `(async (A) => {
         minPrice: p.minPrice, medianPrice: p.medianPrice, rating: p.feedbacksRating, feedbacks: c(p.feedbacksCount),
         avgPos: c(p.avgPosition), avgPosDyn: dy(p.avgPosition), openCard: c(p.openCard), orders: c(p.orders), ordersDyn: dy(p.orders),
         ctr: c(p.CTR), views: c(p.viewCount), buyoutPercent: c(p.buyoutPercent), inAds: !!p.inAdvertising, inPromo: !!(p.promo && p.promo.inPromo), rep: rep(p) })),
-      queries: (det.searchQueries || []).map(q => ({ text: q.text, freq: c(q.frequency) })) });
+      queries: (det.searchQueries || []).map(mapQuery) });
+    // Больше запросов набора и цифры по каждой карточке (31.10.2026, «Ведение карточек»). Открытый набор лимит не тратит.
+    await new Promise(r => setTimeout(r, 1200 + Math.random() * 1000));
+    const rq = await j('/v4/competitor-comparison/nms/detail', { period: per30, id: h.ID, searchQueriesRequest: Object.assign({}, q, { limit: 30 }), sizeDetails: true });
+    const dq = rq.json && !rq.json.error && rq.json.data;
+    if (dq && (dq.searchQueries || []).length) compDetails[compDetails.length - 1].queries = dq.searchQueries.map(mapQuery);
+    else errors.push('сравнение ' + h.date + ': расширенные запросы не получены');
     // Тот же набор за 7 дней (26.10.2026: сравнения раз в неделю — «неделя к неделе»). Период лимит не тратит.
     await new Promise(r => setTimeout(r, 1200 + Math.random() * 1000));
     const body7 = { period: per7, id: h.ID, searchQueriesRequest: q, sizeDetails: true };

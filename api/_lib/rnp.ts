@@ -166,6 +166,32 @@ export function rnpItems(mp: RnpMp): { sku: string; article: string; name: strin
 }
 
 /**
+ * Итог одной карточки за период для «Ведения карточек». Заказы WB — по воронке, а где её нет
+ * за день — по supplier/orders (как в getRnpSummary). null — за период нет ни одной строки.
+ */
+export function rnpSkuTotals(mp: RnpMp, sku: string, from: string, to: string): { orders: number; amount: number; ads: number; stock: number | null; price: number | null; lastDate: string } | null {
+  const d = getDb();
+  if (!d) return null;
+  const rows = d.prepare(`SELECT date, metric, value FROM rnp_fact WHERE mp = ? AND sku = ? AND date >= ? AND date <= ?
+    AND metric IN ('ordered_amount', 'ordered_cnt', 'wbf_order_sum', 'wbf_order_cnt', 'adv_expenses', 'stocks', 'price_seller') ORDER BY date`).all(mp, sku, from, to) as { date: string; metric: string; value: number | null }[];
+  if (!rows.length) return null;
+  const funnel = new Set(rows.filter(r => r.metric === 'wbf_order_sum').map(r => r.date));
+  const res = { orders: 0, amount: 0, ads: 0, stock: null as number | null, price: null as number | null, lastDate: rows[rows.length - 1].date };
+  for (const r of rows) {
+    const v = r.value ?? 0;
+    if (r.metric === 'adv_expenses') res.ads += v;
+    else if (r.metric === 'stocks') { if (r.value !== null) res.stock = r.value; }
+    else if (r.metric === 'price_seller') { if (r.value !== null) res.price = r.value; }
+    else if (r.metric === 'wbf_order_sum') res.amount += v;
+    else if (r.metric === 'wbf_order_cnt') res.orders += v;
+    else if (mp === 'wb' && funnel.has(r.date)) continue;
+    else if (r.metric === 'ordered_amount') res.amount += v;
+    else if (r.metric === 'ordered_cnt') res.orders += v;
+  }
+  return res;
+}
+
+/**
  * Товары в наличии: остаток FBO+FBS > 0 в последнем обходе остатков (как фильтр «В продаже» в «Ценах»).
  * Заказы без остатка не считаем: на Ozon это в основном старые дубли карточек.
  */

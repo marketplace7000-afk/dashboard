@@ -70,6 +70,9 @@ export function checkSectionAccess(user: AuthUser, section: string, rest: string
   const has = (list: Section[]) => list.some(s => user.sections.includes(s));
   const m = method.toUpperCase();
 
+  // «Ведение карточек» — только владелец: и чтение, и запись. Галочки в «Доступах» для раздела нет.
+  if (section === 'cards') return { reason: 'Доступно только владельцу' };
+
   if (section === 'wb' || section === 'ozon' || section === 'ozon-perf') {
     // У WB первый сегмент — scope (prices, promotion…), сам путь дальше.
     const path = (section === 'wb' ? rest.slice(1) : rest).join('/');

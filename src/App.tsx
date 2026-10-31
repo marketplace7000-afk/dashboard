@@ -3,7 +3,7 @@ import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, PaperPlaneTiltIcon,
   GearIcon,
   CaretRightIcon, MegaphoneIcon,
-  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, BinocularsIcon, WarehouseIcon, UsersThreeIcon, PackageIcon
+  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, BinocularsIcon, WarehouseIcon, UsersThreeIcon, PackageIcon, PushPinIcon
 } from '@phosphor-icons/react';
 import { AgentHosts } from './pages/AgentHosts';
 import { Login } from './pages/Login';
@@ -14,6 +14,7 @@ import { Chats } from './pages/Chats';
 import { Settings } from './pages/Settings';
 import { Ads } from './pages/Ads';
 import { Competitors } from './pages/Competitors';
+import { Cards } from './pages/Cards';
 import { Rnp } from './pages/Rnp';
 import { Fbo } from './pages/Fbo';
 import { Sklad } from './pages/Sklad';
@@ -31,7 +32,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 // закрыт (api/_lib/sklad/archive.ts). Вернуть — false здесь и SKLAD_ENABLED=1 на сервере.
 const SKLAD_ARCHIVED = true;
 
-type Page = 'dashboard' | 'access' | 'sklad' | 'prices' | 'rnp' | 'fbo' | 'reviews' | 'chats' | 'ads' | 'competitors' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'access' | 'sklad' | 'prices' | 'rnp' | 'fbo' | 'reviews' | 'chats' | 'ads' | 'competitors' | 'cards' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -60,6 +61,8 @@ const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   { key: 'ads',         Icon: MegaphoneIcon,       label: 'Реклама' },
   // 15.10.2026: конкуренты — отдельный раздел (привязка, позиции и рынок, советник по продажам).
   { key: 'competitors', Icon: BinocularsIcon,      label: 'Конкуренты' },
+  // 31.10.2026: агент ведёт закреплённые карточки — только владелец, галочки в «Доступах» нет.
+  { key: 'cards',       Icon: PushPinIcon,         label: 'Ведение карточек' },
 ];
 const NAV_CONFIG: { key: Page; Icon: any; label: string }[] = [
   // «Сборщики» — сеть агентов на ПК (ТЗ «Сеть агентов»): очередь, живой ход
@@ -82,6 +85,7 @@ const TITLES: Record<Page, string> = {
   fbo: 'Остатки',
   ads: 'Реклама',
   competitors: 'Конкуренты',
+  cards: 'Ведение карточек',
   collectors: 'Сборщики · агенты на ПК',
   settings: 'Настройки',
 };
@@ -97,7 +101,7 @@ export function App() {
   // закрывает им остальное сам, здесь только меню.
   const [me, setMe] = useState<{ name: string; role: Role; sections: string[] } | null>(null);
   const restricted = !!me && me.sections.every(s => s === 'sklad');
-  const allowed = (k: Page) => k === 'access' ? me?.role === 'owner'
+  const allowed = (k: Page) => k === 'access' || k === 'cards' ? me?.role === 'owner'
     : !(SKLAD_ARCHIVED && k === 'sklad') && (!me || me.sections.includes(k));
 
   useEffect(() => {
@@ -227,6 +231,7 @@ export function App() {
           {view === 'fbo' && <Fbo />}
           {view === 'ads' && <Ads />}
           {view === 'competitors' && <Competitors />}
+          {view === 'cards' && <Cards />}
           {view === 'settings' && <Settings />}
           {view === 'collectors' && <AgentHosts />}
           {view === 'access' && <Access />}

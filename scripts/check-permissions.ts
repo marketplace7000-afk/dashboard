@@ -3,7 +3,7 @@
  * Запуск: npm run check
  */
 import { checkSectionAccess } from '../api/_lib/permissions';
-import type { AuthUser, Section } from '../api/_lib/sklad/users';
+import { SECTIONS, type AuthUser, type Section } from '../api/_lib/sklad/users';
 import { loginLockedFor, noteLoginFailure, noteLoginSuccess } from '../api/_lib/loginGuard';
 
 let failed = 0;
@@ -24,6 +24,15 @@ const adsManager = user('manager', ['sklad', 'ads', 'rnp', 'prices']);
 console.log('Владелец');
 check('меняет ставки', ok(owner, 'ads2', ['action'], 'POST'), true);
 check('пишет цены через прокси Ozon', ok(owner, 'ozon', ['v1', 'product', 'import', 'prices'], 'POST'), true);
+
+console.log('«Ведение карточек» — только владелец');
+check('владелец читает', ok(owner, 'cards', [], 'GET'), true);
+check('владелец закрепляет', ok(owner, 'cards', ['pin'], 'POST'), true);
+const allSections = user('manager', SECTIONS.filter(() => true));
+check('менеджер со всеми галочками не читает', ok(allSections, 'cards', [], 'GET'), false);
+check('менеджер со всеми галочками не закрепляет', ok(allSections, 'cards', ['pin'], 'POST'), false);
+check('закупщик не читает', ok(user('buyer', ['sklad']), 'cards', ['catalog'], 'GET'), false);
+check('галочки раздела нет', (SECTIONS as readonly string[]).includes('cards'), false);
 
 console.log('Менеджер только с «Отзывами»');
 check('не меняет ставки', ok(reviewsOnly, 'ads2', ['action'], 'POST'), false);

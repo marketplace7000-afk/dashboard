@@ -480,6 +480,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ─── /api/cards — «Ведение карточек», только владелец (permissions.ts)
+  //   GET  /api/cards              → закреплённые карточки с цифрами из РНП
+  //   GET  /api/cards/catalog?mp=  → товары, которые можно закрепить
+  //   POST /api/cards/pin          → закрепить или изменить рамки
+  //   POST /api/cards/unpin        → открепить
+  if (section === 'cards') {
+    try {
+      const cards = await import('./_lib/cards');
+      if (req.method === 'GET' && parts[1] === 'catalog') return res.status(200).json({ ok: true, items: cards.catalog(req.query?.mp) });
+      if (req.method === 'POST' && parts[1] === 'pin') { cards.savePin(req.body); return res.status(200).json({ ok: true }); }
+      if (req.method === 'POST' && parts[1] === 'unpin') { cards.removePin(req.body); return res.status(200).json({ ok: true }); }
+      if (req.method === 'GET' && !parts[1]) return res.status(200).json({ ok: true, pins: cards.listPins() });
+      return res.status(404).json({ ok: false, error: 'not_found' });
+    } catch (e) {
+      return res.status(400).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
+    }
+  }
+
   // ─── /api/fbo — «Остатки FBO»: склады площадок по кластерам, поставки, спрос (api/_lib/fboStocks.ts).
   //   GET  /api/fbo          → последний снимок (старше 3 ч — фоном собирается новый)
   //   POST /api/fbo/refresh  → собрать заново (фоном)

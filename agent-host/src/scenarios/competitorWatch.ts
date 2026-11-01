@@ -424,6 +424,9 @@ async function ozonVisibility(task: AgentTask, page: Page, cid: string, data: an
   let done = 0, failed = 0;
   outer: for (const p of plan) for (const query of p.queries as string[]) {
     let r: any = null;
+    // Ozon иногда отдаёт пустую выдачу по запросу, где минуту назад были данные: пробуем ещё два раза.
+    for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await page.waitForTimeout(8000);
     try {
       r = await page.evaluate(async (a: any) => {
         const res = await fetch('/api/search-query-analytics/v2/external/explanation_by_id', {
@@ -450,7 +453,9 @@ async function ozonVisibility(task: AgentTask, page: Page, cid: string, data: an
         const exact = items.find((i: any) => i.isExactSku && i.foundWithQuery !== false);
         return { status: 200, done: j.status, total: j.totalNumberOfItems ?? null, ours: exact ? parse(exact) : null, top: items.filter((i: any) => !i.isExactSku).slice(0, 10).map(parse) };
       }, { cid, query, sku: String(p.ozonSku), region: p.region });
-    } catch (e) { failed++; await api.log(task.id, 'warn', `видимость: ${(e as Error).message.slice(0, 120)}`); }
+    } catch (e) { failed++; await api.log(task.id, 'warn', `видимость: ${(e as Error).message.slice(0, 120)}`); break; }
+    if (r?.status !== 200 || r.top?.length) break;
+    }
     if (r?.status === 403 || r?.status === 429) { await api.log(task.id, 'warn', `видимость: кабинет ответил ${r.status}, стоп`); break outer; }
     if (r?.status === 200) rows.push({ sku: p.sku, query, region: p.region.title, why: p.why, total: r.total, ours: r.ours, top: r.top });
     else if (r) failed++;

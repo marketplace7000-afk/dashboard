@@ -37,7 +37,7 @@ type Comp = {
 };
 type Details = { queries: Query[]; collectedAt: number | null; comp: Comp | null };
 type VisRow = { sku: string; relevance: number | null; popularity: number | null; rating: number | null; reviews: number | null; price: number | null; delivery: string; promo: string; cpc: number | null; pos: number | null; name: string; seller: string; ours: boolean };
-type VisQuery = { query: string; date: string; region: string; regionWhy: string; total: number | null; ours: VisRow | null; top: VisRow[]; topRelevance: number | null; topPopularity: number | null; topPrice: number | null; diag: string };
+type VisQuery = { query: string; date: string; region: string; regionWhy: string; total: number | null; ours: VisRow | null; top: VisRow[]; topRelevance: number | null; topPopularity: number | null; topPrice: number | null; diag: string; exact?: boolean };
 
 const GOAL_LABEL: Record<Goal, string> = { growth: 'Рост продаж', hold: 'Удержание', sell_out: 'Распродажа' };
 const MP_INFO: Record<Mp, { label: string; color: string }> = {
@@ -230,7 +230,9 @@ function Visibility({ pin }: { pin: Pin }) {
   const sorted = [...rows].sort((a, b) => (a.ours?.pos ?? 1e9) - (b.ours?.pos ?? 1e9));
   return (
     <div>
-      <div style={{ marginBottom: 12 }}><b>Регион: {first.region}.</b> <span className="muted">{first.regionWhy}. Снимок от {dateRu(first.date)}.</span></div>
+      <div style={{ marginBottom: 12 }}><b>Регион: {first.region}.</b> <span className="muted">{first.regionWhy}. Снимок от {dateRu(first.date)}.</span>
+        {first.exact === false && <div className="cm-warn" style={{ marginTop: 6 }}>Для этого города у агента пока нет точного адреса Ozon: места и сроки доставки могут быть неверными. Агент не опирается на них в правках SEO.</div>}
+      </div>
       <div className="cm-scroll">
         <table className="cm-table">
           <thead><tr>
@@ -241,7 +243,7 @@ function Visibility({ pin }: { pin: Pin }) {
             <Fragment key={v.query}>
               <tr className="cm-row" onClick={() => setOpen(open === v.query ? null : v.query)}>
                 <td className="l q stick">{v.query}</td>
-                <td><b>{v.ours?.pos ?? 'нет'}</b>{v.total ? <div className="cm-sub">из {num(v.total)}</div> : null}</td>
+                <td><b>{v.ours?.pos ?? '—'}</b></td>
                 <td className="l" style={{ whiteSpace: 'normal', minWidth: 210 }}>{v.diag}</td>
                 <td className={`gl ${v.topRelevance != null && (v.ours?.relevance ?? 0) < v.topRelevance * 0.85 ? 'cm-bad' : ''}`}>{dec(v.ours?.relevance)}<div className="cm-sub">топ-10: {dec(v.topRelevance)}</div></td>
                 <td>{dec(v.ours?.popularity)}<div className="cm-sub">топ-10: {dec(v.topPopularity)}</div></td>

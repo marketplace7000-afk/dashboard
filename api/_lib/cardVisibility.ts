@@ -17,11 +17,14 @@ export type VisRow = {
 export type VisQuery = {
   query: string; date: string; at: number; region: string; regionWhy: string; total: number | null;
   ours: VisRow | null; top: VisRow[]; topRelevance: number | null; topPopularity: number | null; topPrice: number | null; diag: string;
+  /** false: у города нет проверенного адреса Ozon, снимку нельзя верить. */
+  exact: boolean;
 };
 
 const region = (title: string, latitude: number, longitude: number, uuid = ''): VisRegion => ({ title, uuid, latitude, longitude, areaId: '0', fullAddress: false });
 const MOSCOW = region('Москва', 55.728138, 37.425808, '0c5b2444-70a0-4932-980c-b4dc0d3f02b5');
-// Кластер Ozon → город. Москва и Петербург проверены в кабинете, остальные заданы координатами города.
+// Кластер Ozon → город. Москва и Петербург проверены в кабинете. У остальных нет адреса (uuid):
+// Краснодар и Казань так дали доставку 36–182 дня всей выдаче и пустые ответы, поэтому выводов по ним не делаем.
 const CITIES: [RegExp, VisRegion][] = [
   [/москв/i, MOSCOW],
   [/петербург|спб|северо-запад|сзо/i, region('Санкт-Петербург', 59.939095, 30.315868, 'c2deb16a-0330-4f05-821f-1d09c93331e6')],
@@ -87,12 +90,25 @@ const median = (v: (number | null)[]): number | null => {
   return a.length ? a[Math.floor(a.length / 2)] : null;
 };
 
+const isExact = (title: string): boolean => CITIES.some(([, r]) => r.title === title && !!r.uuid);
+/** Верхняя граница срока доставки в днях: «2-3 дня» → 3, «0-1 день» → 1. */
+const deliveryDays = (s: string | undefined): number | null => {
+  if (!s || !/дн|день/.test(s)) return null;
+  const n = Number(s.match(/\d+/g)?.pop());
+  return Number.isFinite(n) ? n : null;
+};
+
 /** Правило: что мешает месту. Сравнение только с первой десяткой этого же снимка. */
-function diagnose(ours: VisRow | null, topRelevance: number | null, topPopularity: number | null, topPrice: number | null): string {
-  if (!ours || ours.pos == null) return 'Нет в выдаче: сначала текст карточки';
+function diagnose(v: Pick<VisQuery, 'region' | 'ours' | 'top' | 'topRelevance' | 'topPopularity' | 'topPrice'>): string {
+  const { ours, topRelevance, topPopularity, topPrice } = v;
+  if (!isExact(v.region)) return 'Регион не уточнён: выводов нет';
+  if (!v.top.length) return 'Ozon не отдал выдачу: данных нет';
+  if (!ours || ours.pos == null) return 'Карточки нет в ответе Ozon: проверить вручную';
   if (ours.pos <= 10) return 'В первой десятке';
   if (topRelevance != null && (ours.relevance ?? 0) < topRelevance * 0.85) return 'Слабее по тексту: править SEO';
-  if (/дн|день/.test(ours.delivery) && (Number(ours.delivery.match(/\d+/g)?.pop()) || 0) > 3) return 'Долгая доставка: сначала склады';
+  // Доставка мешает, только если у лидеров она короче: одинаковый долгий срок у всех ничего не значит.
+  const ourDays = deliveryDays(ours.delivery), topDays = median(v.top.filter(t => t.pos != null && t.pos <= 10).map(t => deliveryDays(t.delivery)));
+  if (ourDays != null && ourDays > 3 && topDays != null && ourDays > topDays) return 'Долгая доставка: сначала склады';
   if (topPrice != null && ours.price != null && ours.price > topPrice * 1.15) return 'Цена выше выдачи';
   if (topPopularity != null && (ours.popularity ?? 0) < topPopularity * 0.7) return 'Текст в порядке, мало популярности: реклама';
   return 'Без явной причины';
@@ -109,20 +125,21 @@ export function saveVisibility(rows: any, at: number, date: string): number {
     const ten = top.filter(t => t.pos != null && t.pos <= 10);
     const ours: VisRow | null = r?.ours ?? null;
     const topRelevance = median(ten.map(t => t.relevance)), topPopularity = median(ten.map(t => t.popularity)), topPrice = median(ten.map(t => t.price));
-    const v: VisQuery = {
-      query: String(r.query), date, at, region: String(r.region ?? ''), regionWhy: String(r.why ?? ''), total: r.total ?? null,
-      ours, top: top.slice(0, 10), topRelevance, topPopularity, topPrice, diag: diagnose(ours, topRelevance, topPopularity, topPrice),
-    };
+    const base = { query: String(r.query), date, at, region: String(r.region ?? ''), regionWhy: String(r.why ?? ''), total: r.total ?? null, ours, top: top.slice(0, 10), topRelevance, topPopularity, topPrice };
+    const v: VisQuery = { ...base, diag: diagnose(base), exact: isExact(base.region) };
     st.run(String(r.sku), v.query, date, at, JSON.stringify(v));
     n++;
   }
   return n;
 }
 
-/** Последний снимок карточки. */
+/** Последний снимок карточки. Вывод считаем при чтении, чтобы правка правил действовала и на уже снятое. */
 export function cardVisibility(sku: unknown): VisQuery[] {
   const d = db(), id = String(sku ?? '');
   const last = d.prepare('SELECT MAX(date) date FROM card_visibility WHERE sku = ?').get(id) as { date: string | null };
   if (!last?.date) return [];
-  return (d.prepare('SELECT json FROM card_visibility WHERE sku = ? AND date = ?').all(id, last.date) as { json: string }[]).map(r => JSON.parse(r.json));
+  return (d.prepare('SELECT json FROM card_visibility WHERE sku = ? AND date = ?').all(id, last.date) as { json: string }[]).map(r => {
+    const v = JSON.parse(r.json) as VisQuery;
+    return { ...v, diag: diagnose(v), exact: isExact(v.region) };
+  });
 }

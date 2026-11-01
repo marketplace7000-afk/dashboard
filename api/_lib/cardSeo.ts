@@ -311,8 +311,9 @@ export async function seoMakeDraft(body: any): Promise<SeoDraft> {
   const { twinTier } = crossCheck(mp, sku, rows);
   const gaps = all.filter(g => g.missing.length > 0 && !isBanned(g)).slice(0, 40);
   // Ozon: снимок «Что влияет на место в поиске». Причина места подсказывает, стоит ли вообще трогать текст.
-  const vis = new Map(mp === 'ozon' ? cardVisibility(sku).map(v => [normText(v.query), v]) : []);
-  const visText = [...vis.values()].map(v => `${v.query}: место ${v.ours?.pos ?? 'нет в выдаче'}, соответствие запросу ${v.ours?.relevance ?? '—'} при медиане первой десятки ${v.topRelevance ?? '—'}, вывод: ${v.diag}`).join('\n');
+  // Снимки без точного региона и пустые ответы в черновик не идут: причине места там верить нельзя.
+  const vis = new Map(mp === 'ozon' ? cardVisibility(sku).filter(v => v.exact && v.ours).map(v => [normText(v.query), v]) : []);
+  const visText = [...vis.values()].map(v => `${v.query}: место ${v.ours?.pos ?? '—'}, соответствие запросу ${v.ours?.relevance ?? '—'} при медиане первой десятки ${v.topRelevance ?? '—'}, вывод: ${v.diag}`).join('\n');
   const banned = rows.filter(isBanned);
   if (!gaps.length) throw new Error('Нет подходящих запросов, слов которых не хватает в тексте.');
   const ask = (extra: string) => callAnthropic({

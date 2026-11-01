@@ -164,6 +164,7 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14, span?: { from?: stri
     return {
       mp, id: c.id, name: c.name || `Кампания ${c.id}`, status: c.status ?? '', statusCode: sc,
       payment: c.payment, bidType: c.bid_type,
+      placements: mp === 'wb' ? (c.placements as Ads2Campaign['placements']) ?? null : null,
       dailyLimit: c.daily_limit, dailyLimitOn: c.daily_limit_on, spentToday: c.spent_today, weeklyBudget: c.weekly_budget,
       can,
       items: its.map(it => {

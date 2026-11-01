@@ -43,6 +43,8 @@ export type Ads2Campaign = {
   payment: string | null;
   /** WB: unified | manual; Ozon: стратегия. */
   bidType: string | null;
+  /** WB: на каких площадках кампания показывается. */
+  placements?: { search?: boolean; recommendations?: boolean } | null;
   dailyLimit: number | null; dailyLimitOn: boolean | null; spentToday: number | null;
   weeklyBudget: number | null;
   /** Что можно менять вручную. */

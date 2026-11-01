@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import * as store from '../api/_lib/ads/store';
 import { buildProposals, saveProposals, listProposals, decideProposal, EMPTY_CTX, type AutopilotCtx } from '../api/_lib/ads/autopilot';
 import { productEcon, zeroOrdersChance } from '../api/_lib/ads/econ';
+import { humanWbError, parseWbMinBids } from '../api/_lib/ads/wbMinBids';
 import type { Ads2Overview, Ads2Campaign, Ads2Product, Ads2Stat, Ads2Econ } from '../shared/ads2';
 
 let failed = 0;
@@ -91,7 +92,27 @@ async function main() {
   check('заказ втрое дешевле допустимого → вверх не больше 20%: 200 → 240', by('2'), [['bid', 'scale', 200, 240]]);
   check('остаток 2 дня у всех товаров → пауза кампании', by('3'), [['pause', 'stock_out', null, null]]);
   check('«Не рекламировать» в общей кампании → задача убрать', by('5', '105'), [['task', 'flagged', null, null]]);
-  check('CPC без лимита → лимит 130 ₽', by('6').filter(x => x[0] === 'daily_limit'), [['daily_limit', 'no_daily_limit', null, 130]]);
+  check('CPC с расходом меньше минимума WB → лимит не предлагаем', by('6').filter(x => x[0] === 'daily_limit'), []);
+  const cpcOpts = { payment: 'cpc', bidType: 'unified', can: { pause: true, start: false, bid: true, dailyLimit: true, weeklyBudget: false } };
+  const limBig = buildProposals(overview([camp('61', [item('161', 20, stat({ spend: 7000, orders: 7, revenue: 200000 }))], cpcOpts)], [prod('161')]));
+  check('CPC с большим расходом → лимит от 1000 ₽: 7000/7 × 1,3 = 1300', by('61', undefined, limBig).filter(x => x[0] === 'daily_limit'), [['daily_limit', 'no_daily_limit', null, 1300]]);
+
+  console.log('Минимумы WB');
+  const badWb = stat({ spend: 2000, orders: 2, revenue: 10000 });
+  const mins = (o: Record<string, { search?: number; recommendations?: number; combined?: number }>) => ({ ...EMPTY_CTX, wbMinBids: new Map(Object.entries(o).map(([k, v]) => [k, { search: v.search ?? null, recommendations: v.recommendations ?? null, combined: v.combined ?? null }])) });
+  const fl1 = buildProposals(overview([camp('71', [item('171', 300, badWb)])], [prod('171', { drr: 20 })]), mins({ '71|171': { search: 250 } }));
+  check('снижение упирается в минимум: 300 → 250, а не 210', by('71', undefined, fl1), [['bid', 'above_allowed_cpo', 300, 250]]);
+  const fl2 = buildProposals(overview([camp('72', [item('172', 300, badWb)])], [prod('172', { drr: 20 })]), mins({ '72|172': { search: 300 } }));
+  check('ставка на минимуме → совет вместо снижения', by('72', undefined, fl2).map(x => x[0]), ['task']);
+  check('совет объясняет, что делать', /минимум WB[\s\S]*паузу/.test(fl2.find(p => p.campaignId === '72')!.reason), true);
+  const fl3 = buildProposals(overview([camp('73', [{ ...item('173', 300, badWb), bidReco: 200 }], { placements: { search: true, recommendations: false } })], [prod('173', { drr: 20 })]));
+  check('выключенная площадка не предлагается', by('73', undefined, fl3).map(x => [x[0], x[2]]), [['bid', 300]]);
+  const fl4 = buildProposals(overview([camp('74', [item('174', 300, badWb)], { payment: 'cpm' })], [prod('174', { drr: 20 })]), mins({ '74|174': { search: 210.4 } }));
+  check('округление не уводит под минимум', by('74', undefined, fl4), [['bid', 'above_allowed_cpo', 300, 211]]);
+  check('понятный текст отказа: ставка', humanWbError('WB ответил 400: {"detail":"bid value must be no less than 140.00"}').includes('минимума 140 ₽'), true);
+  check('понятный текст отказа: лимит', humanWbError('WB ответил 400: {"detail":"dailyLimit must be at least 100000"}').includes('меньше 1000 ₽'), true);
+  check('понятный текст отказа: площадка', humanWbError('{"detail":"invalid placement recom for advert"}').includes('площадка выключена'), true);
+  check('разбор минимумов: копейки → рубли', parseWbMinBids({ bids: [{ nm_id: 1, bids: [{ type: 'search', value: 45000 }, { type: 'recommendation', value: 20000 }] }] }).get('1'), { search: 450, recommendations: 200, combined: null });
   check('кампанию на паузе не трогаем', by('7'), []);
   check('кандидат на новую кампанию — только совет', by(null, '200'), [['new_campaign', 'no_ads_opportunity', null, null]]);
   check('срочное — первым', ps[0].level, 'critical');
@@ -227,6 +248,44 @@ async function main() {
   const pst = (await listProposals('wb')).find(p => p.fp === 'wb|1|101|bid|search|x')!;
   res = await decideProposal(pst.id, 'apply', 'менеджер', null);
   check('ставка уже другая → предложение снято, команда не ушла', [stale.added, res.ok, res.message.startsWith('ставка уже изменилась')], [1, false, true]);
+
+  console.log('Минимумы WB при применении');
+  const camps = parseWbAdverts({ adverts: [
+    { bid_type: 'manual', id: 801, status: 9, settings: { name: 'К801', payment_type: 'cpm', placements: { search: true, recommendations: false } },
+      nm_settings: [{ nm_id: 901, bids_kopecks: { search: 50000, recommendations: 23000 } }] },
+  ] });
+  store.saveCampaigns('wb', camps.campaigns, camps.items);
+  const base801 = ps.find(p => p.campaignId === '1')!;
+  const d801 = (placement: 'search' | 'recommendations', fromValue: number, toValue: number) => ({ ...base801, campaignId: '801', sku: '901', placement, fromValue, toValue, fp: `wb|801|901|bid|${placement}|${toValue}` });
+  saveProposals('wb', [d801('search', 500, 350), d801('recommendations', 230, 161)]);
+  const prop801 = async (pl: string) => (await listProposals('wb')).find(p => p.campaignId === '801' && p.placement === pl)!;
+  const isBidPatch = (s: { method: string; url: string }) => s.method === 'PATCH' && s.url.includes('/bids');
+  globalThis.fetch = (async (url: any, init: any = {}) => {
+    sent.push({ method: init.method ?? 'GET', url: String(url), body: init.body ? JSON.parse(init.body) : null });
+    if (String(url).includes('/bids/min')) return new Response(JSON.stringify({ bids: [{ nm_id: 901, bids: [{ type: 'search', value: 45000 }] }] }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  }) as any;
+  const pReco = await prop801('recommendations');
+  const pSearch = await prop801('search');
+  let mark = sent.length;
+  res = await decideProposal(pReco.id, 'apply', 'менеджер', null);
+  check('выключенная площадка → снято, ставка не ушла', [res.ok, res.message.includes('площадка выключена'), sent.slice(mark).some(isBidPatch)], [false, true, false]);
+  mark = sent.length;
+  res = await decideProposal(pSearch.id, 'apply', 'менеджер', null);
+  check('ниже минимума → снято, ставка не ушла', [res.ok, res.message.includes('минимум WB сейчас 450'), sent.slice(mark).some(isBidPatch)], [false, true, false]);
+
+  // Отказ площадки: сразу снова не предлагаем, в истории — понятный текст.
+  const dFail = d801('search', 500, 460);
+  saveProposals('wb', [dFail]);
+  globalThis.fetch = (async (url: any, init: any = {}) => {
+    if (String(url).includes('/bids/min')) return new Response('{}', { status: 200 });
+    if ((init.method ?? 'GET') === 'PATCH') return new Response('{"detail":"bid value must be no less than 470.00"}', { status: 400 });
+    return new Response('{}', { status: 200 });
+  }) as any;
+  res = await decideProposal((await prop801('search')).id, 'apply', 'менеджер', null);
+  check('отказ WB — понятным текстом', [res.ok, res.message.includes('минимума 470 ₽')], [false, true]);
+  saveProposals('wb', [dFail]);
+  check('после отказа 3 дня не предлагается снова', (await listProposals('wb')).some(p => p.fp === dFail.fp), false);
 
   console.log(failed ? `\n✗ ошибок: ${failed}` : '\n✓ всё в порядке');
   process.exit(failed ? 1 : 0);

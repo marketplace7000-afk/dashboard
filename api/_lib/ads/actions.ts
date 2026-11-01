@@ -23,6 +23,7 @@ import {
   type AdMp, type ChangeEntry,
 } from './store';
 import { parseWbDailyLimits, readOzonCampaignProducts } from './sync';
+import { humanWbError } from './wbMinBids';
 
 export type AdActionKind = 'pause' | 'start' | 'bid' | 'daily_limit' | 'weekly_budget';
 
@@ -44,6 +45,9 @@ export type AdAction = {
 };
 
 export type AdActionResult = { ok: boolean; message: string; logId: number | null; needConfirm?: boolean };
+
+/** Минимальный дневной лимит WB, ₽: API требует dailyLimit от 100000 копеек. */
+export const WB_MIN_DAILY_LIMIT = 1000;
 
 /** Во сколько раз ставка может вырасти без отдельного подтверждения. */
 export const BIG_JUMP = 2;
@@ -98,7 +102,7 @@ async function wbBid(a: AdAction, c: NonNullable<ReturnType<typeof getCampaign>>
     method: 'PATCH',
     body: JSON.stringify({ bids: [{ advert_id: Number(c.id), nm_bids: [{ nm_id: Number(it.sku), bid_kopecks: newKop, placement }] }] }),
   });
-  if (!r.ok) throw new ActionError(`WB ответил ${r.status}: ${await bodyText(r)}`);
+  if (!r.ok) throw new ActionError(humanWbError(`WB ответил ${r.status}: ${await bodyText(r)}`));
   // Единая ставка WB одна на поиск и рекомендации.
   patchItemBid('wb', c.id, it.sku, placement === 'recommendations' ? { bid_reco_kop: newKop }
     : unified ? { bid_search_kop: newKop, bid_reco_kop: newKop } : { bid_search_kop: newKop });
@@ -112,12 +116,12 @@ async function wbBid(a: AdAction, c: NonNullable<ReturnType<typeof getCampaign>>
 async function wbDailyLimit(a: AdAction, c: NonNullable<ReturnType<typeof getCampaign>>) {
   if (c.payment !== 'cpc') throw new ActionError('дневной лимит WB бывает только у кампаний с оплатой за клик');
   const enabled = a.enabled !== false;
-  if (enabled && !(a.valueRub! >= 10)) throw new ActionError('дневной лимит WB — не меньше 10 ₽');
+  if (enabled && !(a.valueRub! >= WB_MIN_DAILY_LIMIT)) throw new ActionError(`WB не принимает дневной лимит меньше ${WB_MIN_DAILY_LIMIT} ₽`);
   const body = enabled
     ? { advertIds: [Number(c.id)], enabled: true, dailyLimit: kop(a.valueRub!), carryOverEnabled: false }
     : { advertIds: [Number(c.id)], enabled: false };
   const r = await wbCall('/api/advert/v0/daily-limits', { method: 'PUT', body: JSON.stringify(body) });
-  if (!r.ok) throw new ActionError(`WB ответил ${r.status}: ${await bodyText(r)}`);
+  if (!r.ok) throw new ActionError(humanWbError(`WB ответил ${r.status}: ${await bodyText(r)}`));
   const put: any = await r.json().catch(() => null);
   const below = (put?.adverts ?? []).find((x: any) => String(x?.advertId) === c.id && x?.belowMinLimit);
 

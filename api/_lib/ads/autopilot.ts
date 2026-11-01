@@ -23,7 +23,8 @@
  *   • новые кампании — только совет, решает менеджер.
  */
 import { adsDb, adsMetaGet, adsMetaSet, getCampaign, logChange, type AdMp } from './store';
-import { applyAdAction, type AdAction } from './actions';
+import { applyAdAction, WB_MIN_DAILY_LIMIT, type AdAction } from './actions';
+import { fetchWbMinBids, humanWbError, refreshWbMinBids, storedWbMinBids, type WbMinBid } from './wbMinBids';
 import { getAdsOverview } from './overview';
 import { mskDate } from '../mskDate';
 import { cardHistory, getCompetitors } from './cabinet';
@@ -72,14 +73,18 @@ export type AutopilotCtx = {
    * товара в неделю = выручка за 7 дней × их ДРР («Товары на Ozon»). Это ОЦЕНКА, не факт кабинета.
    */
   compSpend: Map<string, { weekly: number; drr: number | null; n: number; list: string[] }>;
+  /** WB: минимальные ставки «кампания|товар». Нет данных — минимум не учитываем, его проверит применение. */
+  wbMinBids?: Map<string, WbMinBid>;
 };
 
 /**
  * Минимальная ставка площадки, ₽. Ozon «Оплата за клик»: ниже 10 ₽ кабинет ставку не принимает
- * («От 10 ₽», замечание менеджера 22.10.2026). Для WB минимум зависит от категории — не знаем, null.
+ * («От 10 ₽», замечание менеджера 22.10.2026). WB: у каждого товара и площадки свой минимум (ctx.wbMinBids).
  */
-export function minBid(c: Ads2Campaign): number | null {
-  return c.mp === 'ozon' && c.payment === 'cpc' ? 10 : null;
+export function minBid(c: Ads2Campaign, sku?: string, placement?: 'search' | 'recommendations' | 'combined' | null, mins?: Map<string, WbMinBid>): number | null {
+  if (c.mp === 'ozon') return c.payment === 'cpc' ? 10 : null;
+  const m = mins?.get(`${c.id}|${sku}`);
+  return (m && placement ? m[placement] : null) ?? null;
 }
 export const EMPTY_CTX: AutopilotCtx = {
   marginFloorPct: 15, comps: new Map(), benchDrr: new Map(), stat28: new Map(), skuCr: new Map(),
@@ -168,8 +173,9 @@ function bidSlots(c: Ads2Campaign, it: Ads2CampaignItem): { placement: 'search' 
     return b != null && b > 0 ? [{ placement: 'combined', bid: b }] : [];
   }
   const out: { placement: 'search' | 'recommendations'; bid: number }[] = [];
-  if (it.bidSearch != null && it.bidSearch > 0) out.push({ placement: 'search', bid: it.bidSearch });
-  if (it.bidReco != null && it.bidReco > 0) out.push({ placement: 'recommendations', bid: it.bidReco });
+  // На выключенной площадке WB ставку не принимает («invalid placement»), хотя в данных она есть.
+  if (it.bidSearch != null && it.bidSearch > 0 && c.placements?.search !== false) out.push({ placement: 'search', bid: it.bidSearch });
+  if (it.bidReco != null && it.bidReco > 0 && c.placements?.recommendations !== false) out.push({ placement: 'recommendations', bid: it.bidReco });
   return out;
 }
 
@@ -287,8 +293,9 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
     // 2. Дневной лимит WB для кампаний с оплатой за клик — защита от перерасхода.
     if (mp === 'wb' && c.can.dailyLimit && !c.dailyLimitOn && cs && cs.spend > 0 && settledCamp) {
       const days = 7;
-      const lim = Math.max(10, Math.ceil((cs.spend / days) * 1.3 / 10) * 10);
-      out.push({
+      const lim = Math.ceil((cs.spend / days) * 1.3 / 10) * 10;
+      // WB принимает лимит от 1000 ₽. Кампанию с меньшим расходом такой лимит не сдержит — не предлагаем.
+      if (lim >= WB_MIN_DAILY_LIMIT) out.push({
         mp, campaignId: c.id, sku: null, kind: 'daily_limit', placement: null, fromValue: null, toValue: lim,
         rule: 'no_daily_limit', level: 'warn', title: `Включить дневной лимит ${rub(lim)}`,
         reason: `Лимита нет — кампания может съесть любой бюджет за день. Средний расход ${rub(cs.spend / days)}/день, лимит с запасом 30%`,
@@ -468,13 +475,24 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
       if (rule === 'over_budget' && s?.drr != null) overBudgetDrr.set(`${campFp}|${it.sku}`, s.drr);
       const details = det({ checks, missing, confidence, alternative, risk, rollback });
 
-      // Ставка уже на минимуме площадки (Ozon: 10 ₽ за клик) — снижать её нечем, сдерживаем недельным бюджетом.
-      const floor = minBid(c);
-      const atFloor = dir === 'down' && floor != null && slots.length > 0 && slots.every(sl => sl.bid <= floor + 0.01);
+      // Ставка уже на минимуме площадки (Ozon: 10 ₽ за клик; WB: свой у товара) — снижать её нечем.
+      // Ozon сдерживаем недельным бюджетом, на WB даём совет с другим действием.
+      const floorOf = (sl: { placement: 'search' | 'recommendations' | 'combined' | null }) => minBid(c, it.sku, sl.placement, ctx.wbMinBids);
+      const atFloor = dir === 'down' && slots.length > 0 && slots.every(sl => { const f = floorOf(sl); return f != null && sl.bid <= f + 0.01; });
+      if (atFloor && mp === 'wb') {
+        const base = why.replace('Ставку снижаем пропорционально разрыву', 'Снижать надо пропорционально разрыву');
+        out.push({
+          mp, campaignId: c.id, sku: it.sku, kind: 'task', placement: null, fromValue: null, toValue: null,
+          rule, level, title: 'Ставка на минимуме WB — снижать некуда',
+          reason: `${base}. Ставка ${slots.map(sl => rub(sl.bid)).join(' и ')} — это минимум WB для товара. Варианты: убрать товар из кампании или поставить кампанию на паузу, исправить цену или карточку`,
+          fp: `${campFp}|${it.sku}|floor`, details,
+        });
+        return;
+      }
       if (!slots.length || atFloor) {
         // Ставку менять нельзя (стратегия Ozon, кампания за заказ, минимум) — снижения копим, решаем по кампании ниже.
         if (mp === 'ozon' && dir === 'down') budgetDown.push({ sku: it.sku, article: p?.article ?? it.article ?? it.sku, spend: s?.spend ?? 0, factor,
-          why: atFloor ? `${why.replace('Ставку снижаем пропорционально разрыву', 'Снижать надо пропорционально разрыву')}. Ставка уже ${rub(slots[0].bid)} — ниже ${rub(floor!)} Ozon не принимает` : why, rule, level, atFloor });
+          why: atFloor ? `${why.replace('Ставку снижаем пропорционально разрыву', 'Снижать надо пропорционально разрыву')}. Ставка уже ${rub(slots[0].bid)} — ниже ${rub(floorOf(slots[0])!)} Ozon не принимает` : why, rule, level, atFloor });
         return;
       }
       for (const sl of slots) {
@@ -483,8 +501,11 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
         // К потолку ставки спускаемся, но не ниже самого потолка.
         if (rule === 'above_bid_ceiling' && ceil) next = Math.max(next, ceil.max);
         // И не ниже минимальной ставки площадки — меньше кабинет не примет.
+        const floor = floorOf(sl);
         if (floor != null && dir === 'down') next = Math.max(next, floor);
         next = mp === 'wb' && c.payment === 'cpm' ? Math.round(next) : r2(next);
+        // Округление не должно увести обратно под минимум.
+        if (floor != null && dir === 'down' && next < floor) next = mp === 'wb' && c.payment === 'cpm' ? Math.ceil(floor) : floor;
         if (dir === 'up' && next <= sl.bid) continue;
         if (dir === 'down' && next >= sl.bid) continue;
         const where = sl.placement === 'search' ? ' (поиск)' : sl.placement === 'recommendations' ? ' (рекомендации)' : '';
@@ -603,6 +624,12 @@ export async function buildCtx(mp: AdMp, ov: Ads2Overview): Promise<AutopilotCtx
       });
     }
   } catch { /* без конкурентов правила работают как раньше */ }
+  if (mp === 'wb') {
+    try {
+      await refreshWbMinBids(ov.campaigns.filter(c => isActive(c) && c.can.bid));
+      ctx.wbMinBids = storedWbMinBids();
+    } catch { /* без минимумов их проверит применение */ }
+  }
   if (mp === 'ozon') {
     // Расход конкурентов на рекламу в неделю — оценка по «Товарам на Ozon»: выручка за 7 дней × ДРР.
     try {
@@ -639,9 +666,9 @@ export function saveProposals(mp: AdMp, drafts: Draft[]): { added: number; kept:
   const now = Date.now();
   const open = d.prepare(`SELECT id, fp, to_value FROM ad_proposal WHERE mp = ? AND status = 'pending'`).all(mp) as any[];
   const byFp = new Map(open.map(r => [r.fp, r]));
-  // Отклонённое не предлагаем снова 3 дня; принятый совет без команды — 7 дней.
+  // Отклонённое и получившее отказ площадки не предлагаем снова 3 дня; принятый совет без команды — 7 дней.
   const quiet = new Set((d.prepare(`SELECT fp FROM ad_proposal WHERE mp = ? AND (
-      (status = 'rejected' AND decided_at >= ?) OR (status = 'applied' AND kind IN ('task', 'new_campaign') AND decided_at >= ?))`)
+      (status IN ('rejected', 'failed') AND decided_at >= ?) OR (status = 'applied' AND kind IN ('task', 'new_campaign') AND decided_at >= ?))`)
     .all(mp, now - REJECT_QUIET_MS, now - ADVICE_QUIET_MS) as any[]).map(r => r.fp));
   const seen = new Set<string>();
   const ins = d.prepare(`INSERT INTO ad_proposal (created_at, updated_at, mp, campaign_id, sku, kind, placement, from_value, to_value, rule, level, title, reason, fp, status, details)
@@ -732,6 +759,11 @@ function effectOf(r: any): Ads2Proposal['effect'] {
   return { days: after?.days ?? 0, before, after, verdict, verdictText };
 }
 
+/** Старые отказы в журнале хранят сырой ответ WB — показываем понятным текстом. */
+function humanResult(res: any): any {
+  return typeof res?.message === 'string' ? { ...res, message: humanWbError(res.message) } : res;
+}
+
 export async function listProposals(mp: AdMp | null, history = false): Promise<Ads2Proposal[]> {
   const d = db();
   const rows = d.prepare(`SELECT * FROM ad_proposal WHERE ${history ? `status NOT IN ('pending', 'superseded', 'expired')` : `status = 'pending' AND updated_at >= ?`}
@@ -756,7 +788,7 @@ export async function listProposals(mp: AdMp | null, history = false): Promise<A
     kind: r.kind, placement: r.placement, fromValue: r.from_value, toValue: r.to_value,
     rule: r.rule, level: r.level, title: r.title, reason: r.reason, fp: r.fp,
     status: r.status, decidedAt: r.decided_at, decidedBy: r.decided_by, note: r.note,
-    result: r.result ? JSON.parse(r.result) : null,
+    result: r.result ? humanResult(JSON.parse(r.result)) : null,
     details: r.details ? JSON.parse(r.details) : null,
     effect: history ? effectOf(r) : null,
   }));
@@ -810,6 +842,26 @@ async function decideProposalOnce(id: number, decision: 'apply' | 'reject', by: 
     if (cur == null || Math.abs(cur - r.from_value) > 0.01) {
       set('superseded', { result: { error: `ставка уже ${cur == null ? 'другая' : rub(cur)}` } });
       return { ok: false, message: `ставка уже изменилась (${cur == null ? '—' : rub(cur)}), предложение снято — дождитесь пересчёта` };
+    }
+  }
+
+  // WB: минимум мог измениться с момента пересчёта — сверяем перед отправкой, чтобы не получать отказ.
+  if (r.mp === 'wb' && r.kind === 'bid' && r.to_value != null && r.sku) {
+    const pl = (c.placements ?? {}) as { search?: boolean; recommendations?: boolean };
+    const off = r.placement === 'recommendations' ? pl.recommendations === false : r.placement === 'search' ? pl.search === false : false;
+    if (off) {
+      const message = 'в кампании эта площадка выключена, ставку менять не нужно';
+      set('superseded', { result: { error: message } });
+      return { ok: false, message: `${message} — предложение снято` };
+    }
+    if (c.payment === 'cpm' || c.payment === 'cpc') {
+      const m = (await fetchWbMinBids(r.campaign_id, [r.sku], c.payment))?.get(r.sku);
+      const floor = m && r.placement ? m[r.placement as keyof WbMinBid] : null;
+      if (floor != null && r.to_value < floor) {
+        const message = `минимум WB сейчас ${rub(floor)}, ставка ${rub(r.to_value)} не пройдёт`;
+        set('superseded', { result: { error: message } });
+        return { ok: false, message: `${message} — предложение снято, автопилот пересчитает его` };
+      }
     }
   }
 

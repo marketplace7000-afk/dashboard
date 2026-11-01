@@ -143,7 +143,7 @@ function Competitors({ mp, comp }: { mp: Mp; comp: Comp | null }) {
   const [own, ...rest] = comp.cards;
   const hasNms = comp.queries.some(q => q.nms?.length);
   const of = (q: Comp['queries'][number], nm: number) => q.nms?.find(n => n.nmId === nm);
-  const cell = (n?: CompNm) => n == null ? '—' : n.shown === false ? 'нет в поиске' : `${num(n.pos)} · ${num(n.orders)}`;
+  const cell = (n?: CompNm) => n == null ? '—' : n.shown === false ? 'нет данных' : `${num(n.pos)} · ${num(n.orders)}`;
   return (
     <div>
       <div style={{ overflowX: 'auto' }}>
@@ -165,7 +165,7 @@ function Competitors({ mp, comp }: { mp: Mp; comp: Comp | null }) {
         </table>
       </div>
       <p className="muted" style={{ marginBottom: 0 }}>
-        Сравнение от {dateRu(comp.setDate)}, за 30 дней. {hasNms ? 'В ячейке: средняя позиция · заказы.' : 'Цифры по каждой карточке появятся после ночного прохода агента.'}
+        Сравнение от {dateRu(comp.setDate)}, за 30 дней. {hasNms ? 'В ячейке: средняя позиция · заказы. «Нет данных»: WB не отдал цифры по этой карточке, это не значит, что её нет в поиске. Свои позиции сверяйте на вкладке «Запросы».' : 'Цифры по каждой карточке появятся после ночного прохода агента.'}
       </p>
     </div>
   );

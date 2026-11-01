@@ -42,6 +42,8 @@ export type CardMargin = {
   minPct: number; minSource: 'card' | 'plan';
   /** Цена в кабинете, ниже которой маржа падает под минимум. null — недостижимо. */
   floorPrice: number | null; below: boolean;
+  /** Из того же расчёта «Цен»: цена в кабинете, цена покупателя, СПП, реклама на продажу и база маржи. */
+  retail: number | null; buyer: number | null; spp: number | null; adsRub: number | null; base: number | null;
 };
 
 export type CardPin = CardSettings & {
@@ -152,6 +154,7 @@ function marginOf(mp: RnpMp, article: string, report: MarginReport | null, r: an
     profit7d: rub != null && orders != null ? Math.round(rub * orders * (row?.buyout ?? 100) / 100) : null,
     minPct, minSource: own != null ? 'card' : 'plan',
     floorPrice: row ? priceFloor(row, minPct) : null, below: pct != null && pct < minPct,
+    retail: row?.retail ?? null, buyer: row?.buyer ?? null, spp: row?.spp ?? null, adsRub: row?.adsRub ?? null, base: row?.base ?? row?.retail ?? null,
   };
 }
 
@@ -170,12 +173,13 @@ export async function listPins(): Promise<CardPin[]> {
     const mp = r.mp as RnpMp, sku = String(r.sku);
     const it = items.get(`${mp}:${sku}`);
     const cur = rnpSkuTotals(mp, sku, from, to), prev = rnpSkuTotals(mp, sku, prevFrom, prevTo);
+    const margin = marginOf(mp, mp === 'wb' ? it?.article ?? sku : sku, reports.get(mp) ?? null, r, cur?.orders ?? null);
     return {
       mp, sku, article: it?.article ?? '', name: it?.name ?? '', photo: it?.photo ?? '', pinnedAt: Number(r.pinned_at),
       goal: r.goal as CardGoal, minMarginPct: r.min_margin ?? null, minMarginUntil: r.min_margin_until ?? null, maxDrrPct: r.max_drr ?? null, minStockDays: r.min_stock_days ?? null,
-      margin: marginOf(mp, mp === 'wb' ? it?.article ?? sku : sku, reports.get(mp) ?? null, r, cur?.orders ?? null),
+      margin,
       turnover: turnoverOf(mp, sku, mp === 'wb' ? it?.article ?? sku : sku, items),
-      cur: period(cur), prev: period(prev), stock: cur?.stock ?? null, price: cur?.price ?? null, dataDate: cur?.lastDate ?? null,
+      cur: period(cur), prev: period(prev), stock: cur?.stock ?? null, price: margin?.retail ?? cur?.price ?? null, dataDate: cur?.lastDate ?? null,
     };
   });
 }

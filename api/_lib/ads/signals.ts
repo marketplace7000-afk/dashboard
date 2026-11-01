@@ -328,7 +328,7 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
           sku: p.key, code: 'margin_below_floor', level: neg || belowPlan ? 'critical' : onEdge ? 'warn' : 'info', role: 'price',
           title: neg ? 'Товар продаётся в минус' : belowPlan ? 'Маржа ниже плана месяца' : onEdge ? 'Маржа на грани плана' : `Маржа ниже цели ${f1(th.target)}%`,
           text: `Маржа ${mr.marginPct}% (${rub(mr.marginRub ?? 0)} с штуки) при цене ЛК ${rub(mr.retail)}${mr.buyer ? ` и цене покупателя ${rub(mr.buyer)}` : ''}; ${planText}. Съедают: ${eats}. ${reachable ? `Цена ЛК для края — ${rub(floor!)} (маржа ${mAt(floor!)})` : 'Ценой не вытянуть — нужно снижать расходы или пересматривать закупку'}`,
-          action: reachable ? 'Поднять цену ЛК до края в «Ценах» или снизить ДРР (ставки в «Автопилоте»)' : 'Снизить ДРР (пауза или ставка вниз в «Автопилоте»), проверить себестоимость и логистику; при верных цифрах — выводить товар',
+          action: reachable ? 'Снизить ДРР (ставки в «Автопилоте»). Цену поднимать, только если мы дешевле рынка, и не больше 1 % в день' : 'Снизить ДРР (пауза или ставка вниз в «Автопилоте»), проверить себестоимость и логистику; при верных цифрах — выводить товар',
           rub: neg && mr.marginRub != null ? Math.round(Math.abs(mr.marginRub) * p.orders / 7) : null, prod: prodOf(p),
         });
       }
@@ -359,7 +359,7 @@ async function draftSignals(mp: AdMp, now: number): Promise<{ drafts: Draft[]; n
         drafts.push({
           sku: p.key, code: 'price_room', level: 'info', role: 'price', title: 'Есть запас по цене',
           text: `Мы дешевле самого дешёвого из ${comps.length} конкурентов на ${Math.abs(pctOf(mr.buyer, min))}% (${rub(mr.buyer)} против ${rub(min)}), конверсия в корзину ${p.pdpToCart}% не ниже средней ${medConv}%. Можно поднять цену ЛК до ${rub(targetRetail)} (покупателю ≈ ${rub(toBuyer(targetRetail))}), маржа ${mAt(mr.retail)} → ${mAt(targetRetail)}${gain > 0 ? `, ≈ +${rub(gain)} в день` : ''}`,
-          action: 'Поднять цену в «Ценах» шагом до 10% и посмотреть конверсию 3 дня', rub: gain > 0 ? gain : null, prod: prodOf(p),
+          action: 'Поднимать цену в «Ценах» не больше 1 % в день, следя за конверсией', rub: gain > 0 ? gain : null, prod: prodOf(p),
         });
       }
     }

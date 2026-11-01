@@ -14,7 +14,7 @@ type Goal = 'growth' | 'hold' | 'sell_out';
 type Period = { orders: number; amount: number; ads: number; drrPct: number | null };
 type Pin = {
   mp: Mp; sku: string; article: string; name: string; photo: string;
-  margin: { pct: number | null; rubPerSale: number | null; roi: number | null; buyoutPct: number | null; profit7d: number | null; minPct: number; minSource: 'card' | 'plan'; floorPrice: number | null; below: boolean } | null;
+  margin: { pct: number | null; rubPerSale: number | null; roi: number | null; buyoutPct: number | null; profit7d: number | null; minPct: number; minSource: 'card' | 'plan'; floorPrice: number | null; below: boolean; buyer?: number | null } | null;
   goal: Goal; minMarginPct: number | null; minMarginUntil: string | null; maxDrrPct: number | null; minStockDays: number | null;
   turnover?: {
     here: { stock: number | null; fbo: number | null; fbs: number | null; perDay: number | null; days: number | null };
@@ -421,7 +421,9 @@ function SeoEdits({ pin }: { pin: Pin }) {
 
 type Tab = 'advice' | 'queries' | 'comp' | 'vis' | 'edits' | 'rules';
 type Advice = { key: string; area: 'margin' | 'ads' | 'text' | 'price' | 'stock' | 'sales'; level: 'high' | 'mid' | 'low'; title: string; why: string; open: 'edits' | 'vis' | 'rules' | 'ads' | null; more?: string; proposalId?: number };
-type CardAdvice = { items: Advice[]; failed: string[] };
+type MarketRow = { label: string; our: string; market: string; range: string; note?: string };
+type Market = { known: boolean; n: number; total: number; at: number | null; summary: string; rows: MarketRow[] };
+type CardAdvice = { items: Advice[]; failed: string[]; market: Market | null };
 const AREA: Record<Advice['area'], string> = { margin: 'Маржа', ads: 'Реклама', text: 'Карточка', price: 'Цена', stock: 'Запас', sales: 'Продажи' };
 const LEVEL: Record<Advice['level'], string> = { high: 'Сначала это', mid: 'Важно', low: 'Можно позже' };
 const OPEN: Record<'edits' | 'vis' | 'rules', string> = { edits: 'Правки SEO', vis: 'Видимость', rules: 'Рамки' };
@@ -452,10 +454,30 @@ function ApplyAd({ a, onDone }: { a: Advice; onDone: () => void }) {
   );
 }
 
-function AdviceList({ advice, onOpen, onOpenAds, onApplied }: { advice: CardAdvice | undefined; onOpen: (t: Tab) => void; onOpenAds?: () => void; onApplied: () => void }) {
+function MarketBox({ m, onOpenCompetitors }: { m: Market | null; onOpenCompetitors?: () => void }) {
+  if (!m) return <div className="cm-warn">К этой карточке нет закреплённых конкурентов: привяжите их в разделе «Конкуренты», иначе агент не будет советовать поднимать цену.</div>;
+  return (
+    <div className="cm-market">
+      <div className="cm-market-head">
+        <b>Рынок: {m.summary}</b>
+        <span className="muted">{m.n} из {m.total} конкурентов{m.at ? `, цены от ${new Date(m.at).toLocaleDateString('ru-RU')}` : ''}</span>
+        {onOpenCompetitors && <button className="btn btn-sm" onClick={onOpenCompetitors}>Конкуренты</button>}
+      </div>
+      <div className="cm-scroll">
+        <table className="cm-table">
+          <thead><tr><th className="l">Показатель</th><th>Мы</th><th>Конкуренты, середина</th><th>От и до</th></tr></thead>
+          <tbody>{m.rows.map(r => <tr key={r.label}><td className="l">{r.label}{r.note && <div className="cm-sub">{r.note}</div>}</td><td><b>{r.our}</b></td><td>{r.market}</td><td>{r.range}</td></tr>)}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AdviceList({ advice, onOpen, onOpenAds, onOpenCompetitors, onApplied }: { advice: CardAdvice | undefined; onOpen: (t: Tab) => void; onOpenAds?: () => void; onOpenCompetitors?: () => void; onApplied: () => void }) {
   if (!advice) return <div className="muted">Считаю рекомендации…</div>;
   return (
     <div className="cm-advice">
+      <MarketBox m={advice.market} onOpenCompetitors={onOpenCompetitors} />
       {!advice.items.length && <div className="muted">Сейчас рекомендаций нет.</div>}
       {advice.items.map(a => (
         <div key={a.key} className={`cm-advice-row ${a.level}`}>
@@ -468,12 +490,12 @@ function AdviceList({ advice, onOpen, onOpenAds, onApplied }: { advice: CardAdvi
         </div>
       ))}
       {advice.failed.length > 0 && <div className="cm-warn">Не удалось проверить: {advice.failed.join(', ')}.</div>}
-      <p className="cm-note">Рекомендации пересчитываются из свежих данных при открытии раздела, не реже раза в 5 минут. Данные поиска Ozon обновляются ночью. Изменения уходят на площадку только по кнопке «Применить»: сейчас она есть у предложений автопилота по рекламе. Цену поднимаем не больше чем на 1 % в день от цены в кабинете.</p>
+      <p className="cm-note">Рекомендации пересчитываются из свежих данных при открытии раздела, не реже раза в 5 минут. Данные поиска Ozon обновляются ночью. Изменения уходят на площадку только по кнопке «Применить»: сейчас она есть у предложений автопилота по рекламе. Цену выше рынка агент не предлагает, а поднимает её не больше чем на 1 % в день от цены в кабинете.</p>
     </div>
   );
 }
 
-function PinDetails({ pin, advice, onChanged, onOpenAds, onApplied }: { pin: Pin; advice: CardAdvice | undefined; onChanged: () => void; onOpenAds?: () => void; onApplied: () => void }) {
+function PinDetails({ pin, advice, onChanged, onOpenAds, onOpenCompetitors, onApplied }: { pin: Pin; advice: CardAdvice | undefined; onChanged: () => void; onOpenAds?: () => void; onOpenCompetitors?: () => void; onApplied: () => void }) {
   const [tab, setTab] = useState<Tab>('advice');
   const [d, setD] = useState<Details | null>(null);
   const [err, setErr] = useState('');
@@ -495,7 +517,7 @@ function PinDetails({ pin, advice, onChanged, onOpenAds, onApplied }: { pin: Pin
       <div className="cm-tabs">
         {tabs.map(([k, label]) => <button key={k} className={`cm-tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{label}</button>)}
       </div>
-      {tab === 'advice' ? <AdviceList advice={advice} onOpen={setTab} onOpenAds={onOpenAds} onApplied={onApplied} />
+      {tab === 'advice' ? <AdviceList advice={advice} onOpen={setTab} onOpenAds={onOpenAds} onOpenCompetitors={onOpenCompetitors} onApplied={onApplied} />
         : tab === 'rules'
         ? <Settings key={`${pin.goal}|${pin.minMarginPct}|${pin.minMarginUntil}|${pin.maxDrrPct}|${pin.minStockDays}`} pin={pin} onSaved={onChanged} />
         : tab === 'edits' ? <SeoEdits pin={pin} />
@@ -508,7 +530,7 @@ function PinDetails({ pin, advice, onChanged, onOpenAds, onApplied }: { pin: Pin
   );
 }
 
-export function Cards({ onOpenAds }: { onOpenAds?: () => void } = {}) {
+export function Cards({ onOpenAds, onOpenCompetitors }: { onOpenAds?: () => void; onOpenCompetitors?: () => void } = {}) {
   const [pins, setPins] = useState<Pin[] | null>(null);
   const [error, setError] = useState('');
   const [mp, setMp] = useState<Mp>('wb');
@@ -627,11 +649,11 @@ export function Cards({ onOpenAds }: { onOpenAds?: () => void } = {}) {
                       <td className={p.maxDrrPct != null && (p.cur?.drrPct ?? 0) > p.maxDrrPct ? 'cm-bad' : ''}>{pct(p.cur?.drrPct)}{p.maxDrrPct != null && <div className="cm-sub">макс. {pct(p.maxDrrPct)}</div>}</td>
                       <td className={p.margin?.below ? 'cm-bad' : ''}><b>{pct(p.margin?.pct)}</b><div className="cm-sub">мин. {pct(p.margin?.minPct)}</div></td>
                       <td>{rub(p.margin?.profit7d)}<div className="cm-sub">{rub(p.margin?.rubPerSale)} с продажи</div></td>
-                      <td>{rub(p.price)}</td>
+                      <td>{rub(p.price)}{p.margin?.buyer != null && <div className="cm-sub">покупатель {rub(p.margin.buyer)}</div>}</td>
                       <td><Turnover p={p} /></td>
                       <td><button className="btn btn-sm" onClick={e => { e.stopPropagation(); void unpin(p); }}>Открепить</button></td>
                     </tr>
-                    {isOpen && <tr><td colSpan={10} style={{ padding: 16, textAlign: 'left', whiteSpace: 'normal', maxWidth: 0 }}><PinDetails pin={p} advice={advice[key]} onChanged={load} onOpenAds={onOpenAds} onApplied={() => { void load(); setTimeout(() => setNonce(n => n + 1), 4000); }} /></td></tr>}
+                    {isOpen && <tr><td colSpan={10} style={{ padding: 16, textAlign: 'left', whiteSpace: 'normal', maxWidth: 0 }}><PinDetails pin={p} advice={advice[key]} onChanged={load} onOpenAds={onOpenAds} onOpenCompetitors={onOpenCompetitors} onApplied={() => { void load(); setTimeout(() => setNonce(n => n + 1), 4000); }} /></td></tr>}
                   </Fragment>
                 );
               })}

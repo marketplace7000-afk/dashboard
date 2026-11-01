@@ -2384,3 +2384,7 @@ code {
 .cm-advice-text summary { cursor: pointer; }
 .cm-apply-ask { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; font-size: 16px; max-width: 340px; }
 @media (max-width: 700px) { .cm-advice-row { grid-template-columns: minmax(0, 1fr); } }
+
+.cm-market { background: var(--bg-2, #fff); border: 1px solid var(--line, #e5e7eb); border-radius: 10px; padding: 12px 14px; font-size: 18px; white-space: normal; text-align: left; }
+.cm-market-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; }
+.cm-market-head .btn { margin-left: auto; }

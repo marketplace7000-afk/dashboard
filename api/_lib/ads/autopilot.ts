@@ -415,7 +415,7 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
       } else if (belowOwnMin && s && s.spend >= 300) {
         dir = 'down'; rule = 'below_card_margin'; factor = 1 - MAX_DOWN; confidence = 'high';
         why = `Маржа ${p!.marginPct}% ниже минимума карточки ${lim!.minMargin}%. Минимум маржи главнее предела ДРР, поэтому ставку снижаем`;
-        alternative = 'поднять цену, если рынок позволяет';
+        alternative = 'поднять цену, только если мы дешевле рынка, и не больше 1 % в день';
         risk = 'меньше показов — часть заказов уйдёт к конкурентам';
       } else if (overOwnDrr && s && s.spend >= 300) {
         dir = 'down'; rule = 'over_card_drr'; factor = clampDown(lim!.maxDrr! / p!.drr!);

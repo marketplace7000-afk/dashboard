@@ -8,7 +8,7 @@ import { rnpItems } from './rnp';
 import { listPins, type CardPin } from './cards';
 import { cardVisibility, type VisQuery } from './cardVisibility';
 import { seoOverview } from './cardSeo';
-import { listProposals } from './ads/autopilot';
+import { listProposals, getAutopilotMode, ACTIONABLE } from './ads/autopilot';
 
 export type AdviceArea = 'margin' | 'ads' | 'text' | 'price' | 'stock' | 'sales';
 export type AdviceLevel = 'high' | 'mid' | 'low';
@@ -16,6 +16,10 @@ export type Advice = {
   key: string; area: AdviceArea; level: AdviceLevel; title: string; why: string;
   /** Где в разделе смотреть подробности; ads — раздел «Реклама». */
   open: 'edits' | 'vis' | 'rules' | 'ads' | null;
+  /** Полный текст автопилота, если подсказка сокращена. */
+  more?: string;
+  /** Предложение автопилота, которое можно применить кнопкой: команда уходит на площадку. */
+  proposalId?: number;
 };
 
 const CACHE_MS = 5 * 60_000;
@@ -24,6 +28,26 @@ const SLOW_DAYS = 90;
 const WASTE_RUB = 300;
 /** Цена вдвое выше медианы первой десятки: скорее всего, там другой тип товара, сравнение ничего не значит. */
 const PRICE_COMPARABLE = 2;
+
+/** Правило владельца (01.11.2026): цену поднимаем постепенно, не больше 1 % в день от цены в кабинете продавца. */
+export const PRICE_RAISE_PER_DAY = 0.01;
+export function maxPriceToday(cabinetPrice: number): number { return Math.floor(cabinetPrice * (1 + PRICE_RAISE_PER_DAY)); }
+export function daysToPrice(cabinetPrice: number, target: number): number {
+  return target <= cabinetPrice ? 0 : Math.ceil(Math.log(target / cabinetPrice) / Math.log(1 + PRICE_RAISE_PER_DAY));
+}
+const priceAdvice = (price: number | null, floor: number | null): string => {
+  if (floor == null) return 'Снизьте расход на рекламу. ';
+  if (price == null) return `Цена для минимума: от ${rub(floor)}. Поднимаем постепенно, не больше 1 % в день. `;
+  if (floor <= price) return 'Цена уже достаточна: проверьте скидки и расход на рекламу. ';
+  return `Цена для минимума: от ${rub(floor)}, сейчас ${rub(price)}. Поднимаем не больше 1 % в день: сегодня до ${rub(maxPriceToday(price))}, дойдём примерно за ${daysToPrice(price, floor)} дн. Быстрее поможет снижение рекламы. `;
+};
+
+/** Текст автопилота коротко: первая фраза до расчёта, рубли без копеек. */
+export function shortReason(text: string): string {
+  const first = text.split(/(?<=[.!?])\s+(?=[А-ЯЁA-Z])/)[0].split(/:\s/)[0].replace(/[.;,\s]+$/, '');
+  const clean = first.replace(/(\d[\d\s]*),\d+(?=\s*₽)/g, '$1').trim();
+  return clean.length > 120 ? `${clean.slice(0, 117).replace(/\s+\S*$/, '')}…` : clean;
+}
 
 const rub = (n: number) => `${Math.round(n).toLocaleString('ru-RU')} ₽`;
 const plural = (n: number, one: string, few: string, many: string) => {
@@ -36,8 +60,7 @@ function fromNumbers(p: CardPin): Advice[] {
   const out: Advice[] = [];
   const m = p.margin;
   if (m?.below && m.pct != null) {
-    const floor = m.floorPrice != null ? `Цена для минимума: от ${rub(m.floorPrice)}${p.price != null ? `, сейчас ${rub(p.price)}` : ''}. ` : '';
-    out.push({ key: 'margin', area: 'margin', level: 'high', open: 'rules', title: `Маржа ${m.pct} % ниже минимума ${m.minPct} %`, why: `${floor}Поднимите цену или снизьте расход на рекламу. Разгонять рекламу сейчас нельзя: у маржи приоритет.` });
+    out.push({ key: 'margin', area: 'margin', level: 'high', open: 'rules', title: `Маржа ${m.pct} % ниже минимума ${m.minPct} %`, why: `${priceAdvice(p.price, m.floorPrice)}Разгонять рекламу сейчас нельзя: у маржи приоритет.` });
   }
   const drr = p.cur?.drrPct;
   if (p.maxDrrPct != null && drr != null && drr > p.maxDrrPct) {
@@ -57,10 +80,19 @@ function fromNumbers(p: CardPin): Advice[] {
 }
 
 async function fromAds(p: CardPin, ids: Set<string>, pending: Awaited<ReturnType<typeof listProposals>>): Promise<Advice[]> {
-  return pending.filter(a => a.mp === p.mp && a.sku != null && ids.has(String(a.sku))).slice(0, 5).map(a => ({
-    key: `ad-${a.id}`, area: 'ads' as const, level: a.level === 'critical' ? 'high' as const : a.level === 'warn' ? 'mid' as const : 'low' as const,
-    open: 'ads' as const, title: a.title, why: a.reason,
-  }));
+  const canApply = getAutopilotMode().mode !== 'off';
+  return pending
+    .filter(a => a.mp === p.mp && a.sku != null && ids.has(String(a.sku)))
+    // Совет «ничего не делать» действием не считаем.
+    .filter(a => ACTIONABLE.includes(a.kind) || a.level === 'critical' || a.level === 'warn')
+    .slice(0, 5).map(a => {
+      const why = shortReason(a.reason);
+      return {
+        key: `ad-${a.id}`, area: 'ads' as const, level: a.level === 'critical' ? 'high' as const : a.level === 'warn' ? 'mid' as const : 'low' as const,
+        open: 'ads' as const, title: a.title, why, ...(why !== a.reason ? { more: a.reason } : {}),
+        ...(canApply && ACTIONABLE.includes(a.kind) ? { proposalId: a.id } : {}),
+      };
+    });
 }
 
 function fromVisibility(p: CardPin): Advice[] {
@@ -101,8 +133,8 @@ const ORDER: Record<AdviceLevel, number> = { high: 0, mid: 1, low: 2 };
 let cache: { at: number; data: Record<string, { items: Advice[]; failed: string[] }> } | null = null;
 
 /** Рекомендации по всем закреплённым карточкам. Сбой одного источника не прячет остальные, но отмечается. */
-export async function allAdvice(): Promise<Record<string, { items: Advice[]; failed: string[] }>> {
-  if (cache && Date.now() - cache.at < CACHE_MS) return cache.data;
+export async function allAdvice(fresh = false): Promise<Record<string, { items: Advice[]; failed: string[] }>> {
+  if (!fresh && cache && Date.now() - cache.at < CACHE_MS) return cache.data;
   const pins = await listPins();
   const pending = await listProposals(null).catch(() => null);
   const data: Record<string, { items: Advice[]; failed: string[] }> = {};

@@ -2373,11 +2373,14 @@ code {
 .cm-table.cm-list > tbody > tr.cm-row > td:last-child { vertical-align: middle; }
 
 .cm-advice { display: flex; flex-direction: column; gap: 8px; }
-.cm-advice-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 14px; background: var(--bg-2, #fff); border: 1px solid var(--line, #e5e7eb); border-left-width: 4px; border-radius: 10px; font-size: 18px; white-space: normal; text-align: left; }
+.cm-advice-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 14px; background: var(--bg-2, #fff); border: 1px solid var(--line, #e5e7eb); border-left-width: 4px; border-radius: 10px; font-size: 20px; white-space: normal; text-align: left; }
 .cm-advice-row.high { border-left-color: var(--bad); }
 .cm-advice-row.mid { border-left-color: #b45309; }
 .cm-advice-row.low { border-left-color: var(--line, #e5e7eb); }
 .cm-advice-tag { font-weight: 600; }
 .cm-advice-text { min-width: 0; }
-.cm-advice-text .cm-sub { white-space: normal; margin-top: 2px; }
+.cm-advice-text .cm-sub { white-space: normal; margin-top: 3px; font-size: 18px; line-height: 1.4; }
+.cm-advice-tag .cm-sub { font-size: 16px; }
+.cm-advice-text summary { cursor: pointer; }
+.cm-apply-ask { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; font-size: 16px; max-width: 340px; }
 @media (max-width: 700px) { .cm-advice-row { grid-template-columns: minmax(0, 1fr); } }

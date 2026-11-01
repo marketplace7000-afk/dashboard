@@ -490,7 +490,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const cards = await import('./_lib/cards');
       if (req.method === 'GET' && parts[1] === 'advice') {
         const { allAdvice } = await import('./_lib/cardAdvice');
-        return res.status(200).json({ ok: true, cards: await allAdvice() });
+        return res.status(200).json({ ok: true, cards: await allAdvice(req.query?.fresh === '1') });
       }
       if (req.method === 'GET' && parts[1] === 'catalog') return res.status(200).json({ ok: true, items: cards.catalog(req.query?.mp) });
       if (req.method === 'POST' && parts[1] === 'pin') { cards.savePin(req.body); return res.status(200).json({ ok: true }); }

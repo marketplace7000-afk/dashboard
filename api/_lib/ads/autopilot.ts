@@ -796,7 +796,7 @@ export async function listProposals(mp: AdMp | null, history = false): Promise<A
   return list;
 }
 
-const ACTIONABLE: Ads2ProposalKind[] = ['bid', 'pause', 'daily_limit', 'weekly_budget'];
+export const ACTIONABLE: Ads2ProposalKind[] = ['bid', 'pause', 'daily_limit', 'weekly_budget'];
 
 // Предложения, которые сейчас применяются. Статус «applied» ставится только после
 // ответа площадки, и двойной клик «Применить» успевал отправить команду дважды

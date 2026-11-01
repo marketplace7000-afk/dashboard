@@ -420,13 +420,39 @@ function SeoEdits({ pin }: { pin: Pin }) {
 }
 
 type Tab = 'advice' | 'queries' | 'comp' | 'vis' | 'edits' | 'rules';
-type Advice = { key: string; area: 'margin' | 'ads' | 'text' | 'price' | 'stock' | 'sales'; level: 'high' | 'mid' | 'low'; title: string; why: string; open: 'edits' | 'vis' | 'rules' | 'ads' | null };
+type Advice = { key: string; area: 'margin' | 'ads' | 'text' | 'price' | 'stock' | 'sales'; level: 'high' | 'mid' | 'low'; title: string; why: string; open: 'edits' | 'vis' | 'rules' | 'ads' | null; more?: string; proposalId?: number };
 type CardAdvice = { items: Advice[]; failed: string[] };
 const AREA: Record<Advice['area'], string> = { margin: 'Маржа', ads: 'Реклама', text: 'Карточка', price: 'Цена', stock: 'Запас', sales: 'Продажи' };
 const LEVEL: Record<Advice['level'], string> = { high: 'Сначала это', mid: 'Важно', low: 'Можно позже' };
 const OPEN: Record<'edits' | 'vis' | 'rules', string> = { edits: 'Правки SEO', vis: 'Видимость', rules: 'Рамки' };
 
-function AdviceList({ advice, onOpen, onOpenAds }: { advice: CardAdvice | undefined; onOpen: (t: Tab) => void; onOpenAds?: () => void }) {
+/** «Применить» уходит на площадку, поэтому сначала вопрос, с ответом на месте. */
+function ApplyAd({ a, onDone }: { a: Advice; onDone: () => void }) {
+  const [step, setStep] = useState<'idle' | 'ask' | 'busy'>('idle');
+  const [big, setBig] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const send = async () => {
+    setStep('busy');
+    try {
+      const r = await apiPost<{ ok: boolean; message: string; needConfirm?: boolean }>('/api/ads2/autopilot', { id: a.proposalId, decision: 'apply', note: 'Ведение карточек', confirmBig: !!big }, { timeoutMs: 120_000 });
+      if (r.data.needConfirm) { setBig(r.data.message); setStep('ask'); return; }
+      setMsg({ ok: r.data.ok, text: r.data.message });
+      setStep('idle');
+      if (r.data.ok) onDone();
+    } catch (e) { setMsg({ ok: false, text: errText(e) }); setStep('idle'); }
+  };
+  if (msg) return <span className={msg.ok ? 'cm-good' : 'cm-bad'} style={{ maxWidth: 260 }}>{msg.ok ? 'Применено' : msg.text}</span>;
+  if (step === 'idle') return <button className="btn btn-primary btn-sm" onClick={() => setStep('ask')}>Применить</button>;
+  return (
+    <span className="cm-apply-ask">
+      <span>{big || 'Изменить на площадке?'}</span>
+      <button className="btn btn-primary btn-sm" disabled={step === 'busy'} onClick={() => void send()}>{step === 'busy' ? 'Отправляю…' : 'Да, применить'}</button>
+      <button className="btn btn-sm" disabled={step === 'busy'} onClick={() => { setBig(''); setStep('idle'); }}>Отмена</button>
+    </span>
+  );
+}
+
+function AdviceList({ advice, onOpen, onOpenAds, onApplied }: { advice: CardAdvice | undefined; onOpen: (t: Tab) => void; onOpenAds?: () => void; onApplied: () => void }) {
   if (!advice) return <div className="muted">Считаю рекомендации…</div>;
   return (
     <div className="cm-advice">
@@ -434,19 +460,20 @@ function AdviceList({ advice, onOpen, onOpenAds }: { advice: CardAdvice | undefi
       {advice.items.map(a => (
         <div key={a.key} className={`cm-advice-row ${a.level}`}>
           <div className="cm-advice-tag">{AREA[a.area]}<div className="cm-sub">{LEVEL[a.level]}</div></div>
-          <div className="cm-advice-text"><b>{a.title}</b><div className="cm-sub">{a.why}</div></div>
-          {a.open === 'ads'
+          <div className="cm-advice-text"><b>{a.title}</b><div className="cm-sub">{a.why}</div>{a.more && <details className="cm-sub"><summary>Подробнее</summary>{a.more}</details>}</div>
+          {a.proposalId != null ? <ApplyAd a={a} onDone={onApplied} />
+            : a.open === 'ads'
             ? <button className="btn btn-sm" onClick={onOpenAds}>Реклама</button>
             : a.open && <button className="btn btn-sm" onClick={() => onOpen(a.open as Tab)}>{OPEN[a.open]}</button>}
         </div>
       ))}
       {advice.failed.length > 0 && <div className="cm-warn">Не удалось проверить: {advice.failed.join(', ')}.</div>}
-      <p className="cm-note">Рекомендации пересчитываются из свежих данных при открытии раздела, не реже раза в 5 минут. Данные поиска Ozon обновляются ночью. На площадках ничего не меняется, решение за вами.</p>
+      <p className="cm-note">Рекомендации пересчитываются из свежих данных при открытии раздела, не реже раза в 5 минут. Данные поиска Ozon обновляются ночью. Изменения уходят на площадку только по кнопке «Применить»: сейчас она есть у предложений автопилота по рекламе. Цену поднимаем не больше чем на 1 % в день от цены в кабинете.</p>
     </div>
   );
 }
 
-function PinDetails({ pin, advice, onChanged, onOpenAds }: { pin: Pin; advice: CardAdvice | undefined; onChanged: () => void; onOpenAds?: () => void }) {
+function PinDetails({ pin, advice, onChanged, onOpenAds, onApplied }: { pin: Pin; advice: CardAdvice | undefined; onChanged: () => void; onOpenAds?: () => void; onApplied: () => void }) {
   const [tab, setTab] = useState<Tab>('advice');
   const [d, setD] = useState<Details | null>(null);
   const [err, setErr] = useState('');
@@ -468,7 +495,7 @@ function PinDetails({ pin, advice, onChanged, onOpenAds }: { pin: Pin; advice: C
       <div className="cm-tabs">
         {tabs.map(([k, label]) => <button key={k} className={`cm-tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{label}</button>)}
       </div>
-      {tab === 'advice' ? <AdviceList advice={advice} onOpen={setTab} onOpenAds={onOpenAds} />
+      {tab === 'advice' ? <AdviceList advice={advice} onOpen={setTab} onOpenAds={onOpenAds} onApplied={onApplied} />
         : tab === 'rules'
         ? <Settings key={`${pin.goal}|${pin.minMarginPct}|${pin.minMarginUntil}|${pin.maxDrrPct}|${pin.minStockDays}`} pin={pin} onSaved={onChanged} />
         : tab === 'edits' ? <SeoEdits pin={pin} />
@@ -523,13 +550,14 @@ export function Cards({ onOpenAds }: { onOpenAds?: () => void } = {}) {
   };
 
   const [advice, setAdvice] = useState<Record<string, CardAdvice>>({});
+  const [nonce, setNonce] = useState(0);
   useEffect(() => {
     let live = true;
-    const pull = () => apiGet<{ cards: Record<string, CardAdvice> }>('/api/cards/advice').then(r => { if (live) setAdvice(r.data.cards); }).catch(() => {});
+    const pull = () => apiGet<{ cards: Record<string, CardAdvice> }>(`/api/cards/advice${nonce ? '?fresh=1' : ''}`).then(r => { if (live) setAdvice(r.data.cards); }).catch(() => {});
     void pull();
     const t = setInterval(pull, 5 * 60_000);
     return () => { live = false; clearInterval(t); };
-  }, [pins?.length]);
+  }, [pins?.length, nonce]);
   const list = pins?.filter(p => p.mp === mp) ?? [];
   const count = (m: Mp) => pins?.filter(p => p.mp === m).length ?? 0;
 
@@ -603,7 +631,7 @@ export function Cards({ onOpenAds }: { onOpenAds?: () => void } = {}) {
                       <td><Turnover p={p} /></td>
                       <td><button className="btn btn-sm" onClick={e => { e.stopPropagation(); void unpin(p); }}>Открепить</button></td>
                     </tr>
-                    {isOpen && <tr><td colSpan={10} style={{ padding: 16, textAlign: 'left', whiteSpace: 'normal', maxWidth: 0 }}><PinDetails pin={p} advice={advice[key]} onChanged={load} onOpenAds={onOpenAds} /></td></tr>}
+                    {isOpen && <tr><td colSpan={10} style={{ padding: 16, textAlign: 'left', whiteSpace: 'normal', maxWidth: 0 }}><PinDetails pin={p} advice={advice[key]} onChanged={load} onOpenAds={onOpenAds} onApplied={() => { void load(); setTimeout(() => setNonce(n => n + 1), 4000); }} /></td></tr>}
                   </Fragment>
                 );
               })}
@@ -611,7 +639,7 @@ export function Cards({ onOpenAds }: { onOpenAds?: () => void } = {}) {
           </table>
         </div>
       )}
-      <div className="muted">Агент советует, но сам на площадках ничего не меняет.</div>
+      <div className="muted">Сам агент на площадках ничего не меняет: только по вашей кнопке «Применить».</div>
     </div>
   );
 }

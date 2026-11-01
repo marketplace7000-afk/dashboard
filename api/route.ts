@@ -491,6 +491,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (req.method === 'GET' && parts[1] === 'catalog') return res.status(200).json({ ok: true, items: cards.catalog(req.query?.mp) });
       if (req.method === 'POST' && parts[1] === 'pin') { cards.savePin(req.body); return res.status(200).json({ ok: true }); }
       if (req.method === 'POST' && parts[1] === 'unpin') { cards.removePin(req.body); return res.status(200).json({ ok: true }); }
+      if (parts[1] === 'seo') {
+        const seo = await import('./_lib/cardSeo');
+        if (req.method === 'GET') return res.status(200).json({ ok: true, ...(await seo.seoOverview(req.query?.mp, req.query?.sku)) });
+        if (req.method === 'POST' && parts[2] === 'draft') return res.status(200).json({ ok: true, draft: await seo.seoMakeDraft(req.body) });
+        if (req.method === 'POST' && parts[2] === 'mark') { seo.seoMark(req.body); return res.status(200).json({ ok: true }); }
+        if (req.method === 'POST' && parts[2] === 'decide') { seo.seoDecide(req.body); return res.status(200).json({ ok: true }); }
+      }
       if (req.method === 'GET' && parts[1] === 'details') return res.status(200).json({ ok: true, ...cards.cardDetails(req.query?.mp, req.query?.sku) });
       if (req.method === 'POST' && parts[1] === 'refresh') { void cards.collectCardQueries(true).catch(() => {}); return res.status(200).json({ ok: true }); }
       if (req.method === 'GET' && !parts[1]) return res.status(200).json({ ok: true, pins: await cards.listPins() });

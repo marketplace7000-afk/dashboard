@@ -184,8 +184,110 @@ function Competitors({ mp, comp }: { mp: Mp; comp: Comp | null }) {
   );
 }
 
+type SeoDraft = {
+  id: number; status: 'draft' | 'approved' | 'rejected';
+  before: { title: string; description: string }; after: { title: string; description: string };
+  why: string; used: string[]; usedTitle?: string[]; usedDescription?: string[]; skipped: { query: string; reason: string }[]; warnings: string[];
+};
+type SeoData = {
+  content: { title: string; description: string };
+  adDays: number | null;
+  gaps: {
+    text: string; freq: number | null; pos: number | null; reach: number | null; cart: number | null; orders: number | null;
+    tier: 'ВЧ' | 'СЧ' | 'НЧ' | null; verdict: 'works' | 'weak' | 'nodata';
+    ad: { clicks: number; carts: number; orders: number; spend: number } | null; mark: 'target' | 'exclude' | null; missing: string[];
+  }[];
+  draft: SeoDraft | null;
+};
+
+function TextBox({ label, text }: { label: string; text: string }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div className="muted">{label}</div>
+      <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 280, overflowY: 'auto', marginTop: 4 }}>{text}</div>
+    </div>
+  );
+}
+
+function SeoEdits({ pin }: { pin: Pin }) {
+  const [d, setD] = useState<SeoData | null>(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    try { setD((await apiGet<SeoData>(`/api/cards/seo?mp=${pin.mp}&sku=${encodeURIComponent(pin.sku)}`)).data); setErr(''); }
+    catch (e) { setErr(errText(e)); }
+  }, [pin.mp, pin.sku]);
+  useEffect(() => { void load(); }, [load]);
+  const make = async () => {
+    setBusy(true); setErr('');
+    try { await apiPost('/api/cards/seo/draft', { mp: pin.mp, sku: pin.sku }); await load(); }
+    catch (e) { setErr(errText(e)); }
+    finally { setBusy(false); }
+  };
+  const mark = async (text: string, value: 'target' | 'exclude' | null) => {
+    try { await apiPost('/api/cards/seo/mark', { mp: pin.mp, sku: pin.sku, text, mark: value }); await load(); }
+    catch (e) { setErr(errText(e)); }
+  };
+  const decide = async (id: number, decision: 'approved' | 'rejected') => {
+    try { await apiPost('/api/cards/seo/decide', { id, decision }); await load(); }
+    catch (e) { setErr(errText(e)); }
+  };
+  if (err && !d) return <div style={{ color: danger }}>{err}</div>;
+  if (!d) return <div className="muted">Загрузка…</div>;
+  const dr = d.draft;
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div><b>Сейчас в карточке:</b> {d.content.title}</div>
+      {d.gaps.length > 0 ? (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><th style={{ ...th, textAlign: 'left' }}>Запрос</th><th style={th}>Тип</th><th style={th}>Частота</th><th style={th}>Место</th>
+              <th style={th}>Переходы / корзины / заказы</th>
+              {d.adDays != null && <th style={th}>Реклама за {d.adDays} дн.: ₽ / переходы / корзины / заказы</th>}
+              <th style={th}>Оценка</th><th style={{ ...th, textAlign: 'left' }}>Нет в тексте</th><th style={{ ...th, textAlign: 'left' }}>Ваше решение</th></tr></thead>
+            <tbody>{d.gaps.map(g => (
+              <tr key={g.text}>
+                <td style={tdText}>{g.text}</td><td style={td}>{g.tier ?? '—'}</td><td style={td}>{num(g.freq)}</td><td style={td}>{num(g.pos)}</td>
+                <td style={td}>{num(g.reach)} / {g.cart == null ? '—' : num(g.cart)} / {num(g.orders)}</td>
+                {d.adDays != null && <td style={td}>{g.ad ? `${Math.round(g.ad.spend)} / ${g.ad.clicks} / ${g.ad.carts} / ${g.ad.orders}` : '—'}</td>}
+                <td style={{ ...td, color: g.verdict === 'weak' ? danger : undefined }}>{g.verdict === 'works' ? 'работает' : g.verdict === 'weak' ? 'слабая воронка' : 'мало данных'}</td>
+                <td style={{ ...tdText, minWidth: 120 }}>{g.missing.join(', ') || '—'}</td>
+                <td style={{ ...tdText, whiteSpace: 'nowrap' }}>
+                  <button className={`btn btn-sm${g.mark === 'target' ? ' btn-primary' : ''}`} onClick={() => mark(g.text, g.mark === 'target' ? null : 'target')}>Целевой</button>{' '}
+                  <button className={`btn btn-sm${g.mark === 'exclude' ? ' btn-primary' : ''}`} onClick={() => mark(g.text, g.mark === 'exclude' ? null : 'exclude')}>Не наш</button>
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      ) : <div className="muted">Запросов без покрытия в тексте и рекламных трат нет.</div>}
+      {err && <div style={{ color: danger }}>{err}</div>}
+      <div><button className="btn btn-sm btn-primary" onClick={make} disabled={busy || !d.gaps.length}>{busy ? 'Готовлю черновик…' : 'Подготовить черновик'}</button></div>
+      {dr && (
+        <div style={{ display: 'grid', gap: 10, borderTop: '1px solid var(--line, #e6e6e6)', paddingTop: 12 }}>
+          {dr.why && <div>{dr.why}</div>}
+          {dr.warnings.map(w => <div key={w} style={{ color: danger }}>Проверьте: {w}</div>)}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+            <TextBox label="Название, было" text={dr.before.title} />
+            <TextBox label="Название, станет" text={dr.after.title} />
+            <TextBox label="Описание, было" text={dr.before.description} />
+            <TextBox label="Описание, станет" text={dr.after.description} />
+          </div>
+          {dr.usedTitle && dr.usedTitle.length > 0 && <div className="muted">В название: {dr.usedTitle.join(', ')}</div>}
+          {dr.usedDescription && dr.usedDescription.length > 0 && <div className="muted">В описание: {dr.usedDescription.join(', ')}</div>}
+          {dr.skipped.length > 0 && <div className="muted">Не взяты: {dr.skipped.map(s => `${s.query} (${s.reason})`).join('; ')}</div>}
+          {dr.status === 'draft'
+            ? <div style={{ display: 'flex', gap: 8 }}><button className="btn btn-sm btn-primary" onClick={() => decide(dr.id, 'approved')}>Принять</button><button className="btn btn-sm" onClick={() => decide(dr.id, 'rejected')}>Отклонить</button></div>
+            : <div><b>{dr.status === 'approved' ? 'Принято' : 'Отклонено'}</b></div>}
+          <div className="muted">Отправки на площадку пока нет: «Принять» только записывает решение, карточка не меняется.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PinDetails({ pin, onChanged }: { pin: Pin; onChanged: () => void }) {
-  const [tab, setTab] = useState<'queries' | 'comp' | 'rules'>('queries');
+  const [tab, setTab] = useState<'queries' | 'comp' | 'edits' | 'rules'>('queries');
   const [d, setD] = useState<Details | null>(null);
   const [err, setErr] = useState('');
   useEffect(() => {
@@ -195,7 +297,7 @@ function PinDetails({ pin, onChanged }: { pin: Pin; onChanged: () => void }) {
       .catch(e => { if (live) setErr(errText(e)); });
     return () => { live = false; };
   }, [pin.mp, pin.sku]);
-  const tabs: [typeof tab, string][] = [['queries', 'Запросы'], ['comp', 'Конкуренты'], ['rules', 'Рамки']];
+  const tabs: [typeof tab, string][] = [['queries', 'Запросы'], ['comp', 'Конкуренты'], ['edits', 'Правки SEO'], ['rules', 'Рамки']];
   return (
     <div>
       <div className="rnp-tabs" style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -203,6 +305,7 @@ function PinDetails({ pin, onChanged }: { pin: Pin; onChanged: () => void }) {
       </div>
       {tab === 'rules'
         ? <Settings key={`${pin.goal}|${pin.minMarginPct}|${pin.minMarginUntil}|${pin.maxDrrPct}|${pin.minStockDays}`} pin={pin} onSaved={onChanged} />
+        : tab === 'edits' ? <SeoEdits pin={pin} />
         : err ? <div style={{ color: danger }}>{err}</div>
         : !d ? <div className="muted">Загрузка…</div>
         : tab === 'queries' ? <Queries mp={pin.mp} d={d} />

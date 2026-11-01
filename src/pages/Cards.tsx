@@ -36,12 +36,6 @@ type Comp = {
   queries: { text: string; freq: number | null; nms?: CompNm[] }[];
 };
 type Details = { queries: Query[]; collectedAt: number | null; comp: Comp | null };
-type WatchLink = {
-  id: string; url: string; status: string; title: string; brand: string; seller: string; photo: string;
-  price: number | null; rating: number | null; feedbacks: number | null; stock: number | null; orders: number | null; ordersDays: number | null;
-  ctr: number | null; gmv: number | null; drr: number | null; convPdp: number | null; inAds: boolean | null; inPromo: boolean | null; hidden: boolean;
-};
-type Watch = { at: number | null; our: WatchLink | null; links: WatchLink[] };
 type VisRow = { sku: string; relevance: number | null; popularity: number | null; rating: number | null; reviews: number | null; price: number | null; delivery: string; promo: string; cpc: number | null; pos: number | null; name: string; seller: string; ours: boolean };
 type VisQuery = { query: string; date: string; region: string; regionWhy: string; total: number | null; ours: VisRow | null; top: VisRow[]; topRelevance: number | null; topPopularity: number | null; topPrice: number | null; diag: string };
 
@@ -186,98 +180,34 @@ function Queries({ mp, d }: { mp: Mp; d: Details }) {
   );
 }
 
-/** Наша карточка против привязанных конкурентов: те же данные, что в разделе «Конкуренты». */
-function WatchTable({ mp, w }: { mp: Mp; w: Watch }) {
-  const row = (x: WatchLink, ours: boolean) => (
-    <tr key={x.id} className={ours ? 'is-target' : ''}>
-      <td className="l stick">
-        <div className="cm-prod" style={{ minWidth: 300 }}>
-          {x.photo && <img src={x.photo} alt="" />}
-          <span style={{ minWidth: 0 }}>
-            {ours ? <b>Наша карточка</b> : <a href={x.url} target="_blank" rel="noreferrer">{x.brand || x.seller || x.id}</a>}
-            <div className="cm-sub" style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{x.title}</div>
-          </span>
-        </div>
-      </td>
-      <td>{rub(x.price)}</td>
-      <td>{dec(x.rating)}<div className="cm-sub">{num(x.feedbacks)} отз.</div></td>
-      <td>{num(x.orders)}{x.ordersDays ? <div className="cm-sub">за {x.ordersDays} дн.</div> : null}</td>
-      {mp === 'ozon' && <td>{rub(x.gmv)}</td>}
-      <td>{pct(x.ctr)}</td>
-      {mp === 'ozon' && <td>{pct(x.convPdp)}</td>}
-      {mp === 'ozon' && <td>{pct(x.drr)}</td>}
-      <td>{x.inAds == null ? '—' : x.inAds ? 'да' : 'нет'}</td>
-      <td>{x.inPromo == null ? '—' : x.inPromo ? 'да' : 'нет'}</td>
-      <td className={x.stock === 0 || x.hidden ? 'cm-bad' : ''}>{x.hidden ? 'не виден' : x.stock == null ? '—' : x.stock === 0 ? 'нет' : num(x.stock)}</td>
-    </tr>
-  );
-  return (
-    <div className="cm-scroll">
-      <table className="cm-table">
-        <thead><tr>
-          <th className="l stick">Карточка</th><th>Цена</th><th>Рейтинг</th><th>Заказы</th>
-          {mp === 'ozon' && <th>Выручка</th>}
-          <th>CTR</th>
-          {mp === 'ozon' && <th>В корзину</th>}
-          {mp === 'ozon' && <th>ДРР</th>}
-          <th>Реклама</th><th>Акции</th><th>Остаток</th>
-        </tr></thead>
-        <tbody>
-          {w.our && row(w.our, true)}
-          {w.links.map(l => row(l, false))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Competitors({ pin, comp }: { pin: Pin; comp: Comp | null }) {
-  const mp = pin.mp;
-  const [w, setW] = useState<Watch | null>(null);
-  const [err, setErr] = useState('');
-  useEffect(() => {
-    let live = true;
-    apiGet<Watch>(`/api/cards/competitors?mp=${mp}&sku=${encodeURIComponent(pin.sku)}`)
-      .then(r => { if (live) setW(r.data); })
-      .catch(e => { if (live) setErr(errText(e)); });
-    return () => { live = false; };
-  }, [mp, pin.sku]);
-  const [own, ...rest] = comp?.cards ?? [];
-  const hasNms = !!comp?.queries.some(q => q.nms?.length);
+/** WB: запросы из «Сравнения карточек» по каждому конкуренту. Цены и продажи конкурентов — в разделе «Конкуренты». */
+function CompQueries({ comp }: { comp: Comp | null }) {
+  if (!comp) return <div className="muted">Данных пока нет: они появятся после ночного прохода, если у карточки есть открытое сравнение.</div>;
+  const [own, ...rest] = comp.cards;
+  const hasNms = comp.queries.some(q => q.nms?.length);
   const of = (q: Comp['queries'][number], nm: number) => q.nms?.find(n => n.nmId === nm);
   const cell = (n?: CompNm) => n == null ? '—' : n.shown === false ? 'нет данных' : <>{num(n.pos)} место<div className="cm-sub">{num(n.orders)} зак.</div></>;
   return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      {err && <div className="cm-bad">{err}</div>}
-      {!w && !err && <div className="muted">Загрузка…</div>}
-      {w && (w.links.length
-        ? <WatchTable mp={mp} w={w} />
-        : <div className="muted">К этой карточке не привязаны конкуренты. Привяжите их в разделе «Конкуренты», и они появятся здесь после ночного прохода.</div>)}
-      {mp === 'ozon' && <p className="cm-note" style={{ margin: 0 }}>Цифры из «Товаров на Ozon» и витрины. Запросы конкретного конкурента Ozon открывает только с Premium Pro, поэтому борьбу по запросам смотрите на вкладке «Видимость в поиске»: там лидеры выдачи.</p>}
-      {mp === 'wb' && comp && (
-        <div>
-          <div className="cm-scroll">
-            <table className="cm-table">
-              <thead><tr>
-                <th className="l stick">Запрос</th>
-                <th>Частота</th>
-                {hasNms && <th className="gl">Мы</th>}
-                {hasNms && rest.map(c => <th key={c.nmId} title={c.name}>{c.brand || c.nmId}</th>)}
-              </tr></thead>
-              <tbody>{comp.queries.map(q => (
-                <tr key={q.text}>
-                  <td className="l q stick">{q.text}</td>
-                  <td>{num(q.freq)}</td>
-                  {hasNms && <td className="gl"><b>{cell(of(q, own.nmId))}</b></td>}
-                  {hasNms && rest.map(c => <td key={c.nmId}>{cell(of(q, c.nmId))}</td>)}
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
-          <p className="cm-note">Сравнение от {dateRu(comp.setDate)}, за 30 дней. «Нет данных»: WB не отдал цифры по этой карточке, это не значит, что её нет в поиске.</p>
-        </div>
-      )}
-      {mp === 'wb' && !comp && <div className="muted">Запросов сравнения пока нет: они появятся после ночного прохода, если у карточки есть открытое сравнение.</div>}
+    <div>
+      <div className="cm-scroll">
+        <table className="cm-table">
+          <thead><tr>
+            <th className="l stick">Запрос</th>
+            <th>Частота</th>
+            {hasNms && <th className="gl">Мы</th>}
+            {hasNms && rest.map(c => <th key={c.nmId} title={c.name}>{c.brand || c.nmId}</th>)}
+          </tr></thead>
+          <tbody>{comp.queries.map(q => (
+            <tr key={q.text}>
+              <td className="l q stick">{q.text}</td>
+              <td>{num(q.freq)}</td>
+              {hasNms && <td className="gl"><b>{cell(of(q, own.nmId))}</b></td>}
+              {hasNms && rest.map(c => <td key={c.nmId}>{cell(of(q, c.nmId))}</td>)}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      <p className="cm-note">Сравнение от {dateRu(comp.setDate)}, за 30 дней. «Нет данных»: WB не отдал цифры по этой карточке, это не значит, что её нет в поиске.</p>
     </div>
   );
 }
@@ -348,8 +278,13 @@ type SeoGapRow = {
   text: string; freq: number | null; pos: number | null; reach: number | null; cart: number | null; orders: number | null;
   tier: 'ВЧ' | 'СЧ' | 'НЧ' | null; verdict: 'works' | 'weak' | 'nodata';
   ad: { clicks: number; carts: number; orders: number; spend: number } | null; mark: 'target' | 'exclude' | null; missing: string[];
+  twin?: 'ВЧ' | 'СЧ' | 'НЧ' | null;
 };
-type SeoData = { content: { title: string; description: string }; adDays: number | null; gaps: SeoGapRow[]; draft: SeoDraft | null };
+type SeoCross = {
+  mp: Mp; base: Mp; baseCount: number; otherCount: number; pct: number | null;
+  tiers: Record<'ВЧ' | 'СЧ' | 'НЧ', { total: number; found: number; pct: number | null }>;
+};
+type SeoData = { content: { title: string; description: string }; adDays: number | null; cross: SeoCross | null; gaps: SeoGapRow[]; draft: SeoDraft | null };
 type SeoFilter = 'all' | 'none' | 'target' | 'exclude';
 
 function TextBox({ label, text }: { label: string; text: string }) {
@@ -402,6 +337,13 @@ function SeoEdits({ pin }: { pin: Pin }) {
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       <div><b>Сейчас в карточке:</b> {d.content.title}</div>
+      {d.cross ? (
+        <div>
+          <b className={(d.cross.pct ?? 0) >= 70 ? 'cm-good' : 'cm-warn'}>Совпадение с {MP_INFO[d.cross.mp].label}: {d.cross.pct ?? '—'} %</b>
+          {' · '}{(['ВЧ', 'СЧ', 'НЧ'] as const).map(t => `${t} ${d.cross!.tiers[t].total ? `${d.cross!.tiers[t].found} из ${d.cross!.tiers[t].total}` : 'нет'}`).join(' · ')}
+          <div className="cm-sub">{MP_INFO[d.cross.base].label}: {d.cross.baseCount} запросов проверены в списке другой площадки из {d.cross.otherCount}. Запросы, найденные на двух площадках, агент берёт в черновик первыми.</div>
+        </div>
+      ) : <div className="cm-sub">Сравнение с другой площадкой появится после сбора запросов этого товара там.</div>}
       {d.gaps.length > 0 ? (
         <div>
           <div className="cm-filter">
@@ -415,6 +357,7 @@ function SeoEdits({ pin }: { pin: Pin }) {
                   <th className="l stick" rowSpan={2}>Запрос</th>
                   <th className="l" rowSpan={2}>Ваше решение</th>
                   <th rowSpan={2}>Тип</th>
+                  <th rowSpan={2} title="Тип этого запроса на другой площадке">{isWb ? 'На Ozon' : 'На WB'}</th>
                   <th className="c" colSpan={isWb ? 5 : 4}>Поиск{isWb ? ' за 7 дн.' : ' за 4 нед.'}</th>
                   {hasAds && <th className="c" colSpan={4}>Реклама за {d.adDays} дн.</th>}
                   <th className="gl" rowSpan={2}>Оценка</th>
@@ -435,6 +378,7 @@ function SeoEdits({ pin }: { pin: Pin }) {
                     </span>
                   </td>
                   <td>{g.tier ?? '—'}</td>
+                  <td className={g.twin ? 'cm-good' : 'muted'}>{g.twin ?? 'нет'}</td>
                   <td className="gl">{num(g.freq)}</td><td>{num(g.pos)}</td><td>{num(g.reach)}</td>{isWb && <td>{num(g.cart)}</td>}<td>{num(g.orders)}</td>
                   {hasAds && (g.ad
                     ? <><td className="gl">{num(g.ad.spend)}</td><td>{num(g.ad.clicks)}</td><td>{num(g.ad.carts)}</td><td>{num(g.ad.orders)}</td></>
@@ -487,8 +431,8 @@ function PinDetails({ pin, onChanged }: { pin: Pin; onChanged: () => void }) {
     return () => { live = false; };
   }, [pin.mp, pin.sku]);
   const tabs: [Tab, string][] = [
-    ['queries', 'Запросы'], ['comp', 'Конкуренты'],
-    ...(pin.mp === 'ozon' ? [['vis', 'Видимость в поиске'] as [Tab, string]] : []),
+    ['queries', 'Запросы'],
+    pin.mp === 'ozon' ? ['vis', 'Видимость в поиске'] : ['comp', 'Запросы конкурентов'],
     ['edits', 'Правки SEO'], ['rules', 'Рамки'],
   ];
   return (
@@ -503,7 +447,7 @@ function PinDetails({ pin, onChanged }: { pin: Pin; onChanged: () => void }) {
         : err ? <div className="cm-bad">{err}</div>
         : !d ? <div className="muted">Загрузка…</div>
         : tab === 'queries' ? <Queries mp={pin.mp} d={d} />
-        : <Competitors pin={pin} comp={d.comp} />}
+        : <CompQueries comp={d.comp} />}
     </div>
   );
 }
@@ -590,7 +534,7 @@ export function Cards() {
 
       {list.length > 0 && (
         <div className="cm-card" style={{ padding: 0, overflowX: 'auto' }}>
-          <table className="cm-table wide">
+          <table className="cm-table wide cm-list">
             <thead><tr>
               <th className="l">Карточка</th>
               <th>Заказы, 7 дн</th><th>Сумма</th><th>Реклама</th><th>ДРР</th><th>Маржа</th><th>Прибыль, 7 дн</th><th>Цена</th><th title="За сколько дней разойдётся остаток при продажах за 28 дней. Меньше дней — быстрее оборот.">Оборачиваемость</th><th />

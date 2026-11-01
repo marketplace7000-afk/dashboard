@@ -2365,3 +2365,9 @@ code {
 @media (max-width: 700px) { .cm-table td.q { min-width: 170px; } .cm-prod { min-width: 230px; } }
 
 .cm-warn { color: #b45309; }
+/* Строки карточек: главные числа крупнее и на одной линии, подписи под ними. */
+.cm-table.cm-list > tbody > tr.cm-row > td { font-size: 21px; font-weight: 500; vertical-align: top; padding-top: 16px; padding-bottom: 16px; line-height: 1.2; }
+.cm-table.cm-list > tbody > tr.cm-row > td:first-child { font-size: 18px; font-weight: 400; vertical-align: middle; }
+.cm-table.cm-list > tbody > tr.cm-row > td b { font-weight: 650; }
+.cm-table.cm-list > tbody > tr.cm-row .cm-sub { font-size: 16px; font-weight: 400; margin-top: 4px; line-height: 1.25; }
+.cm-table.cm-list > tbody > tr.cm-row > td:last-child { vertical-align: middle; }

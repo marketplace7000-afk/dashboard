@@ -418,6 +418,8 @@ async function ozonVisibility(task: AgentTask, page: Page, cid: string, data: an
   const total = plan.reduce((n, p) => n + (p.queries?.length ?? 0), 0);
   if (!total) return;
   await api.progress(task.id, stage(1, `Видимость в поиске: ${total} запросов`), true);
+  // tsx оборачивает функции внутри evaluate в __name(), а на странице кабинета такого помощника нет.
+  await page.evaluate('globalThis.__name = globalThis.__name || (f => f)');
   const rows: any[] = [];
   let done = 0, failed = 0;
   outer: for (const p of plan) for (const query of p.queries as string[]) {

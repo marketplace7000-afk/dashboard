@@ -116,17 +116,6 @@ export function cardLimits(mp: RnpMp): Map<string, { minMargin: number | null; m
   return out;
 }
 
-/** Конкуренты карточки из раздела «Конкуренты»: те же данные и на WB, и на Ozon. */
-export async function cardCompetitors(mp: unknown, sku: unknown) {
-  if (!isMp(mp)) throw new Error('площадка: wb или ozon');
-  const { getCompetitors } = await import('./ads/cabinet');
-  const id = String(sku ?? ''), key = id.toUpperCase();
-  const c = getCompetitors(mp);
-  const article = (mp === 'wb' ? rnpItems(mp).find(i => i.sku === id)?.article ?? '' : id).toUpperCase();
-  const p = c.watch.find(w => w.ourId === id || w.key === key || (article && w.key === article));
-  return { at: c.at, our: p?.our ?? null, links: (p?.links ?? []).filter(l => l.status !== 'ignored') };
-}
-
 /** Оборачиваемость: за сколько дней разойдётся остаток при средних продажах. Меньше дней — быстрее оборот. */
 export type CardTurnPart = { stock: number | null; fbo: number | null; fbs: number | null; orders: number; perDay: number | null; days: number | null; period: number };
 export type CardTurnover = { here: CardTurnPart; other: (CardTurnPart & { mp: RnpMp }) | null; totalStock: number | null; totalPerDay: number | null; totalDays: number | null };
@@ -291,6 +280,15 @@ async function fetchOzon(ozonSku: string): Promise<CardQuery[]> {
   }));
 }
 
+/** Этот же товар на другой площадке: связь по артикулу продавца. */
+export function twinOf(mp: RnpMp, sku: string): { mp: RnpMp; sku: string } | null {
+  const art = (mp === 'wb' ? rnpItems('wb').find(i => i.sku === sku)?.article ?? '' : sku).toUpperCase();
+  if (!art) return null;
+  const other: RnpMp = mp === 'wb' ? 'ozon' : 'wb';
+  const it = rnpItems(other).find(i => (i.article || i.sku).toUpperCase() === art);
+  return it ? { mp: other, sku: it.sku } : null;
+}
+
 let collecting = false;
 
 /** Собрать запросы закреплённых карточек. force — не смотреть на возраст прошлого сбора. */
@@ -301,7 +299,10 @@ export async function collectCardQueries(force = false): Promise<string> {
     const d = qdb();
     const date = mskDate(0);
     const done: string[] = [], errors: string[] = [];
-    const pins = d.prepare('SELECT mp, sku FROM card_pin').all() as { mp: RnpMp; sku: string }[];
+    let ozonCalls = 0;
+    const pinned = d.prepare('SELECT mp, sku FROM card_pin').all() as { mp: RnpMp; sku: string }[];
+    // Тот же товар на другой площадке: его запросы нужны для перекрёстной проверки SEO, закреплять его не требуется.
+    const pins = [...new Map([...pinned, ...pinned.map(p => twinOf(p.mp, String(p.sku))).filter((t): t is { mp: RnpMp; sku: string } => !!t)].map(p => [`${p.mp}:${p.sku}`, p])).values()];
     for (const p of pins) {
       const last = d.prepare('SELECT MAX(at) at FROM card_query WHERE mp = ? AND sku = ?').get(p.mp, p.sku) as { at: number | null };
       if (!force && last?.at && Date.now() - last.at < COLLECT_EVERY_MS) continue;
@@ -311,6 +312,8 @@ export async function collectCardQueries(force = false): Promise<string> {
         else {
           const ext = rnpItems('ozon').find(i => i.sku === String(p.sku))?.extId;
           if (!ext) throw new Error('нет SKU Ozon');
+          // API запросов Ozon отвечает 429 уже на четвёртый запрос подряд: идём медленно, сбор фоновый.
+          if (ozonCalls++) await new Promise(r => setTimeout(r, 25_000));
           rows = await fetchOzon(ext);
         }
         // Пустой ответ не затирает прошлый сбор этого дня.

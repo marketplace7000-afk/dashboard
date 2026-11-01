@@ -498,7 +498,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (req.method === 'POST' && parts[2] === 'mark') { seo.seoMark(req.body); return res.status(200).json({ ok: true }); }
         if (req.method === 'POST' && parts[2] === 'decide') { seo.seoDecide(req.body); return res.status(200).json({ ok: true }); }
       }
-      if (req.method === 'GET' && parts[1] === 'competitors') return res.status(200).json({ ok: true, ...(await cards.cardCompetitors(req.query?.mp, req.query?.sku)) });
       if (req.method === 'GET' && parts[1] === 'visibility') {
         const { cardVisibility } = await import('./_lib/cardVisibility');
         return res.status(200).json({ ok: true, rows: cardVisibility(req.query?.sku) });

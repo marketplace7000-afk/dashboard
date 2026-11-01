@@ -419,10 +419,35 @@ function SeoEdits({ pin }: { pin: Pin }) {
   );
 }
 
-type Tab = 'queries' | 'comp' | 'vis' | 'edits' | 'rules';
+type Tab = 'advice' | 'queries' | 'comp' | 'vis' | 'edits' | 'rules';
+type Advice = { key: string; area: 'margin' | 'ads' | 'text' | 'price' | 'stock' | 'sales'; level: 'high' | 'mid' | 'low'; title: string; why: string; open: 'edits' | 'vis' | 'rules' | 'ads' | null };
+type CardAdvice = { items: Advice[]; failed: string[] };
+const AREA: Record<Advice['area'], string> = { margin: 'Маржа', ads: 'Реклама', text: 'Карточка', price: 'Цена', stock: 'Запас', sales: 'Продажи' };
+const LEVEL: Record<Advice['level'], string> = { high: 'Сначала это', mid: 'Важно', low: 'Можно позже' };
+const OPEN: Record<'edits' | 'vis' | 'rules', string> = { edits: 'Правки SEO', vis: 'Видимость', rules: 'Рамки' };
 
-function PinDetails({ pin, onChanged }: { pin: Pin; onChanged: () => void }) {
-  const [tab, setTab] = useState<Tab>('queries');
+function AdviceList({ advice, onOpen, onOpenAds }: { advice: CardAdvice | undefined; onOpen: (t: Tab) => void; onOpenAds?: () => void }) {
+  if (!advice) return <div className="muted">Считаю рекомендации…</div>;
+  return (
+    <div className="cm-advice">
+      {!advice.items.length && <div className="muted">Сейчас рекомендаций нет.</div>}
+      {advice.items.map(a => (
+        <div key={a.key} className={`cm-advice-row ${a.level}`}>
+          <div className="cm-advice-tag">{AREA[a.area]}<div className="cm-sub">{LEVEL[a.level]}</div></div>
+          <div className="cm-advice-text"><b>{a.title}</b><div className="cm-sub">{a.why}</div></div>
+          {a.open === 'ads'
+            ? <button className="btn btn-sm" onClick={onOpenAds}>Реклама</button>
+            : a.open && <button className="btn btn-sm" onClick={() => onOpen(a.open as Tab)}>{OPEN[a.open]}</button>}
+        </div>
+      ))}
+      {advice.failed.length > 0 && <div className="cm-warn">Не удалось проверить: {advice.failed.join(', ')}.</div>}
+      <p className="cm-note">Рекомендации пересчитываются из свежих данных при открытии раздела, не реже раза в 5 минут. Данные поиска Ozon обновляются ночью. На площадках ничего не меняется, решение за вами.</p>
+    </div>
+  );
+}
+
+function PinDetails({ pin, advice, onChanged, onOpenAds }: { pin: Pin; advice: CardAdvice | undefined; onChanged: () => void; onOpenAds?: () => void }) {
+  const [tab, setTab] = useState<Tab>('advice');
   const [d, setD] = useState<Details | null>(null);
   const [err, setErr] = useState('');
   useEffect(() => {
@@ -433,6 +458,7 @@ function PinDetails({ pin, onChanged }: { pin: Pin; onChanged: () => void }) {
     return () => { live = false; };
   }, [pin.mp, pin.sku]);
   const tabs: [Tab, string][] = [
+    ['advice', `Рекомендации${advice ? ` · ${advice.items.length}` : ''}`],
     ['queries', 'Запросы'],
     pin.mp === 'ozon' ? ['vis', 'Видимость в поиске'] : ['comp', 'Запросы конкурентов'],
     ['edits', 'Правки SEO'], ['rules', 'Рамки'],
@@ -442,7 +468,8 @@ function PinDetails({ pin, onChanged }: { pin: Pin; onChanged: () => void }) {
       <div className="cm-tabs">
         {tabs.map(([k, label]) => <button key={k} className={`cm-tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{label}</button>)}
       </div>
-      {tab === 'rules'
+      {tab === 'advice' ? <AdviceList advice={advice} onOpen={setTab} onOpenAds={onOpenAds} />
+        : tab === 'rules'
         ? <Settings key={`${pin.goal}|${pin.minMarginPct}|${pin.minMarginUntil}|${pin.maxDrrPct}|${pin.minStockDays}`} pin={pin} onSaved={onChanged} />
         : tab === 'edits' ? <SeoEdits pin={pin} />
         : tab === 'vis' ? <Visibility pin={pin} />
@@ -454,7 +481,7 @@ function PinDetails({ pin, onChanged }: { pin: Pin; onChanged: () => void }) {
   );
 }
 
-export function Cards() {
+export function Cards({ onOpenAds }: { onOpenAds?: () => void } = {}) {
   const [pins, setPins] = useState<Pin[] | null>(null);
   const [error, setError] = useState('');
   const [mp, setMp] = useState<Mp>('wb');
@@ -495,6 +522,14 @@ export function Cards() {
     catch (e) { setError(errText(e)); }
   };
 
+  const [advice, setAdvice] = useState<Record<string, CardAdvice>>({});
+  useEffect(() => {
+    let live = true;
+    const pull = () => apiGet<{ cards: Record<string, CardAdvice> }>('/api/cards/advice').then(r => { if (live) setAdvice(r.data.cards); }).catch(() => {});
+    void pull();
+    const t = setInterval(pull, 5 * 60_000);
+    return () => { live = false; clearInterval(t); };
+  }, [pins?.length]);
   const list = pins?.filter(p => p.mp === mp) ?? [];
   const count = (m: Mp) => pins?.filter(p => p.mp === m).length ?? 0;
 
@@ -554,6 +589,7 @@ export function Cards() {
                           <span style={{ minWidth: 0 }}>
                             <b>{p.article || p.sku}</b>
                             <div className="cm-sub" style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{p.name}</div>
+                            {advice[key]?.items.length ? <div className={`cm-sub ${advice[key].items[0].level === 'high' ? 'cm-bad' : 'cm-warn'}`} style={{ fontWeight: 600 }}>Рекомендаций: {advice[key].items.length}</div> : null}
                           </span>
                         </div>
                       </td>
@@ -567,7 +603,7 @@ export function Cards() {
                       <td><Turnover p={p} /></td>
                       <td><button className="btn btn-sm" onClick={e => { e.stopPropagation(); void unpin(p); }}>Открепить</button></td>
                     </tr>
-                    {isOpen && <tr><td colSpan={10} style={{ padding: 16, textAlign: 'left', whiteSpace: 'normal', maxWidth: 0 }}><PinDetails pin={p} onChanged={load} /></td></tr>}
+                    {isOpen && <tr><td colSpan={10} style={{ padding: 16, textAlign: 'left', whiteSpace: 'normal', maxWidth: 0 }}><PinDetails pin={p} advice={advice[key]} onChanged={load} onOpenAds={onOpenAds} /></td></tr>}
                   </Fragment>
                 );
               })}
@@ -575,7 +611,7 @@ export function Cards() {
           </table>
         </div>
       )}
-      <div className="muted">Агент пока только наблюдает: на площадках ничего не меняется.</div>
+      <div className="muted">Агент советует, но сам на площадках ничего не меняет.</div>
     </div>
   );
 }

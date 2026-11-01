@@ -231,7 +231,7 @@ export function App() {
           {view === 'fbo' && <Fbo />}
           {view === 'ads' && <Ads />}
           {view === 'competitors' && <Competitors />}
-          {view === 'cards' && <Cards />}
+          {view === 'cards' && <Cards onOpenAds={() => setPage('ads')} />}
           {view === 'settings' && <Settings />}
           {view === 'collectors' && <AgentHosts />}
           {view === 'access' && <Access />}

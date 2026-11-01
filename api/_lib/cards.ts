@@ -11,7 +11,7 @@ import { mskDate } from './mskDate';
 import { getMargins, priceFloor, type MarginReport } from './margin';
 import { marginThresholds } from './repricer';
 import { normSku } from './costs';
-import { rnpItems, rnpSkuTotals } from './rnp';
+import { rnpItems, rnpSkuTotals, rnpStockFacts } from './rnp';
 import { fetchWithRetry } from './fetchRetry';
 import { wbUpstream } from '../_proxy';
 import type { RnpMp } from '../../shared/rnp';
@@ -46,6 +46,7 @@ export type CardMargin = {
 
 export type CardPin = CardSettings & {
   margin: CardMargin | null;
+  turnover: CardTurnover;
   mp: RnpMp; sku: string; article: string; name: string; photo: string; pinnedAt: number;
   cur: CardPeriod | null; prev: CardPeriod | null; stock: number | null; price: number | null;
   /** Последний день, за который в РНП есть данные по карточке. */
@@ -102,6 +103,55 @@ export function cardMarginFloors(mp: RnpMp): Map<string, number> {
   return out;
 }
 
+/** Рамки закреплённых карточек для автопилота: артикул (UPPER) → свой минимум маржи, предел ДРР, минимальный запас. */
+export function cardLimits(mp: RnpMp): Map<string, { minMargin: number | null; maxDrr: number | null; minStockDays: number | null }> {
+  const out = new Map<string, { minMargin: number | null; maxDrr: number | null; minStockDays: number | null }>();
+  try {
+    const items = new Map(rnpItems(mp).map(i => [i.sku, i.article]));
+    for (const r of db().prepare('SELECT * FROM card_pin WHERE mp = ?').all(mp) as any[]) {
+      const sku = String(r.sku);
+      out.set(normSku(mp === 'wb' ? items.get(sku) ?? sku : sku), { minMargin: activeMin(r), maxDrr: r.max_drr ?? null, minStockDays: r.min_stock_days ?? null });
+    }
+  } catch (e) { console.warn('[cards] рамки не прочитаны:', (e as Error)?.message); }
+  return out;
+}
+
+/** Конкуренты карточки из раздела «Конкуренты»: те же данные и на WB, и на Ozon. */
+export async function cardCompetitors(mp: unknown, sku: unknown) {
+  if (!isMp(mp)) throw new Error('площадка: wb или ozon');
+  const { getCompetitors } = await import('./ads/cabinet');
+  const id = String(sku ?? ''), key = id.toUpperCase();
+  const c = getCompetitors(mp);
+  const article = (mp === 'wb' ? rnpItems(mp).find(i => i.sku === id)?.article ?? '' : id).toUpperCase();
+  const p = c.watch.find(w => w.ourId === id || w.key === key || (article && w.key === article));
+  return { at: c.at, our: p?.our ?? null, links: (p?.links ?? []).filter(l => l.status !== 'ignored') };
+}
+
+/** Оборачиваемость: за сколько дней разойдётся остаток при средних продажах. Меньше дней — быстрее оборот. */
+export type CardTurnPart = { stock: number | null; fbo: number | null; fbs: number | null; orders: number; perDay: number | null; days: number | null; period: number };
+export type CardTurnover = { here: CardTurnPart; other: (CardTurnPart & { mp: RnpMp }) | null; totalStock: number | null; totalPerDay: number | null; totalDays: number | null };
+
+const TURN_DAYS = 28;
+
+function turnPart(mp: RnpMp, sku: string): CardTurnPart {
+  const f = rnpStockFacts(mp, sku, TURN_DAYS);
+  const perDay = f.orders > 0 && f.period > 0 ? f.orders / f.period : null;
+  return { ...f, perDay, days: perDay && f.stock != null ? Math.round(f.stock / perDay) : null };
+}
+
+function turnoverOf(mp: RnpMp, sku: string, article: string, items: Map<string, { sku: string; article: string }>): CardTurnover {
+  const here = turnPart(mp, sku);
+  const art = article.toUpperCase();
+  const oMp: RnpMp = mp === 'wb' ? 'ozon' : 'wb';
+  const twin = [...items.entries()].find(([k, it]) => k.startsWith(`${oMp}:`) && (it.article || it.sku).toUpperCase() === art)?.[1];
+  const o = twin ? turnPart(oMp, twin.sku) : null;
+  const other = o && o.stock != null ? { ...o, mp: oMp } : null;
+  // FBS — общий склад, площадки показывают его почти одинаково. Берём больший, иначе товар посчитается дважды.
+  const totalStock = other ? (here.fbo ?? 0) + (other.fbo ?? 0) + Math.max(here.fbs ?? 0, other.fbs ?? 0) : here.stock;
+  const perDay = (here.perDay ?? 0) + (other?.perDay ?? 0);
+  return { here, other, totalStock, totalPerDay: perDay || null, totalDays: perDay > 0 && totalStock != null ? Math.round(totalStock / perDay) : null };
+}
+
 function marginOf(mp: RnpMp, article: string, report: MarginReport | null, r: any, orders: number | null): CardMargin | null {
   if (!report) return null;
   const row = report.items[normSku(article)];
@@ -135,6 +185,7 @@ export async function listPins(): Promise<CardPin[]> {
       mp, sku, article: it?.article ?? '', name: it?.name ?? '', photo: it?.photo ?? '', pinnedAt: Number(r.pinned_at),
       goal: r.goal as CardGoal, minMarginPct: r.min_margin ?? null, minMarginUntil: r.min_margin_until ?? null, maxDrrPct: r.max_drr ?? null, minStockDays: r.min_stock_days ?? null,
       margin: marginOf(mp, mp === 'wb' ? it?.article ?? sku : sku, reports.get(mp) ?? null, r, cur?.orders ?? null),
+      turnover: turnoverOf(mp, sku, mp === 'wb' ? it?.article ?? sku : sku, items),
       cur: period(cur), prev: period(prev), stock: cur?.stock ?? null, price: cur?.price ?? null, dataDate: cur?.lastDate ?? null,
     };
   });

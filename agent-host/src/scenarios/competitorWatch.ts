@@ -409,6 +409,57 @@ const OZ_BY_SKU = (companyId: string, skus: number[]) => `(async (CID, SKUS) => 
   return { bySku: out, errors: errors, netFails: netFails };
 })(${JSON.stringify(companyId)}, ${JSON.stringify(skus)})`;
 
+/**
+ * «Видимость в поиске» → «Что влияет на место в поиске» по закреплённым карточкам (01.11.2026). Только чтение.
+ * Значения кабинет отдаёт текстом («84,90», «1 998 ₽»), поэтому разбираем их здесь.
+ */
+async function ozonVisibility(task: AgentTask, page: Page, cid: string, data: any): Promise<void> {
+  const plan = Array.isArray(task.params.visibility) ? task.params.visibility as any[] : [];
+  const total = plan.reduce((n, p) => n + (p.queries?.length ?? 0), 0);
+  if (!total) return;
+  await api.progress(task.id, stage(1, `Видимость в поиске: ${total} запросов`), true);
+  const rows: any[] = [];
+  let done = 0, failed = 0;
+  outer: for (const p of plan) for (const query of p.queries as string[]) {
+    let r: any = null;
+    try {
+      r = await page.evaluate(async (a: any) => {
+        const res = await fetch('/api/search-query-analytics/v2/external/explanation_by_id', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json', 'x-o3-company-id': a.cid, 'x-o3-app-name': 'seller-ui' },
+          body: JSON.stringify({ sellerId: a.cid, query: a.query, skus: [a.sku], sortOption: { headerKey: 'position', direction: 'SortDirectionAscending' }, coordinates: a.region, itemsPerPage: '36', pageNumber: '1', onlyCurSellerItems: false, applicationScope: 'SCOPE_BIG_OZON' }),
+        });
+        if (!res.ok) return { status: res.status };
+        const j = await res.json();
+        const numOf = (s: any) => { const m = String(s ?? '').replace(/\s/g, '').replace(',', '.').match(/\d+(\.\d+)?/); return m ? Number(m[0]) : null; };
+        const keys = (j.headers ?? []).map((h: any) => h.key);
+        const parse = (it: any) => {
+          const of = (k: string) => it.values?.[keys.indexOf(k)]?.values?.[0];
+          const label = (k: string) => of(k)?.label;
+          const info = of('itemInfo')?.itemInfo ?? {};
+          return {
+            sku: String(it.sku), ours: !!it.isCurSellerItem, name: String(info.name ?? ''), seller: String(info.sellerName ?? ''),
+            pos: numOf(label('position')?.value), relevance: numOf(label('textRelevance')?.value), popularity: numOf(label('generalPopularity')?.value),
+            rating: numOf(label('reviews')?.value), reviews: numOf(label('reviews')?.subvalue), price: numOf(label('price')?.value),
+            delivery: String(label('deliveryPeriod')?.value ?? ''), promo: String(label('salePromotions')?.value ?? ''), cpc: numOf(label('promotionCpcRate')?.value),
+          };
+        };
+        const items = j.items ?? [];
+        const exact = items.find((i: any) => i.isExactSku && i.foundWithQuery !== false);
+        return { status: 200, done: j.status, total: j.totalNumberOfItems ?? null, ours: exact ? parse(exact) : null, top: items.filter((i: any) => !i.isExactSku).slice(0, 10).map(parse) };
+      }, { cid, query, sku: String(p.ozonSku), region: p.region });
+    } catch (e) { failed++; await api.log(task.id, 'warn', `видимость: ${(e as Error).message.slice(0, 120)}`); }
+    if (r?.status === 403 || r?.status === 429) { await api.log(task.id, 'warn', `видимость: кабинет ответил ${r.status}, стоп`); break outer; }
+    if (r?.status === 200) rows.push({ sku: p.sku, query, region: p.region.title, why: p.why, total: r.total, ours: r.ours, top: r.top });
+    else if (r) failed++;
+    done++;
+    await api.progress(task.id, stage(1, `Видимость в поиске: ${done} из ${total}`, { items_done: done, items_total: total }), true);
+    await page.waitForTimeout(2500 + Math.random() * 2000);
+  }
+  data.visibility = rows;
+  if (failed) data.errors = [...(data.errors ?? []), `видимость: не сняты ${failed} запросов`];
+}
+
 /** Продажи, выручка, CTR, корзина, ДРР, акции по каждому привязанному конкуренту и нашему товару («Товары на Ozon»). */
 async function ozonSales(task: AgentTask, page: Page, cid: string, data: any): Promise<void> {
   const skus = [...new Set([...(task.params.watch as number[] ?? []), ...(task.params.ours as number[] ?? [])].map(Number).filter(n => n > 0))].slice(0, 700);
@@ -539,6 +590,7 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
       const items = (data?.markets ?? []).reduce((s: number, m: any) => s + (m.items?.length ?? 0), 0);
       await api.progress(task.id, stage(1, `Категорий ${data?.markets?.length ?? 0}, товаров рынка ${items}`, { items_done: items, items_total: items }), true);
       await ozonSales(task, page, cid, data);
+      await ozonVisibility(task, page, cid, data);
     }
     // Карточки привязанных конкурентов и наших товаров на витрине (цена, рейтинг, отзывы, остаток).
     const ids = [...new Set([...(task.params.ours as number[] ?? []), ...(task.params.watch as number[] ?? [])].map(Number).filter(n => n > 0))]

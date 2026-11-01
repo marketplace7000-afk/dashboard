@@ -192,6 +192,25 @@ export function rnpSkuTotals(mp: RnpMp, sku: string, from: string, to: string): 
 }
 
 /**
+ * Остаток и заказы за закрытые дни для оборачиваемости. Период — days дней,
+ * а у новой карточки — со дня первого заказа, иначе её продажи окажутся занижены.
+ */
+export function rnpStockFacts(mp: RnpMp, sku: string, days: number): { stock: number | null; fbo: number | null; fbs: number | null; orders: number; period: number } {
+  const out = { stock: null as number | null, fbo: null as number | null, fbs: null as number | null, orders: 0, period: 0 };
+  const d = getDb();
+  if (!d) return out;
+  const last = (metric: string) => (d.prepare('SELECT value FROM rnp_fact WHERE mp = ? AND sku = ? AND metric = ? AND value IS NOT NULL ORDER BY date DESC LIMIT 1').get(mp, sku, metric) as { value: number } | undefined)?.value ?? null;
+  out.stock = last('stocks'); out.fbo = last('stocks_fbo'); out.fbs = last('stocks_fbs');
+  const to = mskDate(1), from = mskDate(days);
+  const t = rnpSkuTotals(mp, sku, from, to);
+  out.orders = t?.orders ?? 0;
+  const first = (d.prepare(`SELECT MIN(date) date FROM rnp_fact WHERE mp = ? AND sku = ? AND date >= ? AND date <= ?
+    AND metric IN ('ordered_cnt', 'wbf_order_cnt') AND value > 0`).get(mp, sku, from, to) as { date: string | null } | undefined)?.date;
+  if (first) out.period = Math.round((Date.parse(to + 'T00:00:00Z') - Date.parse(first + 'T00:00:00Z')) / DAY_MS) + 1;
+  return out;
+}
+
+/**
  * Товары в наличии: остаток FBO+FBS > 0 в последнем обходе остатков (как фильтр «В продаже» в «Ценах»).
  * Заказы без остатка не считаем: на Ozon это в основном старые дубли карточек.
  */

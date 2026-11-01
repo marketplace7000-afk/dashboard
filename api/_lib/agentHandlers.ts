@@ -136,6 +136,12 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
       if (task.params.marketplace !== 'ozon') {
         const { wbViewsPlan } = await import('./rnp');
         task.params = { ...task.params, ...wbViewsPlan(!!task.params.light) };
+      } else if (!task.params.light) {
+        // Снимок «Видимости в поиске» по закреплённым карточкам: только в полном проходе.
+        try {
+          const { visibilityPlan } = await import('./cardVisibility');
+          task.params = { ...task.params, visibility: await visibilityPlan() };
+        } catch (e) { console.warn('[cards] план видимости не собран:', (e as Error)?.message); }
       }
     }
     res.status(200).json({ task, settings: getSettings() });

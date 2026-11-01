@@ -30,7 +30,7 @@ import { cardHistory, getCompetitors } from './cabinet';
 import { getAllLinks } from '../competitorWatch';
 import { getMargins } from '../margin';
 import { marginThresholds } from '../repricer';
-import { cardMarginFloors } from '../cards';
+import { cardLimits, cardMarginFloors } from '../cards';
 import { normSku } from '../costs';
 import { campaignStats } from './store';
 import { toStat } from './overview';
@@ -55,6 +55,8 @@ export type AutopilotCtx = {
   marginFloorPct: number;
   /** Минимумы закреплённых карточек («Ведение карточек»): артикул → маржа, %. */
   cardFloors?: Map<string, number>;
+  /** Рамки закреплённых карточек из «Ведения карточек». */
+  cardLimits?: Map<string, { minMargin: number | null; maxDrr: number | null; minStockDays: number | null }>;
   /** Наш товар (ключ рекламы) → подтверждённые конкуренты с витрины и наша цена покупателя. */
   comps: Map<string, { ourBuyer: number | null; prices: number[]; outOfStock: number; total: number; median: number | null; min: number | null }>;
   /** Ozon: товар → медианный ДРР его категории по «Товарам на Ozon», %. */
@@ -355,7 +357,14 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
           { confidence: 'high', alternative: 'если поставка придёт за 1–2 дня — оставить, но ставку не повышать', risk: 'вернуть товар в кампанию сразу после поставки, иначе он потеряет позиции', rollback: 'вернуть в кампанию в день поступления на склад' });
         return;
       }
-      const noRaise = dos != null && dos < 14;
+      // Рамки закреплённой карточки. Порядок: минимум маржи главнее предела ДРР. Большой ДРР не разрешает опускать маржу.
+      const lim = ctx.cardLimits?.get(normSku(p?.article ?? '')) ?? null;
+      const noRaise = dos != null && dos < (lim?.minStockDays ?? 14);
+      const belowOwnMin = lim?.minMargin != null && p?.marginPct != null && p.marginPct < lim.minMargin;
+      const overOwnDrr = lim?.maxDrr != null && p?.drr != null && p.drr > lim.maxDrr;
+      if (lim?.minMargin != null) checks.push(`минимум маржи карточки ${lim.minMargin}%, сейчас ${p?.marginPct ?? '—'}%`);
+      if (lim?.maxDrr != null) checks.push(`предел ДРР карточки ${lim.maxDrr}%, сейчас ${p?.drr ?? '—'}%`);
+      if (lim?.minStockDays != null) checks.push(`минимальный запас карточки ${lim.minStockDays} дн`);
 
       let dir: 'down' | 'up' | null = null;
       let factor = 1;
@@ -396,6 +405,15 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
           `Маржа до рекламы ${rub(e.marginBeforeAds)} не покрывает план прибыли ${e.planPct}% — любая реклама уводит товар ниже плана. Сначала цена или себестоимость; ставку не повышать`,
           { confidence: 'medium', alternative: 'если товар нужен для оборота или позиций — держать минимальную ставку осознанно', risk: 'резкое отключение рекламы роняет позиции и органические продажи' });
         return;
+      } else if (belowOwnMin && s && s.spend >= 300) {
+        dir = 'down'; rule = 'below_card_margin'; factor = 1 - MAX_DOWN; confidence = 'high';
+        why = `Маржа ${p!.marginPct}% ниже минимума карточки ${lim!.minMargin}%. Минимум маржи главнее предела ДРР, поэтому ставку снижаем`;
+        alternative = 'поднять цену, если рынок позволяет';
+        risk = 'меньше показов — часть заказов уйдёт к конкурентам';
+      } else if (overOwnDrr && s && s.spend >= 300) {
+        dir = 'down'; rule = 'over_card_drr'; factor = clampDown(lim!.maxDrr! / p!.drr!);
+        why = `ДРР товара ${p!.drr}% выше предела карточки ${lim!.maxDrr}%. Ставку снижаем пропорционально разрыву`;
+        risk = 'меньше показов — часть заказов уйдёт к конкурентам';
       } else if (e && cpo && cpo.cpo > e.allowedCpo * 1.05 && p && p.drr != null && e.allowedDrr != null && p.drr <= e.allowedDrr && e.profit > 0) {
         // Общий ДРР — полезная проверка (разбор менеджера): дорогой рекламный заказ, но по товару в целом реклама
         // в пределах экономики и товар в плюсе — реклама, вероятно, тянет и органические заказы. Не режем.
@@ -422,7 +440,7 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
         dir = 'down'; rule = 'above_bid_ceiling'; factor = 1 - MAX_DOWN;
         why = `Ставка выше потолка ${rub(ceil.max)}: ${ceil.how}`;
         risk = 'меньше показов в верхних позициях';
-      } else if (!overBudget && e && cpo && cpo.orders >= 3 && cpo.cpo < e.allowedCpo * 0.6 && !noRaise && !lowMargin) {
+      } else if (!overBudget && e && cpo && cpo.orders >= 3 && cpo.cpo < e.allowedCpo * 0.6 && !noRaise && !lowMargin && !overOwnDrr) {
         if (cause) {
           task(cause.stage, 'info', 'Сначала поправить карточку, потом поднимать рекламу',
             `Реклама окупается (заказ ${rub(cpo.cpo)} при допустимом ${rub(e.allowedCpo)}), но ${cause.text}`, { confidence: 'medium' });
@@ -439,7 +457,7 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
         why = `Рекламный заказ ${rub(cpo.cpo)} при допустимом ${rub(e.allowedCpo)}, ${cpo.orders} заказов за ${cpo.days} дн, запас ${dos ?? '—'} дн — есть куда расти`;
         risk = 'цена заказа вырастет; следить, чтобы осталась в пределах допустимой';
         rollback = 'вернуть ставку, если цена заказа превысит допустимую или прибыль товара упадёт';
-      } else if (compOut && cm && !overBudget && e && cpo && cpo.cpo <= e.allowedCpo && !noRaise && !lowMargin && !compCheaper) {
+      } else if (compOut && cm && !overBudget && e && cpo && cpo.cpo <= e.allowedCpo && !noRaise && !lowMargin && !compCheaper && !overOwnDrr) {
         dir = 'up'; rule = 'comp_out'; level = 'growth'; factor = 1.15;
         why = `У всех ${cm.total} подтверждённых конкурентов нет в наличии — окно: заказ ${rub(cpo.cpo)} в пределах допустимого, запас ${dos ?? '—'} дн`;
         risk = 'конкуренты могут вернуться в наличие в любой день';
@@ -549,7 +567,7 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
 
 /** Контекст этапа В по площадке: край маржи, конкуренты с витрины, нормы ДРР категорий Ozon. */
 export async function buildCtx(mp: AdMp, ov: Ads2Overview): Promise<AutopilotCtx> {
-  const ctx: AutopilotCtx = { ...EMPTY_CTX, marginFloorPct: marginThresholds(mp).floor, cardFloors: cardMarginFloors(mp), comps: new Map(), benchDrr: new Map(), stat28: new Map(), skuCr: new Map(), compSpend: new Map() };
+  const ctx: AutopilotCtx = { ...EMPTY_CTX, marginFloorPct: marginThresholds(mp).floor, cardFloors: cardMarginFloors(mp), cardLimits: cardLimits(mp), comps: new Map(), benchDrr: new Map(), stat28: new Map(), skuCr: new Map(), compSpend: new Map() };
   // 28 дней «кампания × товар»: сравнение с 7 днями, конверсия для редких заказов, медианы воронки.
   try {
     const rows = campaignStats(mp, mskDate(27), mskDate(0), true);

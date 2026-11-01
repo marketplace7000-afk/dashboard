@@ -17,6 +17,7 @@ import { rnpInStockSkus, rnpItems, saveWbCardViews } from '../rnp';
 import { wbImageUrl } from '../wbBasket';
 import { onWbSnapshot, compareState, compareReports } from './wbCompare';
 import { saveCompQueries } from '../cards';
+import { saveVisibility } from '../cardVisibility';
 
 const KEEP = 30;
 
@@ -254,6 +255,10 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
   if (mp === 'wb' && Array.isArray(data.funnelViews)) {
     try { viewsN = saveWbCardViews(data.funnelViews); } catch (e) { console.warn('[rnp] показы WB не записаны:', (e as Error).message); }
     delete data.funnelViews;   // в снимке кабинета не храним — они уже в РНП
+  }
+  if (mp === 'ozon' && Array.isArray(data.visibility)) {
+    try { saveVisibility(data.visibility, at, new Date(at + 3 * 3_600_000).toISOString().slice(0, 10)); } catch (e) { console.warn('[cards] видимость не записана:', (e as Error)?.message); }
+    delete data.visibility;   // в снимке кабинета не храним — она в своей таблице
   }
   if (mp === 'wb') saveCompLast(data.compDetails, at);
   // Запросы сравнений с цифрами по карточкам — в свою таблицу; снимок кабинета остаётся прежнего размера (5 запросов, без цифр).

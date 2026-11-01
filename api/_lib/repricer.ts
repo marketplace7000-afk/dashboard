@@ -30,6 +30,7 @@ import { getWbBoxTariffs } from './wbBoxTariffs';
 import { getMarketPosition, type MarketPosition } from './competitorPrices';
 import { getWatchList } from './competitorWatch';
 import { noteSwallowed } from './log';
+import { cardMarginFloors } from './cards';
 
 // ─── Настройки ──────────────────────────────────────────────────────────────
 
@@ -237,6 +238,7 @@ export async function buildSuggestions(): Promise<RepricerReport> {
   const suggestions: Suggestion[] = [];
   const skipped: { sku: string; why: string }[] = [];
   const stop = new Set(settings.stopList);
+  const cardFloors = cardMarginFloors('wb');
 
   for (const sku of Object.keys(getWatchList().items)) {
     if (stop.has(normSku(sku))) { skipped.push({ sku, why: 'в стоп-листе' }); continue; }
@@ -288,13 +290,15 @@ export async function buildSuggestions(): Promise<RepricerReport> {
       storage,
     };
 
-    const floorPrice = priceForMargin(input, settings.minMarginPct);
+    // Минимум закреплённой карточки важнее общего порога.
+    const minMargin = cardFloors.get(normSku(sku)) ?? settings.minMarginPct;
+    const floorPrice = priceForMargin(input, minMargin);
     const marginNow = calcWbProfit(input)?.margin ?? null;
     base.floorPrice = floorPrice;
     base.marginNow = marginNow == null ? null : Math.round(marginNow * 10) / 10;
 
     if (floorPrice == null) {
-      suggestions.push({ ...base, blocker: 'порог недостижим', reason: `Маржа ${settings.minMarginPct}% недостижима ни при какой цене: себестоимость и комиссии съедают весь чек. Это вопрос закупки, а не цены.` });
+      suggestions.push({ ...base, blocker: 'порог недостижим', reason: `Маржа ${minMargin}% недостижима ни при какой цене: себестоимость и комиссии съедают весь чек. Это вопрос закупки, а не цены.` });
       continue;
     }
 

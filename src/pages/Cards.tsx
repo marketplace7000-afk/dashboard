@@ -13,7 +13,8 @@ type Goal = 'growth' | 'hold' | 'sell_out';
 type Period = { orders: number; amount: number; ads: number; drrPct: number | null };
 type Pin = {
   mp: Mp; sku: string; article: string; name: string; photo: string;
-  goal: Goal; minMarginPct: number | null; maxDrrPct: number | null; minStockDays: number | null;
+  margin: { pct: number | null; rubPerSale: number | null; roi: number | null; buyoutPct: number | null; profit7d: number | null; minPct: number; minSource: 'card' | 'plan'; floorPrice: number | null; below: boolean } | null;
+  goal: Goal; minMarginPct: number | null; minMarginUntil: string | null; maxDrrPct: number | null; minStockDays: number | null;
   cur: Period | null; prev: Period | null; stock: number | null; price: number | null; dataDate: string | null;
 };
 type Item = { sku: string; article: string; name: string; photo: string };
@@ -51,8 +52,8 @@ function change(cur?: number, prev?: number) {
 }
 
 function Settings({ pin, onSaved }: { pin: Pin; onSaved: () => void }) {
-  const [f, setF] = useState<{ goal: Goal; minMarginPct: number | string; maxDrrPct: number | string; minStockDays: number | string }>({
-    goal: pin.goal, minMarginPct: pin.minMarginPct ?? '', maxDrrPct: pin.maxDrrPct ?? '', minStockDays: pin.minStockDays ?? '',
+  const [f, setF] = useState<{ goal: Goal; minMarginPct: number | string; minMarginUntil: string; maxDrrPct: number | string; minStockDays: number | string }>({
+    goal: pin.goal, minMarginPct: pin.minMarginPct ?? '', minMarginUntil: pin.minMarginUntil ?? '', maxDrrPct: pin.maxDrrPct ?? '', minStockDays: pin.minStockDays ?? '',
   });
   const [msg, setMsg] = useState('');
   const save = async () => {
@@ -68,6 +69,14 @@ function Settings({ pin, onSaved }: { pin: Pin; onSaved: () => void }) {
   );
   return (
     <div>
+      {pin.margin && (
+        <div style={{ marginBottom: 12 }}>
+          <b style={{ color: pin.margin.below ? danger : undefined }}>Сейчас маржа {pct(pin.margin.pct)}</b>, прибыль с продажи {rub(pin.margin.rubPerSale)}, за 7 дней примерно {rub(pin.margin.profit7d)}.
+          <div className="muted">
+            Действует минимум {pct(pin.margin.minPct)} ({pin.margin.minSource === 'card' ? 'ваш, для этой карточки' : 'план месяца из «Цен»'}): цена в кабинете не ниже {pin.margin.floorPrice == null ? 'нельзя посчитать' : rub(pin.margin.floorPrice)}.
+          </div>
+        </div>
+      )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'end' }}>
         <label style={{ display: 'grid', gap: 4 }}>
           <span className="muted">Цель</span>
@@ -76,12 +85,16 @@ function Settings({ pin, onSaved }: { pin: Pin; onSaved: () => void }) {
           </select>
         </label>
         {field('minMarginPct', 'Мин. маржа, %')}
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span className="muted">Действует до</span>
+          <input className="input" type="date" value={f.minMarginUntil} onChange={e => setF({ ...f, minMarginUntil: e.target.value })} style={{ width: 150 }} />
+        </label>
         {field('maxDrrPct', 'Макс. ДРР, %')}
         {field('minStockDays', 'Мин. запас, дней')}
         <button className="btn btn-sm" onClick={save}>Сохранить</button>
         {msg && <span className="muted">{msg}</span>}
       </div>
-      <p className="muted" style={{ marginBottom: 0 }}>Рамки пока только сохраняются: агент начнёт учитывать их, когда появится план действий.</p>
+      <p className="muted" style={{ marginBottom: 0 }}>Минимум маржи учитывают автопилот рекламы и репрайсер, пока срок не истёк. Пустой минимум или истёкший срок возвращают план месяца. ДРР и запас пока только сохраняются.</p>
     </div>
   );
 }
@@ -189,7 +202,7 @@ function PinDetails({ pin, onChanged }: { pin: Pin; onChanged: () => void }) {
         {tabs.map(([k, label]) => <button key={k} className={`mp-tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{label}</button>)}
       </div>
       {tab === 'rules'
-        ? <Settings key={`${pin.goal}|${pin.minMarginPct}|${pin.maxDrrPct}|${pin.minStockDays}`} pin={pin} onSaved={onChanged} />
+        ? <Settings key={`${pin.goal}|${pin.minMarginPct}|${pin.minMarginUntil}|${pin.maxDrrPct}|${pin.minStockDays}`} pin={pin} onSaved={onChanged} />
         : err ? <div style={{ color: danger }}>{err}</div>
         : !d ? <div className="muted">Загрузка…</div>
         : tab === 'queries' ? <Queries mp={pin.mp} d={d} />
@@ -283,7 +296,7 @@ export function Cards() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr>
               <th style={{ ...th, textAlign: 'left' }}>Карточка</th>
-              <th style={th}>Заказы, 7 дн</th><th style={th}>Сумма</th><th style={th}>Реклама</th><th style={th}>ДРР</th><th style={th}>Цена</th><th style={th}>Остаток</th><th style={th} />
+              <th style={th}>Заказы, 7 дн</th><th style={th}>Сумма</th><th style={th}>Реклама</th><th style={th}>ДРР</th><th style={th}>Маржа</th><th style={th}>Прибыль, 7 дн</th><th style={th}>Цена</th><th style={th}>Остаток</th><th style={th} />
             </tr></thead>
             <tbody>
               {list.map(p => {
@@ -305,11 +318,13 @@ export function Cards() {
                       <td style={td}>{rub(p.cur?.amount)}{change(p.cur?.amount, p.prev?.amount)}</td>
                       <td style={td}>{rub(p.cur?.ads)}</td>
                       <td style={td}>{pct(p.cur?.drrPct)}</td>
+                      <td style={{ ...td, color: p.margin?.below ? danger : undefined }}><b>{pct(p.margin?.pct)}</b><div className="muted">мин. {pct(p.margin?.minPct)}</div></td>
+                      <td style={td}>{rub(p.margin?.profit7d)}<div className="muted">{rub(p.margin?.rubPerSale)} с продажи</div></td>
                       <td style={td}>{rub(p.price)}</td>
                       <td style={td}>{num(p.stock)}</td>
                       <td style={td}><button className="btn btn-sm" onClick={e => { e.stopPropagation(); void unpin(p); }}>Открепить</button></td>
                     </tr>
-                    {isOpen && <tr><td colSpan={8} style={{ padding: 12, borderTop: '1px solid var(--line, #e6e6e6)' }}><PinDetails pin={p} onChanged={load} /></td></tr>}
+                    {isOpen && <tr><td colSpan={10} style={{ padding: 12, borderTop: '1px solid var(--line, #e6e6e6)' }}><PinDetails pin={p} onChanged={load} /></td></tr>}
                   </Fragment>
                 );
               })}

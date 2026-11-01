@@ -493,7 +493,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (req.method === 'POST' && parts[1] === 'unpin') { cards.removePin(req.body); return res.status(200).json({ ok: true }); }
       if (req.method === 'GET' && parts[1] === 'details') return res.status(200).json({ ok: true, ...cards.cardDetails(req.query?.mp, req.query?.sku) });
       if (req.method === 'POST' && parts[1] === 'refresh') { void cards.collectCardQueries(true).catch(() => {}); return res.status(200).json({ ok: true }); }
-      if (req.method === 'GET' && !parts[1]) return res.status(200).json({ ok: true, pins: cards.listPins() });
+      if (req.method === 'GET' && !parts[1]) return res.status(200).json({ ok: true, pins: await cards.listPins() });
       return res.status(404).json({ ok: false, error: 'not_found' });
     } catch (e) {
       return res.status(400).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });

@@ -8,6 +8,9 @@
  */
 import { adsDb } from './ads/store';
 import { mskDate } from './mskDate';
+import { getMargins, priceFloor, type MarginReport } from './margin';
+import { marginThresholds } from './repricer';
+import { normSku } from './costs';
 import { rnpItems, rnpSkuTotals } from './rnp';
 import { fetchWithRetry } from './fetchRetry';
 import { wbUpstream } from '../_proxy';
@@ -20,6 +23,8 @@ export type CardSettings = {
   goal: CardGoal;
   /** Минимальная маржа, %. null — не задана. */
   minMarginPct: number | null;
+  /** До какого дня включительно действует минимум (YYYY-MM-DD). null — бессрочно. */
+  minMarginUntil: string | null;
   /** Предельный ДРР, %. null — не задан. */
   maxDrrPct: number | null;
   /** Минимальный запас товара, дней. null — не задан. */
@@ -28,7 +33,19 @@ export type CardSettings = {
 
 export type CardPeriod = { orders: number; amount: number; ads: number; drrPct: number | null };
 
+/** Маржа из расчёта раздела «Цены». Прибыль — после всех расходов, включая рекламу по ДРР листа. */
+export type CardMargin = {
+  pct: number | null; rubPerSale: number | null; roi: number | null; buyoutPct: number | null;
+  /** Примерная прибыль за 7 дней: прибыль с продажи × заказы × выкуп. */
+  profit7d: number | null;
+  /** Какой минимум действует сейчас и откуда он. */
+  minPct: number; minSource: 'card' | 'plan';
+  /** Цена в кабинете, ниже которой маржа падает под минимум. null — недостижимо. */
+  floorPrice: number | null; below: boolean;
+};
+
 export type CardPin = CardSettings & {
+  margin: CardMargin | null;
   mp: RnpMp; sku: string; article: string; name: string; photo: string; pinnedAt: number;
   cur: CardPeriod | null; prev: CardPeriod | null; stock: number | null; price: number | null;
   /** Последний день, за который в РНП есть данные по карточке. */
@@ -43,6 +60,7 @@ function db(): any {
     d.exec(`CREATE TABLE IF NOT EXISTS card_pin (
       mp TEXT NOT NULL, sku TEXT NOT NULL, goal TEXT NOT NULL, min_margin REAL, max_drr REAL, min_stock_days REAL,
       pinned_at INTEGER NOT NULL, PRIMARY KEY (mp, sku));`);
+    try { d.exec('ALTER TABLE card_pin ADD COLUMN min_margin_until TEXT'); } catch { /* колонка уже есть */ }
     ready = true;
   }
   return d;
@@ -65,19 +83,58 @@ function period(t: { orders: number; amount: number; ads: number } | null): Card
   return { ...t, drrPct: t.amount > 0 ? Math.round((t.ads / t.amount) * 1000) / 10 : null };
 }
 
-export function listPins(): CardPin[] {
+/** Минимум карточки, если он задан и срок не истёк. */
+const activeMin = (r: any): number | null =>
+  r.min_margin != null && (!r.min_margin_until || r.min_margin_until >= mskDate(0)) ? Number(r.min_margin) : null;
+
+/** Минимумы закреплённых карточек для алгоритмов: артикул (UPPER) → маржа, %. */
+export function cardMarginFloors(mp: RnpMp): Map<string, number> {
+  const out = new Map<string, number>();
+  try {
+    const items = new Map(rnpItems(mp).map(i => [i.sku, i.article]));
+    for (const r of db().prepare('SELECT * FROM card_pin WHERE mp = ?').all(mp) as any[]) {
+      const min = activeMin(r);
+      if (min == null) continue;
+      const sku = String(r.sku);
+      out.set(normSku(mp === 'wb' ? items.get(sku) ?? sku : sku), min);
+    }
+  } catch (e) { console.warn('[cards] минимумы маржи не прочитаны:', (e as Error)?.message); }
+  return out;
+}
+
+function marginOf(mp: RnpMp, article: string, report: MarginReport | null, r: any, orders: number | null): CardMargin | null {
+  if (!report) return null;
+  const row = report.items[normSku(article)];
+  const own = activeMin(r);
+  const minPct = own ?? marginThresholds(mp).floor;
+  const pct = row?.marginPct ?? null, rub = row?.marginRub ?? null;
+  return {
+    pct, rubPerSale: rub, roi: row?.roi ?? null, buyoutPct: row?.buyout ?? null,
+    profit7d: rub != null && orders != null ? Math.round(rub * orders * (row?.buyout ?? 100) / 100) : null,
+    minPct, minSource: own != null ? 'card' : 'plan',
+    floorPrice: row ? priceFloor(row, minPct) : null, below: pct != null && pct < minPct,
+  };
+}
+
+export async function listPins(): Promise<CardPin[]> {
   const rows = db().prepare('SELECT * FROM card_pin ORDER BY pinned_at DESC').all() as any[];
   // Сравниваем закрытые дни: неполное «сегодня» занизило бы последнюю неделю.
   const to = mskDate(1), from = addDays(to, -6), prevTo = addDays(from, -1), prevFrom = addDays(prevTo, -6);
   const items = new Map<string, ReturnType<typeof rnpItems>[number]>();
   for (const mp of ['wb', 'ozon'] as RnpMp[]) for (const it of rnpItems(mp)) items.set(`${mp}:${it.sku}`, it);
+  // Маржа не должна ронять раздел: без неё остальные цифры всё равно показываем.
+  const reports = new Map<RnpMp, MarginReport | null>();
+  for (const mp of new Set(rows.map(r => r.mp as RnpMp))) {
+    reports.set(mp, await getMargins(mp).catch(e => { console.warn('[cards] маржа не посчитана:', (e as Error)?.message); return null; }));
+  }
   return rows.map(r => {
     const mp = r.mp as RnpMp, sku = String(r.sku);
     const it = items.get(`${mp}:${sku}`);
     const cur = rnpSkuTotals(mp, sku, from, to), prev = rnpSkuTotals(mp, sku, prevFrom, prevTo);
     return {
       mp, sku, article: it?.article ?? '', name: it?.name ?? '', photo: it?.photo ?? '', pinnedAt: Number(r.pinned_at),
-      goal: r.goal as CardGoal, minMarginPct: r.min_margin ?? null, maxDrrPct: r.max_drr ?? null, minStockDays: r.min_stock_days ?? null,
+      goal: r.goal as CardGoal, minMarginPct: r.min_margin ?? null, minMarginUntil: r.min_margin_until ?? null, maxDrrPct: r.max_drr ?? null, minStockDays: r.min_stock_days ?? null,
+      margin: marginOf(mp, mp === 'wb' ? it?.article ?? sku : sku, reports.get(mp) ?? null, r, cur?.orders ?? null),
       cur: period(cur), prev: period(prev), stock: cur?.stock ?? null, price: cur?.price ?? null, dataDate: cur?.lastDate ?? null,
     };
   });
@@ -98,12 +155,14 @@ export function savePin(input: any): void {
   const goal: CardGoal = input?.goal === undefined ? 'growth' : input.goal;
   if (!GOALS.includes(goal)) throw new Error('неизвестная цель');
   const minMargin = limit(input?.minMarginPct, 'Минимальная маржа', 100);
+  const until = input?.minMarginUntil ? String(input.minMarginUntil) : null;
+  if (until && !/^\d{4}-\d{2}-\d{2}$/.test(until)) throw new Error('Срок минимальной маржи: нужна дата');
   const maxDrr = limit(input?.maxDrrPct, 'Предельный ДРР', 100);
   const minStock = limit(input?.minStockDays, 'Минимальный запас', 365);
-  db().prepare(`INSERT INTO card_pin (mp, sku, goal, min_margin, max_drr, min_stock_days, pinned_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(mp, sku) DO UPDATE SET goal = excluded.goal, min_margin = excluded.min_margin,
+  db().prepare(`INSERT INTO card_pin (mp, sku, goal, min_margin, min_margin_until, max_drr, min_stock_days, pinned_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(mp, sku) DO UPDATE SET goal = excluded.goal, min_margin = excluded.min_margin, min_margin_until = excluded.min_margin_until,
       max_drr = excluded.max_drr, min_stock_days = excluded.min_stock_days`)
-    .run(input.mp, sku, goal, minMargin, maxDrr, minStock, Date.now());
+    .run(input.mp, sku, goal, minMargin, until, maxDrr, minStock, Date.now());
   // Новая карточка: запросы сразу, не дожидаясь планового обновления. Уже собранные пропускаются по возрасту.
   void collectCardQueries().catch(e => console.warn('[cards] запросы не собраны:', (e as Error)?.message));
 }

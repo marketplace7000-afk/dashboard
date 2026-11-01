@@ -30,6 +30,8 @@ import { cardHistory, getCompetitors } from './cabinet';
 import { getAllLinks } from '../competitorWatch';
 import { getMargins } from '../margin';
 import { marginThresholds } from '../repricer';
+import { cardMarginFloors } from '../cards';
+import { normSku } from '../costs';
 import { campaignStats } from './store';
 import { toStat } from './overview';
 import {
@@ -51,6 +53,8 @@ const OVER_BUDGET_TOP = 5;
 export type AutopilotCtx = {
   /** Край маржи, % (план месяца + запас): ниже — ставки не поднимаем. */
   marginFloorPct: number;
+  /** Минимумы закреплённых карточек («Ведение карточек»): артикул → маржа, %. */
+  cardFloors?: Map<string, number>;
   /** Наш товар (ключ рекламы) → подтверждённые конкуренты с витрины и наша цена покупателя. */
   comps: Map<string, { ourBuyer: number | null; prices: number[]; outOfStock: number; total: number; median: number | null; min: number | null }>;
   /** Ozon: товар → медианный ДРР его категории по «Товарам на Ozon», %. */
@@ -314,7 +318,7 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
       const cause = funnelCause(s && s.clicks >= 100 ? s : (s28 ?? s), ctx.bench);
       const cpo = cpoOf(s, s28);
       const ceil = bidCeiling(c, e, s, s28);
-      const lowMargin = p?.marginPct != null && p.marginPct < ctx.marginFloorPct;
+      const lowMargin = p?.marginPct != null && p.marginPct < (ctx.cardFloors?.get(normSku(p.article)) ?? ctx.marginFloorPct);
       const cm = ctx.comps.get(it.sku);
       const compCheaper = !!cm && cm.ourBuyer != null && cm.median != null && cm.ourBuyer >= cm.median * 1.08;
       const compOut = !!cm && cm.total > 0 && cm.outOfStock === cm.total;
@@ -545,7 +549,7 @@ export function buildProposals(ov: Ads2Overview, ctx: AutopilotCtx = EMPTY_CTX):
 
 /** Контекст этапа В по площадке: край маржи, конкуренты с витрины, нормы ДРР категорий Ozon. */
 export async function buildCtx(mp: AdMp, ov: Ads2Overview): Promise<AutopilotCtx> {
-  const ctx: AutopilotCtx = { ...EMPTY_CTX, marginFloorPct: marginThresholds(mp).floor, comps: new Map(), benchDrr: new Map(), stat28: new Map(), skuCr: new Map(), compSpend: new Map() };
+  const ctx: AutopilotCtx = { ...EMPTY_CTX, marginFloorPct: marginThresholds(mp).floor, cardFloors: cardMarginFloors(mp), comps: new Map(), benchDrr: new Map(), stat28: new Map(), skuCr: new Map(), compSpend: new Map() };
   // 28 дней «кампания × товар»: сравнение с 7 днями, конверсия для редких заказов, медианы воронки.
   try {
     const rows = campaignStats(mp, mskDate(27), mskDate(0), true);

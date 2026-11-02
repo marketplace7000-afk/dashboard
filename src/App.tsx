@@ -3,7 +3,7 @@ import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, PaperPlaneTiltIcon,
   GearIcon,
   CaretRightIcon, MegaphoneIcon,
-  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, BinocularsIcon, WarehouseIcon, UsersThreeIcon, PackageIcon, PushPinIcon
+  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, BinocularsIcon, WarehouseIcon, UsersThreeIcon, PackageIcon, PushPinIcon, TargetIcon
 } from '@phosphor-icons/react';
 import { AgentHosts } from './pages/AgentHosts';
 import { Login } from './pages/Login';
@@ -16,6 +16,7 @@ import { Ads } from './pages/Ads';
 import { Competitors } from './pages/Competitors';
 import { Cards } from './pages/Cards';
 import { Rnp } from './pages/Rnp';
+import { Plan } from './pages/Plan';
 import { Fbo } from './pages/Fbo';
 import { Sklad } from './pages/Sklad';
 import { Access } from './pages/Access';
@@ -32,7 +33,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 // закрыт (api/_lib/sklad/archive.ts). Вернуть — false здесь и SKLAD_ENABLED=1 на сервере.
 const SKLAD_ARCHIVED = true;
 
-type Page = 'dashboard' | 'access' | 'sklad' | 'prices' | 'rnp' | 'fbo' | 'reviews' | 'chats' | 'ads' | 'competitors' | 'cards' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'access' | 'sklad' | 'prices' | 'rnp' | 'plan' | 'fbo' | 'reviews' | 'chats' | 'ads' | 'competitors' | 'cards' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -56,6 +57,8 @@ const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   { key: 'chats',       Icon: ChatsCircleIcon,     label: 'Чаты с покупателями' },
   // «Рука на пульсе» — по дням и товарам из API площадок (11.10.2026), замена РнП «Культуры Аналитики».
   { key: 'rnp',         Icon: PulseIcon,           label: 'РНП' },
+  // 02.11.2026: план заказов по артикулам и месяцам вместо таблицы «AV План 2026».
+  { key: 'plan',        Icon: TargetIcon,          label: 'План' },
   // 26.10.2026: остатки на складах площадок по кластерам, поставки, где покупают.
   { key: 'fbo',         Icon: PackageIcon,         label: 'Остатки' },
   { key: 'ads',         Icon: MegaphoneIcon,       label: 'Реклама' },
@@ -82,6 +85,7 @@ const TITLES: Record<Page, string> = {
   reviews: 'Отзывы и вопросы',
   chats: 'Чаты с покупателями',
   rnp: 'Рука на пульсе (РНП)',
+  plan: 'План заказов',
   fbo: 'Остатки',
   ads: 'Реклама',
   competitors: 'Конкуренты',
@@ -220,7 +224,7 @@ export function App() {
             </div>
           </div>
         </div>
-        <div className={`content ${view === 'rnp' ? 'content-wide' : view === 'prices' || view === 'ads' || view === 'competitors' || view === 'cards' || view === 'sklad' || view === 'fbo' ? 'content-prices' : ''}`}>
+        <div className={`content ${view === 'rnp' || view === 'plan' ? 'content-wide' : view === 'prices' || view === 'ads' || view === 'competitors' || view === 'cards' || view === 'sklad' || view === 'fbo' ? 'content-prices' : ''}`}>
           <ErrorBoundary key={view ?? 'none'} name={view ? TITLES[view] : ''}>
           {view === 'dashboard' && <Dashboard onNav={navTo} can={k => allowed(k as Page)} />}
           {view === 'sklad' && <Sklad />}
@@ -228,6 +232,7 @@ export function App() {
           {view === 'reviews' && <Reviews />}
           {view === 'chats' && <Chats />}
           {view === 'rnp' && <Rnp />}
+          {view === 'plan' && <Plan />}
           {view === 'fbo' && <Fbo />}
           {view === 'ads' && <Ads />}
           {view === 'competitors' && <Competitors />}

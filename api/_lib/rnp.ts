@@ -224,6 +224,84 @@ export function rnpInStockSkus(mp: RnpMp): Set<string> {
   } catch { return new Set(); }
 }
 
+/**
+ * Заказы и реклама по артикулам и дням для раздела «План» (02.11.2026).
+ * Те же правила, что в РНП: WB — воронка, а в дни без неё supplier/orders; ключ — артикул,
+ * потому что у одного артикула WB бывает несколько карточек. real — себестоимость заведена в
+ * «Складе», остальное (товары для выкупов) в план не попадает.
+ */
+export function planArticleFacts(mp: RnpMp, from: string, to: string): {
+  byArticle: Map<string, { days: Map<string, { cnt: number; rub: number; ads: number }> }>;
+  items: Map<string, { name: string; photo: string }>;
+  real: (article: string) => boolean;
+} {
+  const byArticle = new Map<string, { days: Map<string, { cnt: number; rub: number; ads: number }> }>();
+  const items = new Map<string, { name: string; photo: string }>();
+  const costs = getCosts();
+  const realCache = new Map<string, boolean>();
+  const real = (article: string) => {
+    let v = realCache.get(article);
+    if (v === undefined) { v = !!resolveCost(article, costs); realCache.set(article, v); }
+    return v;
+  };
+  const d = getDb();
+  if (!d) return { byArticle, items, real };
+  const artOf = new Map<string, string>();
+  for (const it of d.prepare('SELECT sku, article, name, photo FROM rnp_item WHERE mp = ?').all(mp) as any[]) {
+    const a = up(it.article || it.sku);
+    artOf.set(String(it.sku), a);
+    const cur = items.get(a);
+    if (!cur) items.set(a, { name: String(it.name || ''), photo: String(it.photo || '') });
+    else { cur.name ||= String(it.name || ''); cur.photo ||= String(it.photo || ''); }
+  }
+  const rows = d.prepare(`SELECT date, sku, metric, value FROM rnp_fact WHERE mp = ? AND date >= ? AND date <= ?
+    AND metric IN ('ordered_amount', 'ordered_cnt', 'wbf_order_sum', 'wbf_order_cnt', 'adv_expenses')`).all(mp, from, to) as RnpRow[];
+  const funnelDays = mp === 'wb' ? new Set(rows.filter(r => r.metric === 'wbf_order_sum').map(r => r.date)) : new Set<string>();
+  for (const r of rows) {
+    let field: 'cnt' | 'rub' | 'ads';
+    if (r.metric === 'adv_expenses') field = 'ads';
+    else if (r.metric === 'wbf_order_cnt') field = 'cnt';
+    else if (r.metric === 'wbf_order_sum') field = 'rub';
+    else {
+      if (funnelDays.has(r.date)) continue;
+      field = r.metric === 'ordered_cnt' ? 'cnt' : 'rub';
+    }
+    const a = artOf.get(String(r.sku)) ?? up(r.sku);
+    let x = byArticle.get(a);
+    if (!x) { x = { days: new Map() }; byArticle.set(a, x); }
+    let day = x.days.get(r.date);
+    if (!day) { day = { cnt: 0, rub: 0, ads: 0 }; x.days.set(r.date, day); }
+    day[field] += num(r.value);
+  }
+  return { byArticle, items, real };
+}
+
+/** Последний остаток по артикулам: сумма по карточкам артикула на последнюю дату обхода. */
+export function rnpLatestStocks(mp: RnpMp): Map<string, number> {
+  const out = new Map<string, number>();
+  const d = getDb();
+  if (!d) return out;
+  const last = (d.prepare(`SELECT max(date) dt FROM rnp_fact WHERE mp = ? AND metric = 'stocks'`).get(mp) as any)?.dt ?? '';
+  const artOf = new Map((d.prepare('SELECT sku, article FROM rnp_item WHERE mp = ?').all(mp) as any[]).map(it => [String(it.sku), up(it.article || it.sku)]));
+  for (const r of d.prepare(`SELECT sku, value FROM rnp_fact WHERE mp = ? AND metric = 'stocks' AND date = ?`).all(mp, last) as any[]) {
+    const a = artOf.get(String(r.sku)) ?? up(r.sku);
+    out.set(a, (out.get(a) ?? 0) + num(r.value));
+  }
+  return out;
+}
+
+/** Ссылка на карточку на площадке по артикулу. */
+export function rnpLinks(mp: RnpMp): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const it of rnpItems(mp)) {
+    const a = up(it.article || it.sku);
+    if (out.has(a)) continue;
+    if (mp === 'wb') out.set(a, `https://www.wildberries.ru/catalog/${it.sku}/detail.aspx`);
+    else if (it.extId) out.set(a, `https://www.ozon.ru/product/${it.extId}/`);
+  }
+  return out;
+}
+
 function upsertItems(mp: RnpMp, items: RnpItem[]): void {
   const d = getDb();
   if (!d || !items.length) return;

@@ -21,6 +21,7 @@ import {
 import { apiGet, apiPost, errText } from '../api/http';
 import { RNP_METRICS, RNP_METRIC, type RnpMetric, type RnpMp, type RnpResponse, type RnpItem, type RnpPriceView } from '../../shared/rnp';
 import { RnpAdvisorSheet } from './RnpAdvisor';
+import type { PlanRnp } from '../../shared/plan';
 
 /** Листы раздела: таблица РНП и «Советник» (выпуски в течение дня, 15.10.2026). */
 type Sheet = 'table' | 'advisor';
@@ -393,6 +394,16 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
     return () => clearInterval(t);
   }, [load, data?.collecting]);
 
+  // План месяца (раздел «План»): минимум заказов в день по площадке и товару.
+  const [plan, setPlan] = useState<PlanRnp | null>(null);
+  useEffect(() => {
+    let live = true;
+    const get = () => apiGet<PlanRnp>(`/api/plan/rnp?mp=${mp}`).then(r => { if (live) setPlan(r.data); }).catch(() => { /* без плана РНП работает как раньше */ });
+    void get();
+    const t = setInterval(get, 300_000);
+    return () => { live = false; clearInterval(t); };
+  }, [mp]);
+
   const collectNow = async () => {
     try { await apiPost(`/api/rnp/collect?mp=${mp}`); setData(d => d ? { ...d, collecting: true } : d); } catch (e) { setErr(errText(e)); }
   };
@@ -573,6 +584,7 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
         {panel === 'rules' && <RulesPanel mp={mp} s={s} set={set} />}
       </section>
 
+      {plan?.totals && <PlanStrip plan={plan} />}
       {err && <div className="rnp-alert">Не удалось загрузить РНП: {err}</div>}
       {data?.notes.map(n => <div key={n} className="rnp-note">{n}</div>)}
       {!data && !err && <div className="card muted">{loading ? 'Загружаю…' : ''}</div>}
@@ -600,6 +612,7 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
                   <Block title="Итого по площадке" sub={`${view.itemsCount} товаров в выборке`} photo="" link="" rows={view.total.rows} hits={[]} heat={s.heatmap} total />
                   {view.blocks.slice(0, shown).map(b => (
                     <Block key={b.e.key} title={b.e.title} sub={s.rowGroup === 'product' ? '' : b.e.sub} hint={b.e.sub} photo={b.e.photo} link={b.e.link} rows={b.rows} hits={b.hits} heat={s.heatmap}
+                      plan={s.rowGroup === 'product' ? plan?.byArticle[b.e.title.toUpperCase()] : undefined}
                       cat={s.rowGroup === 'product' ? b.e.item?.category : undefined}
                       price={s.rowGroup === 'product' && (data?.prices || data?.sellerPrices) ? (b.e.price ?? null) : undefined} />
                   ))}
@@ -660,9 +673,36 @@ function PriceFacts({ p }: { p: ItemPrice | null }) {
   );
 }
 
-function Block({ title, sub, hint, photo, link, rows, hits, heat, total, cat, price }: {
+/** Полоса плана над таблицей: сколько заказов нужно в день, чтобы выполнить план месяца. */
+function PlanStrip({ plan }: { plan: PlanRnp }) {
+  const t = plan.totals!;
+  const low = t.needPerDay !== null && t.needPerDay > 0 && t.pace7 !== null && t.pace7 < t.needPerDay;
+  const behindCount = Object.values(plan.byArticle).filter(a => a.behind).length;
+  return (
+    <section className={`card rnp-plan ${low ? 'low' : ''}`} title="Нужно в день = (план − заказы по вчера) ÷ дней до конца месяца, включая сегодня">
+      <span><span className="muted">План месяца</span> <b>{nf0.format(t.fact)} из {nf0.format(t.qty)} шт</b>{t.pct !== null && <> · <b>{nf0.format(t.pct)}%</b></>}</span>
+      <span><span className="muted">Минимум в день</span> <b className={low ? 'rnp-m-bad' : ''}>{t.needPerDay === null ? '–' : `${nf1.format(t.needPerDay)} шт`}</b>{t.needRubPerDay !== null && <> · {nf0.format(t.needRubPerDay)} ₽</>}</span>
+      <span><span className="muted">Темп за 7 дней</span> <b>{t.pace7 === null ? '–' : `${nf1.format(t.pace7)} шт`}</b></span>
+      <span><span className="muted">Прогноз</span> <b>{t.forecast === null ? '–' : `${nf0.format(t.forecast)} шт`}</b></span>
+      <span><span className="muted">Осталось дней</span> <b>{plan.daysLeft}</b></span>
+      {behindCount > 0 && <span className="rnp-m-bad">Отстают товаров: {behindCount}</span>}
+      {plan.state !== 'approved' && <span className="muted">план ещё не утверждён</span>}
+    </section>
+  );
+}
+
+function PlanFacts({ p }: { p: NonNullable<PlanRnp['byArticle'][string]> }) {
+  return (
+    <dl className="rnp-econ" title="План из раздела «План». Минимум = (план − заказы по вчера) ÷ оставшиеся дни, темп — заказов в день за 7 полных дней">
+      <div><dt>План</dt><dd>{nf0.format(p.fact)} из {nf0.format(p.qty)}{p.pct !== null && ` · ${nf0.format(p.pct)}%`}</dd></div>
+      <div><dt>В день</dt><dd><b className={p.behind ? 'rnp-m-bad' : ''}>{p.needPerDay === null ? '–' : nf1.format(p.needPerDay)}</b>{p.pace7 !== null && ` · темп ${nf1.format(p.pace7)}`}</dd></div>
+    </dl>
+  );
+}
+
+function Block({ title, sub, hint, photo, link, rows, hits, heat, total, cat, price, plan }: {
   title: string; sub: string; hint?: string; photo: string; link: string; rows: BlockRow[]; hits: Rule[]; heat: boolean; total?: boolean; cat?: string;
-  price?: ItemPrice | null;
+  price?: ItemPrice | null; plan?: PlanRnp['byArticle'][string];
 }) {
   return (
     <>
@@ -681,6 +721,7 @@ function Block({ title, sub, hint, photo, link, rows, hits, heat, total, cat, pr
                   {sub && <div className="rnp-item-sub" title={sub}>{sub}</div>}
                   {cat && <div className="rnp-item-cat">{cat}</div>}
                   {price !== undefined && <PriceFacts p={price} />}
+                  {plan && <PlanFacts p={plan} />}
                   {hits.length > 0 && (
                     <div className="rnp-item-hits">
                       {hits.map(h => <span key={h.id} className={`rnp-dot rnp-c-${h.color}`} title={ruleTitle(h)} />)}

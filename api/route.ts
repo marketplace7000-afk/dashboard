@@ -515,6 +515,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ─── /api/plan — план заказов по артикулам и месяцам (api/_lib/plan.ts).
+  if (section === 'plan') {
+    const { handlePlan } = await import('./_lib/plan');
+    return handlePlan(req, res, String(parts[1] ?? ''), authUser(req));
+  }
+
   // ─── /api/fbo — «Остатки FBO»: склады площадок по кластерам, поставки, спрос (api/_lib/fboStocks.ts).
   //   GET  /api/fbo          → последний снимок (старше 3 ч — фоном собирается новый)
   //   POST /api/fbo/refresh  → собрать заново (фоном)

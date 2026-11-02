@@ -91,8 +91,8 @@
 .plan { font-family: "Inter", "Golos Text", "Segoe UI", system-ui, sans-serif; }
 .plan button, .plan input, .plan select, .plan textarea { font-family: inherit; }
 .plan-table { --p-q: #5f6470; font-variant-numeric: tabular-nums; }
-.plan-table.cm-table.cm-list > thead > tr > th { font-size: 15px; font-weight: 600; color: var(--text); background: var(--card, #fff); border-bottom: 0; padding: 14px 10px; }
-.plan-table.cm-table.cm-list > tbody > tr.cm-row > td { padding: 13px 10px; font-size: 17px; font-weight: 400; vertical-align: middle; border-top: 1px solid #eef0f3; border-bottom: 0; }
+.plan-table.cm-table.cm-list > thead > tr > th { font-size: 17px; font-weight: 600; color: var(--text); background: var(--card, #fff); border-bottom: 0; padding: 15px 11px; }
+.plan-table.cm-table.cm-list > tbody > tr.cm-row > td { padding: 14px 11px; font-size: 19px; font-weight: 400; vertical-align: middle; border-top: 1px solid #eef0f3; border-bottom: 0; }
 .plan-table.cm-table.cm-list > tbody > tr.cm-row > td.pq { color: var(--p-q); }
 .plan-table.cm-table.cm-list > tbody > tr.cm-row > td.pq.warn { color: #b45309; }
 .plan-table.cm-table.cm-list > tbody > tr.cm-row > td.pq.bad { color: var(--bad); }
@@ -100,23 +100,23 @@
 .plan-table.cm-table.cm-list > tbody > tr.plan-total > td, .plan-table.cm-table.cm-list > tbody > tr.plan-total > td.stick { font-weight: 600; border-top: 0; }
 .plan-table .stick { border-right: 1px solid #e2e5ea; }
 .plan-table tr.p-open > td { background: var(--accent-soft, #e8effd); }
-.plan-table .cm-sub { font-size: 14px; font-weight: 400; color: var(--muted); }
-.plan-table .cm-prod b { font-weight: 600; font-size: 17px; }
-.plan .cm-prod { min-width: 260px; }
-.plan .cm-prod img, .plan .cm-prod .ph { width: 40px; height: 52px; }
-.plan .cm-prod .nm { font-size: 14px; -webkit-line-clamp: 1; line-clamp: 1; }
-.plan-table .plan-num { font-size: 17px; font-weight: 400; padding: 3px 7px; color: inherit; }
+.plan-table .cm-sub { font-size: 16px; font-weight: 400; color: var(--muted); }
+.plan-table .cm-prod b { font-weight: 600; font-size: 19px; }
+.plan .cm-prod { min-width: 290px; }
+.plan .cm-prod img, .plan .cm-prod .ph { width: 44px; height: 58px; }
+.plan .cm-prod .nm { font-size: 16px; -webkit-line-clamp: 1; line-clamp: 1; }
+.plan-table .plan-num { font-size: 19px; font-weight: 400; padding: 3px 7px; color: inherit; }
 .plan-table .plan-mark { width: 16px; }
 .plan-table .plan-num:disabled { padding-right: 0; }
 .plan-table .plan-cell:has(.plan-num:disabled) .plan-mark { display: none; }
-.plan-table .plan-st { font-size: 16px; font-weight: 400; color: var(--p-q); background: transparent; padding: 0; }
+.plan-table .plan-st { font-size: 18px; font-weight: 400; color: var(--p-q); background: transparent; padding: 0; }
 .plan-table .plan-acts .cm-mark { opacity: .55; }
 .plan-table .plan-acts .cm-mark:hover { opacity: 1; }
-.p-stock { display: grid; justify-items: end; font-size: 15px; line-height: 1.35; color: var(--muted); white-space: nowrap; }
+.p-stock { display: grid; justify-items: end; font-size: 17px; line-height: 1.35; color: var(--muted); white-space: nowrap; }
 .p-stock b { font-weight: 500; color: var(--text); }
 .p-stock .go { color: var(--accent); }
 .p-stock .short { color: var(--bad); font-weight: 500; }
-.p-prog { width: 100px; display: grid; gap: 6px; }
+.p-prog { width: 112px; display: grid; gap: 6px; }
 .p-prog b { font-weight: 600; }
 .p-prog .plan-prog { width: 100%; margin: 0; height: 5px; border-radius: 3px; }
 .p-prog .plan-prog i { border-radius: 3px; }

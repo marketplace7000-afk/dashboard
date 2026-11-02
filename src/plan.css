@@ -125,3 +125,9 @@
 
 .rnp-plan { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 28px; font-size: 17px; }
 .rnp-plan.low { border-left: 4px solid var(--bad); }
+
+/* Штуки, средний чек и рубли: заголовок и обе строки значений по центру столбца */
+.plan-table.cm-table.cm-list > thead > tr > th:nth-child(n+6):nth-child(-n+8),
+.plan-table.cm-table.cm-list > tbody > tr.cm-row > td.pair { text-align: center; }
+.plan-table td.pair .plan-cell { justify-content: center; padding-right: 24px; }
+.plan-table td.pair .plan-num { text-align: center; }

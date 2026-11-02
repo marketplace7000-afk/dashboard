@@ -488,7 +488,7 @@ export async function getPlanForRnp(mpIn: unknown): Promise<PlanRnp> {
   const b = await buildMp(mp, month);
   const has = b.rows.some(r => r.qty > 0);
   const byArticle: PlanRnp['byArticle'] = {};
-  for (const r of b.rows) if (r.qty > 0) byArticle[r.article] = { qty: r.qty, fact: r.fact, pct: r.pct, needPerDay: r.needPerDay, pace7: r.pace7, behind: r.behind };
+  for (const r of b.rows) if (r.qty > 0) byArticle[r.article] = { qty: r.qty, fact: r.fact, pct: r.pct, needPerDay: r.needPerDay, pace7: r.pace7, behind: r.behind, startDate: r.startDate ?? null, daily: r.daily };
   return {
     ok: true, month, state: has ? (b.head.state as 'draft' | 'approved') : 'none',
     daysLeft: Number(monthEnd(month).slice(8)) - Number(today.slice(8)) + 1,

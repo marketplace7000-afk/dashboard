@@ -20,7 +20,7 @@ export type RnpMetric = {
   key: string;
   label: string;
   short?: string;            // короткая подпись для узкой колонки
-  group: 'Продажи' | 'Воронка' | 'Реклама' | 'Карточка' | 'Остатки';
+  group: 'Продажи' | 'План' | 'Воронка' | 'Реклама' | 'Карточка' | 'Остатки';
   unit: RnpUnit;
   kind: RnpMetricKind;
   num?: string; den?: string; scale?: number;   // для ratio
@@ -60,6 +60,18 @@ export const RNP_METRICS: RnpMetric[] = [
   // Служебные слагаемые СПП: не показываются, нужны для свёртки.
   { key: 'spp_disc', label: 'СПП, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', mps: [] },
   { key: 'spp_base', label: 'Цена продавца по заказам, ₽', group: 'Продажи', unit: 'rub', kind: 'sum', mps: [] },
+
+  // ── План (02.11.2026): из раздела «План», только текущий месяц. Значения подставляет экран РНП, сервер их не хранит ──
+  { key: 'plan_qty', label: 'План на месяц, шт', short: 'План', group: 'План', unit: 'pcs', kind: 'last', mps: BOTH,
+    hint: 'Из раздела «План», текущий месяц. По группе товаров — сумма' },
+  { key: 'plan_day', label: 'План в день, шт', group: 'План', unit: 'num', kind: 'last', mps: BOTH,
+    hint: 'План месяца ÷ дней в месяце; у новинки — дней от даты старта' },
+  { key: 'plan_need', label: 'Нужно в день, шт', short: 'Нужно', group: 'План', unit: 'num', kind: 'last', mps: BOTH,
+    hint: 'Минимум на этот день: (план − заказы по предыдущий день) ÷ дней до конца месяца, включая этот день. По группе товаров — сумма минимумов. В «Итого» — минимум на сегодня, красный, если темп за 7 дней ниже него' },
+  { key: 'plan_fact', label: 'Заказано с начала месяца, шт', short: 'С начала месяца', group: 'План', unit: 'pcs', kind: 'last', mps: BOTH,
+    hint: 'Нарастающий итог заказов на эту дату. Только товары с планом' },
+  { key: 'plan_pct', label: 'Выполнение плана, %', short: 'Выполнение', group: 'План', unit: 'pct', kind: 'ratio', num: 'plan_fact', den: 'plan_qty', scale: 100, mps: BOTH,
+    hint: 'Заказано с начала месяца ÷ план на месяц' },
 
   // ── Воронка (Ozon — v1/analytics/data; WB с 14.10.2026 — sales-funnel/products/history: переходы и корзины, история с этой даты) ──
   { key: 'hits_view', label: 'Показы', group: 'Воронка', unit: 'num', kind: 'sum', better: 'up', mps: BOTH,
@@ -117,7 +129,7 @@ export const RNP_METRICS: RnpMetric[] = [
 export const RNP_METRIC: Record<string, RnpMetric> = Object.fromEntries(RNP_METRICS.map(m => [m.key, m]));
 
 /** Базовые метрики, которые хранит сервер (всё, что не ratio). */
-export const RNP_BASE_KEYS = RNP_METRICS.filter(m => m.kind !== 'ratio').map(m => m.key);
+export const RNP_BASE_KEYS = RNP_METRICS.filter(m => m.kind !== 'ratio' && m.group !== 'План').map(m => m.key);
 
 export type RnpItem = {
   sku: string;          // ключ: WB — nmId, Ozon — артикул продавца (offer_id)

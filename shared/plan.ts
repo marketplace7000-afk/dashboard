@@ -95,7 +95,12 @@ export type PlanStats = { ok: true; view: PlanView; article: string | null; rows
 
 export type PlanRnp = {
   ok: true; month: string; state: 'draft' | 'approved' | 'mixed' | 'none'; daysLeft: number; totals: PlanTotals | null;
-  byArticle: Record<string, { qty: number; fact: number; pct: number | null; needPerDay: number | null; pace7: number | null; behind: boolean }>;
+  byArticle: Record<string, PlanRnpArticle>;
+};
+
+export type PlanRnpArticle = {
+  qty: number; fact: number; pct: number | null; needPerDay: number | null; pace7: number | null; behind: boolean;
+  startDate: string | null; daily: PlanDay[];
 };
 
 const DAY_MS = 86_400_000;
@@ -151,6 +156,30 @@ export function calcPace(a: {
   const forecast = a.today < from && !a.factTotal ? null : a.factToYesterday + (a.pace7 ?? 0) * daysLeft;
   const behind = needPerDay !== null && needPerDay > 0 && a.today >= start && elapsed > 0 && (a.pace7 ?? 0) < needPerDay;
   return { expected, needPerDay, forecast, daysLeft, behind };
+}
+
+/**
+ * Строки плана для таблицы РНП: значение на каждую дату. Даты вне месяца плана — null,
+ * до старта новинки план в день и минимум — null. Минимум на дату считается той же
+ * формулой, что и на сегодня: заказы только по предыдущий день.
+ */
+export function planDaySeries(p: Pick<PlanRnpArticle, 'qty' | 'startDate' | 'daily'>, month: string, dates: string[]): {
+  plan_qty: Array<number | null>; plan_day: Array<number | null>; plan_need: Array<number | null>; plan_fact: Array<number | null>;
+} {
+  const from = monthStart(month), to = monthEnd(month);
+  const start = p.startDate && p.startDate > from ? (p.startDate > to ? to : p.startDate) : from;
+  const perDay = p.qty / (daysBetween(start, to) + 1);
+  const cumTo = (d: string) => p.daily.reduce((s, x) => s + (x.date <= d ? x.cnt : 0), 0);
+  const out = { plan_qty: [] as Array<number | null>, plan_day: [] as Array<number | null>, plan_need: [] as Array<number | null>, plan_fact: [] as Array<number | null> };
+  for (const d of dates) {
+    const inMonth = d >= from && d <= to;
+    const active = inMonth && d >= start;
+    out.plan_qty.push(inMonth ? p.qty : null);
+    out.plan_fact.push(inMonth ? cumTo(d) : null);
+    out.plan_day.push(active ? perDay : null);
+    out.plan_need.push(active ? calcPace({ qty: p.qty, month, today: d, startDate: p.startDate, factToYesterday: cumTo(addDays(d, -1)), factTotal: cumTo(d), pace7: null }).needPerDay : null);
+  }
+  return out;
 }
 
 export const pctOf = (fact: number, plan: number): number | null => (plan > 0 ? (fact / plan) * 100 : null);

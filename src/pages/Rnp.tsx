@@ -21,7 +21,7 @@ import {
 import { apiGet, apiPost, errText } from '../api/http';
 import { RNP_METRICS, RNP_METRIC, type RnpMetric, type RnpMp, type RnpResponse, type RnpItem, type RnpPriceView } from '../../shared/rnp';
 import { RnpAdvisorSheet } from './RnpAdvisor';
-import type { PlanRnp } from '../../shared/plan';
+import { planDaySeries, type PlanRnp } from '../../shared/plan';
 
 /** Листы раздела: таблица РНП и «Советник» (выпуски в течение дня, 15.10.2026). */
 type Sheet = 'table' | 'advisor';
@@ -71,7 +71,7 @@ const RATING_RULE: Rule = { id: 'r-rating', metric: 'rating', op: 'drop', value:
 
 const DEFAULTS: Settings = {
   period: '14', from: '', to: '', dateGroup: 'day', rowGroup: 'product', category: '', inStock: true,
-  metrics: ['ordered_cnt', 'ordered_amount', 'avg_bill', 'adv_expenses', 'percent_drr', 'card_ctr', 'rating', 'stocks'],
+  metrics: ['ordered_cnt', 'ordered_amount', 'avg_bill', 'plan_qty', 'plan_need', 'plan_pct', 'adv_expenses', 'percent_drr', 'card_ctr', 'rating', 'stocks'],
   rules: [
     { id: 'r1', metric: 'percent_drr', op: 'gt', value: 15, color: 'red', on: true },
     { id: 'r2', metric: 'ordered_cnt', op: 'drop', value: 30, color: 'amber', on: true },
@@ -86,7 +86,13 @@ function loadSettings(mp: RnpMp): Settings {
   try {
     const raw = localStorage.getItem(LS_KEY(mp));
     if (raw) {
-      const s: Settings & { ratingAdded?: boolean; ctrAdded?: boolean } = { ...DEFAULTS, ...JSON.parse(raw) };
+      const s: Settings & { ratingAdded?: boolean; ctrAdded?: boolean; planAdded?: boolean } = { ...DEFAULTS, ...JSON.parse(raw) };
+      // 02.11.2026: один раз показываем план; дальше его можно убрать в «Метриках», выбор сохранится.
+      if (!s.planAdded) {
+        s.planAdded = true;
+        const add = ['plan_qty', 'plan_need', 'plan_pct'].filter(k => !s.metrics.includes(k));
+        s.metrics = RNP_METRICS.filter(m => s.metrics.includes(m.key) || add.includes(m.key)).map(m => m.key);
+      }
       // 26.10.2026: так же один раз добавляем «CTR карточки» — перед рейтингом.
       if (!s.ctrAdded) {
         s.ctrAdded = true;
@@ -276,7 +282,7 @@ function Spark({ values, metric }: { values: Array<number | null>; metric: RnpMe
 // ─── Панель метрик и правил ─────────────────────────────────────────────────
 
 function MetricPicker({ mp, s, set, present }: { mp: RnpMp; s: Settings; set: (p: Partial<Settings>) => void; present: Set<string> }) {
-  const groups = ['Продажи', 'Воронка', 'Реклама', 'Карточка', 'Остатки'] as const;
+  const groups = ['Продажи', 'План', 'Воронка', 'Реклама', 'Карточка', 'Остатки'] as const;
   const toggle = (k: string) => set({ metrics: s.metrics.includes(k) ? s.metrics.filter(x => x !== k) : RNP_METRICS.filter(m => m.key === k || s.metrics.includes(m.key)).map(m => m.key) });
   return (
     <div className="rnp-metrics">
@@ -360,10 +366,25 @@ function useHeight<T extends HTMLElement>() {
   return [ref, h] as const;
 }
 
+/** Подставляет план в данные РНП как обычные метрики: свёртка, сортировка, правила и выгрузка работают сами. */
+function withPlan<T extends RnpResponse>(data: T, plan: PlanRnp | null): T {
+  if (!plan || !Object.keys(plan.byArticle).length) return data;
+  const facts = { ...data.facts };
+  const used = new Set<string>();   // один артикул — одна строка плана, иначе сумма по группе задвоится
+  for (const it of data.items) {
+    const a = it.article.toUpperCase();
+    const p = plan.byArticle[a];
+    if (!p || used.has(a)) continue;
+    used.add(a);
+    facts[it.sku] = { ...facts[it.sku], ...planDaySeries(p, plan.month, data.dates) };
+  }
+  return { ...data, facts, present: [...data.present, 'plan_qty', 'plan_day', 'plan_need', 'plan_fact'] };
+}
+
 function RnpBoard({ mp }: { mp: RnpMp }) {
   const [s, setS] = useState<Settings>(() => loadSettings(mp));
   const set = useCallback((p: Partial<Settings>) => setS(prev => { const n = { ...prev, ...p }; saveSettings(mp, n); return n; }), [mp]);
-  const [data, setData] = useState<(RnpResponse & { collecting?: boolean }) | null>(null);
+  const [rawData, setData] = useState<(RnpResponse & { collecting?: boolean }) | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -390,9 +411,9 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
   useEffect(() => { void load(); }, [load]);
   // Пока на сервере идёт сбор — переспрашиваем чаще, иначе раз в 5 минут.
   useEffect(() => {
-    const t = setInterval(load, data?.collecting ? 20_000 : 300_000);
+    const t = setInterval(load, rawData?.collecting ? 20_000 : 300_000);
     return () => clearInterval(t);
-  }, [load, data?.collecting]);
+  }, [load, rawData?.collecting]);
 
   // План месяца (раздел «План»): минимум заказов в день по площадке и товару.
   const [plan, setPlan] = useState<PlanRnp | null>(null);
@@ -403,6 +424,7 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
     const t = setInterval(get, 300_000);
     return () => { live = false; clearInterval(t); };
   }, [mp]);
+  const data = useMemo(() => rawData && withPlan(rawData, plan), [rawData, plan]);
 
   const collectNow = async () => {
     try { await apiPost(`/api/rnp/collect?mp=${mp}`); setData(d => d ? { ...d, collecting: true } : d); } catch (e) { setErr(errText(e)); }
@@ -612,7 +634,7 @@ function RnpBoard({ mp }: { mp: RnpMp }) {
                   <Block title="Итого по площадке" sub={`${view.itemsCount} товаров в выборке`} photo="" link="" rows={view.total.rows} hits={[]} heat={s.heatmap} total />
                   {view.blocks.slice(0, shown).map(b => (
                     <Block key={b.e.key} title={b.e.title} sub={s.rowGroup === 'product' ? '' : b.e.sub} hint={b.e.sub} photo={b.e.photo} link={b.e.link} rows={b.rows} hits={b.hits} heat={s.heatmap}
-                      plan={s.rowGroup === 'product' ? plan?.byArticle[b.e.title.toUpperCase()] : undefined}
+                      behind={s.rowGroup === 'product' ? plan?.byArticle[b.e.title.toUpperCase()]?.behind : undefined}
                       cat={s.rowGroup === 'product' ? b.e.item?.category : undefined}
                       price={s.rowGroup === 'product' && (data?.prices || data?.sellerPrices) ? (b.e.price ?? null) : undefined} />
                   ))}
@@ -691,18 +713,9 @@ function PlanStrip({ plan }: { plan: PlanRnp }) {
   );
 }
 
-function PlanFacts({ p }: { p: NonNullable<PlanRnp['byArticle'][string]> }) {
-  return (
-    <dl className="rnp-econ" title="План из раздела «План». Минимум = (план − заказы по вчера) ÷ оставшиеся дни, темп — заказов в день за 7 полных дней">
-      <div><dt>План</dt><dd>{nf0.format(p.fact)} из {nf0.format(p.qty)}{p.pct !== null && ` · ${nf0.format(p.pct)}%`}</dd></div>
-      <div><dt>В день</dt><dd><b className={p.behind ? 'rnp-m-bad' : ''}>{p.needPerDay === null ? '–' : nf1.format(p.needPerDay)}</b>{p.pace7 !== null && ` · темп ${nf1.format(p.pace7)}`}</dd></div>
-    </dl>
-  );
-}
-
-function Block({ title, sub, hint, photo, link, rows, hits, heat, total, cat, price, plan }: {
+function Block({ title, sub, hint, photo, link, rows, hits, heat, total, cat, price, behind }: {
   title: string; sub: string; hint?: string; photo: string; link: string; rows: BlockRow[]; hits: Rule[]; heat: boolean; total?: boolean; cat?: string;
-  price?: ItemPrice | null; plan?: PlanRnp['byArticle'][string];
+  price?: ItemPrice | null; behind?: boolean;
 }) {
   return (
     <>
@@ -721,7 +734,6 @@ function Block({ title, sub, hint, photo, link, rows, hits, heat, total, cat, pr
                   {sub && <div className="rnp-item-sub" title={sub}>{sub}</div>}
                   {cat && <div className="rnp-item-cat">{cat}</div>}
                   {price !== undefined && <PriceFacts p={price} />}
-                  {plan && <PlanFacts p={plan} />}
                   {hits.length > 0 && (
                     <div className="rnp-item-hits">
                       {hits.map(h => <span key={h.id} className={`rnp-dot rnp-c-${h.color}`} title={ruleTitle(h)} />)}
@@ -738,7 +750,7 @@ function Block({ title, sub, hint, photo, link, rows, hits, heat, total, cat, pr
             const cls = f ? `rnp-flag rnp-c-${f.color}` : heat ? heatClass(v, r.cells, r.metric) : '';
             return <td key={i} className={`rnp-num ${cls}`} title={f ? ruleTitle(f) : undefined}>{fmt(v, r.metric)}</td>;
           })}
-          <td className="rnp-num rnp-col-total">{fmt(r.total, r.metric)}</td>
+          <td className={`rnp-num rnp-col-total ${behind && r.metric.key === 'plan_need' ? 'rnp-m-bad' : ''}`}>{fmt(r.total, r.metric)}</td>
         </tr>
       ))}
     </>

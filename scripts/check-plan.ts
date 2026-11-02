@@ -25,7 +25,9 @@ check('нет продаж совсем', pickPrice({ manual: 0, frozen: 0, basi
 
 // Сверка с октябрём WB: на утро 16.10 план 1 238, заказов по вчера 845, осталось 16 дней.
 const oct = calcPace({ qty: 1238, month: '2026-10', today: '2026-10-16', factToYesterday: 845, factTotal: 845, pace7: 50 });
-check('минимум в день, WB 16.10', Math.round(oct.needPerDay!), 25);
+check('минимум в день, WB 16.10, вверх до целого', oct.needPerDay, 25);
+check('минимум 7,6 → 8', calcPace({ qty: 38, month: '2026-11', today: '2026-11-26', factToYesterday: 0, factTotal: 0, pace7: 0 }).needPerDay, 8);
+check('ровно 2 не становится 3', calcPace({ qty: 10, month: '2026-11', today: '2026-11-26', factToYesterday: 0, factTotal: 0, pace7: 0 }).needPerDay, 2);
 check('дней осталось, включая сегодня', oct.daysLeft, 16);
 check('темп выше минимума — не отстаёт', oct.behind, false);
 check('прогноз: факт + темп × дни', oct.forecast, 845 + 50 * 16);
@@ -54,7 +56,7 @@ check('РНП: заказы дня', ser.plan_ordered.slice(1), [2, 4]);
 check('РНП: нарастающий итог', ser.plan_fact.slice(1), [2, 6]);
 check('РНП: минимум 1.11 без заказов', ser.plan_need[1], 1);
 check('РНП: минимум 2.11 — заказы только по 1.11', ser.plan_need[2], 28 / 29);
-check('РНП: минимум совпадает с разделом «План»', ser.plan_need[2], calcPace({ qty: 30, month: '2026-11', today: '2026-11-02', factToYesterday: 2, factTotal: 6, pace7: 1 }).needPerDay);
+check('РНП: минимум совпадает с разделом «План»', Math.ceil(ser.plan_need[2]!), calcPace({ qty: 30, month: '2026-11', today: '2026-11-02', factToYesterday: 2, factTotal: 6, pace7: 1 }).needPerDay);
 const fresh = planDaySeries({ qty: 12, startDate: '2026-11-25', daily: [] }, '2026-11', ['2026-11-24', '2026-11-25']);
 check('РНП: новинка до старта — без минимума', fresh.plan_need[0], null);
 check('РНП: новинка от старта', fresh.plan_need[1], 2);

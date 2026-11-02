@@ -135,7 +135,7 @@ export function pickPrice(a: {
   return { price: 0, source: 'none' };
 }
 
-export type Pace = { expected: number | null; needPerDay: number | null; forecast: number | null; daysLeft: number; behind: boolean };
+export type Pace = { expected: number | null; needPerDay: number | null; needExact: number | null; forecast: number | null; daysLeft: number; behind: boolean };
 
 /**
  * Темп одного товара или площадки.
@@ -146,16 +146,18 @@ export function calcPace(a: {
 }): Pace {
   const from = monthStart(a.month), to = monthEnd(a.month);
   const start = a.startDate && a.startDate > from ? (a.startDate > to ? to : a.startDate) : from;
-  if (a.today > to) return { expected: a.qty || null, needPerDay: null, forecast: a.factTotal, daysLeft: 0, behind: false };
+  if (a.today > to) return { expected: a.qty || null, needPerDay: null, needExact: null, forecast: a.factTotal, daysLeft: 0, behind: false };
   const activeDays = daysBetween(start, to) + 1;
   const firstLeft = a.today > start ? a.today : start;
   const daysLeft = daysBetween(firstLeft, to) + 1;
   const elapsed = Math.max(0, activeDays - daysLeft);
   const expected = a.qty > 0 ? (a.qty * elapsed) / activeDays : null;
-  const needPerDay = a.qty > 0 ? Math.max(0, a.qty - a.factToYesterday) / daysLeft : null;
+  const needExact = a.qty > 0 ? Math.max(0, a.qty - a.factToYesterday) / daysLeft : null;
+  // Штуки целые, округляем вверх: при округлении вниз план к концу месяца не набирается.
+  const needPerDay = needExact === null ? null : Math.ceil(needExact);
   const forecast = a.today < from && !a.factTotal ? null : a.factToYesterday + (a.pace7 ?? 0) * daysLeft;
   const behind = needPerDay !== null && needPerDay > 0 && a.today >= start && elapsed > 0 && (a.pace7 ?? 0) < needPerDay;
-  return { expected, needPerDay, forecast, daysLeft, behind };
+  return { expected, needPerDay, needExact, forecast, daysLeft, behind };
 }
 
 /**
@@ -176,7 +178,7 @@ export function planDaySeries(p: Pick<PlanRnpArticle, 'qty' | 'startDate' | 'dai
     out.plan_qty.push(inMonth ? p.qty : null);
     out.plan_fact.push(inMonth ? cumTo(d) : null);
     out.plan_ordered.push(inMonth ? p.daily.find(x => x.date === d)?.cnt ?? 0 : null);
-    out.plan_need.push(active ? calcPace({ qty: p.qty, month, today: d, startDate: p.startDate, factToYesterday: cumTo(addDays(d, -1)), factTotal: cumTo(d), pace7: null }).needPerDay : null);
+    out.plan_need.push(active ? calcPace({ qty: p.qty, month, today: d, startDate: p.startDate, factToYesterday: cumTo(addDays(d, -1)), factTotal: cumTo(d), pace7: null }).needExact : null);
   }
   return out;
 }

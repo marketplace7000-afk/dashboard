@@ -213,6 +213,8 @@ function aggregate(data: RnpResponse, skus: string[], idxs: number[], baseKeys: 
 function derive(key: string, b: Base): number | null {
   const m = RNP_METRIC[key];
   if (!m) return null;
+  // Минимум в штуках — целый и вверх. Группа: сначала сумма точных минимумов, потом округление. 1e-9 — от хвостов дробей в сумме.
+  if (key === 'plan_need') { const v = b[key]; return v === null || v === undefined ? null : Math.ceil(v - 1e-9); }
   if (m.kind !== 'ratio') return b[key] ?? null;
   const n = b[m.num!]; const d = b[m.den!];
   if (n === null || n === undefined || d === null || d === undefined || d === 0) return null;

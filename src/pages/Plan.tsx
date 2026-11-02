@@ -251,7 +251,7 @@ function MonthPlan({ view, month, setMonth }: { view: PlanView; month: string; s
                     <th title="Заказы по вчера + темп за 7 дней × оставшиеся дни">Прогноз</th>
                     <th>{sortBtn('ads', 'Реклама')}</th>
                     <th>{sortBtn('marginPct', 'Маржа', 'Из отчёта финансиста, последний заполненный месяц')}</th>
-                    <th title="Текущий остаток и товар в пути">Остаток</th>
+                    <th title="FBO на этой площадке + FBS на всех своих складах. Те же числа, что в разделе «Остатки». Свои склады общие для WB и Ozon">Остаток</th>
                     <th aria-label="Действия" />
                   </tr>
                 </thead>
@@ -452,6 +452,7 @@ function PlanLine({ r, data, open, onToggle, post, onArchive }: { r: PlanRow; da
         </td>
         <td>
           <span className={r.stockShort ? 'bad' : ''}>{n0(r.stock)}</span>
+          {r.stock !== null && <div className="cm-sub">FBO {n0(r.stockFbo)} · FBS {n0(r.stockFbs)}</div>}
           {!!r.transit && <div className="cm-sub">едет {n0(r.transit)}</div>}
           {r.stockShort && <div className="cm-sub bad">не хватит</div>}
         </td>

@@ -49,7 +49,10 @@ export type PlanRow = {
   marginPct: number | null;
   marginRub: number | null;
   marginMonth: string | null;
+  /** FBO этой площадки + FBS всех своих складов, как в разделе «Остатки». */
   stock: number | null;
+  stockFbo: number | null;
+  stockFbs: number | null;
   transit: number | null;
   /** Хватит ли остатка и едущего товара на оставшийся план; null — неизвестно. */
   stockShort: boolean;

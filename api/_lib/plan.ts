@@ -188,6 +188,32 @@ function ensureImport(): void {
 
 type Line = { article: string; qty: number; price_manual: number; price_frozen: number; is_new: number; name: string; start_date: string | null; comment: string };
 
+/**
+ * Остаток — те же числа, что в разделе «Остатки» (просьба владельца 02.11.2026): FBO этой площадки
+ * (WB без остановленных складов) и FBS по всем своим складам из таблицы «Склад». Цифра FBS в API
+ * площадок не годится: там то, что выгружено на площадку, а не то, что лежит на складах.
+ */
+type StockMaps = { fbo: Map<string, number>; fbs: Map<string, number> };
+const stockMemo = new Map<PlanMp, { at: number; maps: StockMaps | null }>();
+async function stockMaps(mp: PlanMp): Promise<StockMaps | null> {
+  const hit = stockMemo.get(mp);
+  if (hit && Date.now() - hit.at < 60_000) return hit.maps;
+  let maps: StockMaps | null = null;
+  try {
+    const { getFbo } = await import('./fboStocks');
+    const { buildOzon, buildWb } = await import('../../src/utils/fboModel');
+    const { data } = await getFbo();
+    if (data) {
+      const add = (m: Map<string, number>, art: string, q: number) => { const a = up(art); m.set(a, (m.get(a) ?? 0) + q); };
+      maps = { fbo: new Map(), fbs: new Map() };
+      for (const s of (mp === 'wb' ? buildWb(data) : buildOzon(data)).stock) add(maps.fbo, s.art, s.q);
+      for (const s of data.fbs.stock) add(maps.fbs, s.art, s.q);
+    }
+  } catch (e) { console.warn('[plan] остатки не прочитаны:', (e as Error)?.message); }
+  stockMemo.set(mp, { at: Date.now(), maps });
+  return maps;
+}
+
 async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; archived: PlanArchived[]; head: { state: string; basis: PlanBasis; approved_by: string | null; approved_at: number | null }; factSource: 'api' | 'finance'; catalog: { article: string; name: string }[]; approxTo: string | null; finMonth: string | null }> {
   const d = getDb();
   const today = mskDate(0);
@@ -212,6 +238,7 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; ar
   const fin = finByArticle(mp, month);
   const margins = latestMargins(mp, month);
   const stocks = rnpLatestStocks(mp);
+  const stockNow = await stockMaps(mp);
   let sheet: Record<string, any> = {};
   try { const { getStockSheet } = await import('./stockSheet'); sheet = (await getStockSheet(false)).items; } catch { /* остаток в пути просто не покажем */ }
   const snapshots = new Map((d.prepare('SELECT article, fact, fact_rub, ads FROM plan_snapshot WHERE mp = ? AND month = ?').all(mp, month) as any[]).map(r => [String(r.article), r]));
@@ -278,7 +305,9 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; ar
     const pace = calcPace({ qty, month, today, startDate, factToYesterday, factTotal: fact, pace7 });
     const planRub = qty * price;
     const m = margins.get(article);
-    const stock = stocks.has(article) ? stocks.get(article)! : null;
+    const stockFbo = stockNow ? stockNow.fbo.get(article) ?? 0 : null;
+    const stockFbs = stockNow ? stockNow.fbs.get(article) ?? 0 : null;
+    const stock = stockNow ? stockFbo! + stockFbs! : null;
     const sh = sheet[article]?.[mp];
     const transit = sh ? num(sh.transit) : null;
     const remain = Math.max(0, qty - fact);
@@ -287,7 +316,7 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; ar
     // В утверждённом месяце товар с планом остаётся до конца месяца: утверждённое архив не меняет.
     const isArchived = archivedSet.has(article);
     if (isArchived && !(head.state === 'approved' && qty > 0)) {
-      archived.push({ mp, article, name: l?.name || item?.name || '', photo: item?.photo || '', qty, fact, factRub, stock: stocks.has(article) ? stocks.get(article)! : null });
+      archived.push({ mp, article, name: l?.name || item?.name || '', photo: item?.photo || '', qty, fact, factRub, stock });
       continue;
     }
     rows.push({
@@ -298,7 +327,7 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; ar
       expected: pace.expected, forecast: pace.forecast, needPerDay: pace.needPerDay, pace7, behind: pace.behind,
       ads, drr: factRub > 0 ? (ads / factRub) * 100 : null,
       marginPct: m ? m.pct : null, marginRub: m ? m.rub : null, marginMonth: m ? m.month : null,
-      stock, transit, stockShort: !isPast && stock !== null && remain > stock + (transit ?? 0),
+      stock, stockFbo, stockFbs, transit, stockShort: !isPast && stock !== null && remain > stock + (transit ?? 0),
       prevFact: pf === null ? null : Math.round(pf), orders30: sum(article, addDays(today, -30), yesterday).cnt, daily,
     });
   }
@@ -373,7 +402,10 @@ function mergeRows(wb: PlanRow[], oz: PlanRow[]): PlanRow[] {
     x.orders30 += r.orders30; x.behind = x.behind || r.behind; x.stockShort = x.stockShort || r.stockShort;
     x.price = x.qty > 0 ? x.planRub / x.qty : x.price;
     x.pct = pctOf(x.fact, x.qty); x.pctRub = pctOf(x.factRub, x.planRub); x.drr = x.factRub > 0 ? (x.ads / x.factRub) * 100 : null;
-    x.stock = x.stock === null && r.stock === null ? null : Math.max(x.stock ?? 0, r.stock ?? 0);
+    // FBO складывается по площадкам, а свои склады общие: их считаем один раз.
+    x.stockFbo = x.stockFbo === null && r.stockFbo === null ? null : (x.stockFbo ?? 0) + (r.stockFbo ?? 0);
+    x.stockFbs = x.stockFbs ?? r.stockFbs;
+    x.stock = x.stockFbo === null && x.stockFbs === null ? null : (x.stockFbo ?? 0) + (x.stockFbs ?? 0);
     x.photo = x.photo || r.photo; x.name = x.name || r.name; x.hasLine = x.hasLine || r.hasLine;
     x[r.mp as PlanMp] = part;
     const days = new Map(x.daily.map(d => [d.date, d]));

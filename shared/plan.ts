@@ -160,26 +160,44 @@ export function calcPace(a: {
 
 /**
  * Строки плана для таблицы РНП: значение на каждую дату. Даты вне месяца плана — null,
- * до старта новинки план в день и минимум — null. Минимум на дату считается той же
+ * до старта новинки минимум — null. Минимум на дату считается той же
  * формулой, что и на сегодня: заказы только по предыдущий день.
  */
 export function planDaySeries(p: Pick<PlanRnpArticle, 'qty' | 'startDate' | 'daily'>, month: string, dates: string[]): {
-  plan_qty: Array<number | null>; plan_day: Array<number | null>; plan_need: Array<number | null>; plan_fact: Array<number | null>;
+  plan_qty: Array<number | null>; plan_need: Array<number | null>; plan_fact: Array<number | null>; plan_ordered: Array<number | null>;
 } {
   const from = monthStart(month), to = monthEnd(month);
   const start = p.startDate && p.startDate > from ? (p.startDate > to ? to : p.startDate) : from;
-  const perDay = p.qty / (daysBetween(start, to) + 1);
   const cumTo = (d: string) => p.daily.reduce((s, x) => s + (x.date <= d ? x.cnt : 0), 0);
-  const out = { plan_qty: [] as Array<number | null>, plan_day: [] as Array<number | null>, plan_need: [] as Array<number | null>, plan_fact: [] as Array<number | null> };
+  const out = { plan_qty: [] as Array<number | null>, plan_need: [] as Array<number | null>, plan_fact: [] as Array<number | null>, plan_ordered: [] as Array<number | null> };
   for (const d of dates) {
     const inMonth = d >= from && d <= to;
     const active = inMonth && d >= start;
     out.plan_qty.push(inMonth ? p.qty : null);
     out.plan_fact.push(inMonth ? cumTo(d) : null);
-    out.plan_day.push(active ? perDay : null);
+    out.plan_ordered.push(inMonth ? p.daily.find(x => x.date === d)?.cnt ?? 0 : null);
     out.plan_need.push(active ? calcPace({ qty: p.qty, month, today: d, startDate: p.startDate, factToYesterday: cumTo(addDays(d, -1)), factTotal: cumTo(d), pace7: null }).needPerDay : null);
   }
   return out;
 }
 
 export const pctOf = (fact: number, plan: number): number | null => (plan > 0 ? (fact / plan) * 100 : null);
+
+/**
+ * Общее выполнение плана товаром. Сравниваем заказы по вчера с тем, что должно быть к этому дню
+ * при ровных продажах. Сегодня не учитываем: день не закончен. Отставание меньше одной штуки — ещё не отставание.
+ */
+export type PlanStatusKey = 'done' | 'ok' | 'near' | 'bad' | 'wait';
+export function planStatus(p: Pick<PlanRnpArticle, 'qty' | 'startDate' | 'daily'>, month: string, today: string): {
+  key: PlanStatusKey; pct: number | null; expected: number; factToYesterday: number;
+} {
+  const fact = p.daily.reduce((s, x) => s + x.cnt, 0);
+  const factToYesterday = p.daily.reduce((s, x) => s + (x.date < today ? x.cnt : 0), 0);
+  const pct = pctOf(fact, p.qty);
+  const expected = calcPace({ qty: p.qty, month, today, startDate: p.startDate, factToYesterday, factTotal: fact, pace7: null }).expected ?? 0;
+  const key: PlanStatusKey = p.qty > 0 && fact >= p.qty ? 'done'
+    : expected <= 0 ? 'wait'
+    : expected - factToYesterday < 1 ? 'ok'
+    : factToYesterday >= expected * 0.8 ? 'near' : 'bad';
+  return { key, pct, expected, factToYesterday };
+}

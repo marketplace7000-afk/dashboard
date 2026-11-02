@@ -1,7 +1,7 @@
 /**
  * Расчёты раздела «План» (02.11.2026). Запуск: npm run check
  */
-import { avgCheck, calcPace, monthEnd, pctOf, pickPrice, planDaySeries, shiftMonth } from '../shared/plan';
+import { avgCheck, calcPace, monthEnd, pctOf, pickPrice, planDaySeries, planStatus, shiftMonth } from '../shared/plan';
 
 let failed = 0;
 function check(name: string, actual: unknown, expected: unknown): void {
@@ -48,16 +48,28 @@ check('закрытый месяц: прогноз = факт', past.forecast, 1
 // Строки плана в таблице РНП: 30 шт на ноябрь, заказы 1.11 — 2 шт, 2.11 — 4 шт.
 const days = [{ date: '2026-11-01', cnt: 2 }, { date: '2026-11-02', cnt: 4 }];
 const ser = planDaySeries({ qty: 30, startDate: null, daily: days }, '2026-11', ['2026-10-31', '2026-11-01', '2026-11-02']);
-check('РНП: прошлый месяц — пусто', [ser.plan_qty[0], ser.plan_need[0], ser.plan_fact[0], ser.plan_day[0]], [null, null, null, null]);
+check('РНП: прошлый месяц — пусто', [ser.plan_qty[0], ser.plan_need[0], ser.plan_fact[0], ser.plan_ordered[0]], [null, null, null, null]);
 check('РНП: план на месяц', ser.plan_qty[2], 30);
-check('РНП: план в день', ser.plan_day[1], 1);
+check('РНП: заказы дня', ser.plan_ordered.slice(1), [2, 4]);
 check('РНП: нарастающий итог', ser.plan_fact.slice(1), [2, 6]);
 check('РНП: минимум 1.11 без заказов', ser.plan_need[1], 1);
 check('РНП: минимум 2.11 — заказы только по 1.11', ser.plan_need[2], 28 / 29);
 check('РНП: минимум совпадает с разделом «План»', ser.plan_need[2], calcPace({ qty: 30, month: '2026-11', today: '2026-11-02', factToYesterday: 2, factTotal: 6, pace7: 1 }).needPerDay);
 const fresh = planDaySeries({ qty: 12, startDate: '2026-11-25', daily: [] }, '2026-11', ['2026-11-24', '2026-11-25']);
-check('РНП: новинка до старта — без минимума', [fresh.plan_day[0], fresh.plan_need[0]], [null, null]);
-check('РНП: новинка от старта', [fresh.plan_day[1], fresh.plan_need[1]], [2, 2]);
+check('РНП: новинка до старта — без минимума', fresh.plan_need[0], null);
+check('РНП: новинка от старта', fresh.plan_need[1], 2);
+
+// Общее выполнение на 11.11: прошло 10 дней из 30, при плане 30 к вчера ждём 10 шт.
+const st = (cum: number, qty = 30) => planStatus({ qty, startDate: null, daily: [{ date: '2026-11-01', cnt: cum }, { date: '2026-11-11', cnt: 1 }] }, '2026-11', '2026-11-11');
+check('статус: по плану', st(10).key, 'ok');
+check('статус: чуть ниже, от 80 %', st(8).key, 'near');
+check('статус: отстаёт', st(7).key, 'bad');
+check('статус: сегодняшний заказ не спасает вчерашний итог', st(7).factToYesterday, 7);
+check('статус: процент — вместе с сегодня', st(14).pct, 50);
+check('статус: выполнен', st(29).key, 'done');
+check('статус: первый день — ждём', planStatus({ qty: 30, startDate: null, daily: [] }, '2026-11', '2026-11-01').key, 'wait');
+check('статус: новинка до старта — ждём', planStatus({ qty: 12, startDate: '2026-11-25', daily: [] }, '2026-11', '2026-11-03').key, 'wait');
+check('статус: меньше штуки — не отставание', planStatus({ qty: 3, startDate: null, daily: [] }, '2026-11', '2026-11-03').key, 'ok');
 
 if (failed) { console.error(`check-plan: ошибок ${failed}`); process.exit(1); }
 console.log('check-plan: всё верно');

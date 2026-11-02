@@ -18,7 +18,7 @@ import { mskDate } from './mskDate';
 import { planArticleFacts, rnpLatestStocks, rnpLinks } from './rnp';
 import {
   addDays, avgCheck, calcPace, monthEnd, monthStart, pctOf, pickPrice, shiftMonth,
-  type PlanBasis, type PlanDay, type PlanMp, type PlanResponse, type PlanRnp, type PlanRow, type PlanStatRow, type PlanStats, type PlanStatus, type PlanTotals, type PlanView,
+  type PlanBasis, type PlanDay, type PlanArchived, type PlanMp, type PlanResponse, type PlanRnp, type PlanRow, type PlanStatRow, type PlanStats, type PlanStatus, type PlanTotals, type PlanView,
 } from '../../shared/plan';
 
 let DatabaseSync: any = null;
@@ -65,6 +65,8 @@ function getDb(): any {
       PRIMARY KEY (mp, month, article));
     CREATE TABLE IF NOT EXISTS plan_meta (key TEXT PRIMARY KEY, value TEXT);
   `);
+  // Архив (02.11.2026): товар скрыт начиная с этого месяца, прошлые месяцы не меняются.
+  try { db.exec('ALTER TABLE plan_article ADD COLUMN archived_from TEXT'); } catch { /* столбец уже есть */ }
   return db;
 }
 const metaGet = (k: string): string | null => (getDb().prepare('SELECT value FROM plan_meta WHERE key = ?').get(k) as any)?.value ?? null;
@@ -186,7 +188,7 @@ function ensureImport(): void {
 
 type Line = { article: string; qty: number; price_manual: number; price_frozen: number; is_new: number; name: string; start_date: string | null; comment: string };
 
-async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; head: { state: string; basis: PlanBasis; approved_by: string | null; approved_at: number | null }; factSource: 'api' | 'finance'; catalog: { article: string; name: string }[]; approxTo: string | null; finMonth: string | null }> {
+async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; archived: PlanArchived[]; head: { state: string; basis: PlanBasis; approved_by: string | null; approved_at: number | null }; factSource: 'api' | 'finance'; catalog: { article: string; name: string }[]; approxTo: string | null; finMonth: string | null }> {
   const d = getDb();
   const today = mskDate(0);
   const yesterday = addDays(today, -1);
@@ -196,7 +198,9 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; he
     ?? { state: 'draft', basis: '7d', approved_by: null, approved_at: null };
   const lines = d.prepare('SELECT article, qty, price_manual, price_frozen, is_new, name, start_date, comment FROM plan_line WHERE month = ? AND mp = ?').all(month, mp) as Line[];
   const lineBy = new Map(lines.map(l => [l.article, l]));
-  const statuses = new Map((d.prepare('SELECT article, status FROM plan_article WHERE mp = ?').all(mp) as any[]).map(r => [String(r.article), STATUS(r.status)]));
+  const articleRows = d.prepare('SELECT article, status, archived_from FROM plan_article WHERE mp = ?').all(mp) as any[];
+  const statuses = new Map(articleRows.map(r => [String(r.article), STATUS(r.status)]));
+  const archivedSet = new Set(articleRows.filter(r => r.archived_from && month >= String(r.archived_from)).map(r => String(r.article)));
 
   // База средних чеков: для текущего и будущего месяца — вчера, для прошлого черновика — канун месяца.
   const anchor = isPast ? addDays(from, -1) : yesterday;
@@ -233,9 +237,12 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; he
     }
   }
 
+  for (const a of archivedSet) universe.add(a);
+
   const snapIns = d.prepare('INSERT OR REPLACE INTO plan_snapshot (mp, month, article, fact, fact_rub, ads) VALUES (?, ?, ?, ?, ?, ?)');
   const links = rnpLinks(mp);
   const rows: PlanRow[] = [];
+  const archived: PlanArchived[] = [];
   for (const article of universe) {
     const l = lineBy.get(article);
     const item = facts.items.get(article);
@@ -277,8 +284,14 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; he
     const remain = Math.max(0, qty - fact);
     const pf = factSource === 'finance' || prevMonth < API_FROM_MONTH ? (prevFin.get(article)?.orders ?? null) : sum(article, monthStart(prevMonth), monthEnd(prevMonth)).cnt;
 
+    // В утверждённом месяце товар с планом остаётся до конца месяца: утверждённое архив не меняет.
+    const isArchived = archivedSet.has(article);
+    if (isArchived && !(head.state === 'approved' && qty > 0)) {
+      archived.push({ mp, article, name: l?.name || item?.name || '', photo: item?.photo || '', qty, fact, factRub, stock: stocks.has(article) ? stocks.get(article)! : null });
+      continue;
+    }
     rows.push({
-      mp, article, name: l?.name || item?.name || '', photo: item?.photo || '', link: links.get(article) || '',
+      archived: isArchived, mp, article, name: l?.name || item?.name || '', photo: item?.photo || '', link: links.get(article) || '',
       status: isNew ? 'Новинка' : statuses.get(article) ?? 'Рабочий', isNew, inSale, startDate, comment: l?.comment ?? '',
       qty, hasLine: !!l, price, priceSource: source, planRub,
       fact, factRub, pct: pctOf(fact, qty), pctRub: pctOf(factRub, planRub),
@@ -292,7 +305,7 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; he
   rows.sort((a, b) => b.planRub - a.planRub || b.fact - a.fact || a.article.localeCompare(b.article));
 
   const shown = new Set(rows.map(r => r.article));
-  const catalog = [...facts.items.entries()].filter(([a]) => facts.real(a) && !shown.has(a)).map(([article, i]) => ({ article, name: i.name })).sort((a, b) => a.article.localeCompare(b.article));
+  const catalog = [...facts.items.entries()].filter(([a]) => facts.real(a) && !shown.has(a) && !archivedSet.has(a)).map(([article, i]) => ({ article, name: i.name })).sort((a, b) => a.article.localeCompare(b.article));
 
   // По какую дату заполнен отчёт финансиста: день, когда заказы РНП догоняют его итог.
   let approxTo: string | null = null;
@@ -308,7 +321,8 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; he
       if (cum >= total) break;
     }
   }
-  return { rows, head, factSource, catalog, approxTo, finMonth };
+  archived.sort((a, b) => b.fact - a.fact || a.article.localeCompare(b.article));
+  return { rows, archived, head, factSource, catalog, approxTo, finMonth };
 }
 
 function totalsOf(rows: PlanRow[], month: string, today: string): PlanTotals {
@@ -407,7 +421,7 @@ export async function getPlan(viewIn: unknown, monthIn: unknown, user: PlanUser)
     canApprove: view !== 'all' && user.role === 'owner',
     factSource: parts[0].factSource,
     finance: { month: parts[0].finMonth, approxTo: parts[0].approxTo, checkedAt: Number(metaGet('fin:at')) || null, error: err || null },
-    rows, totals: totalsOf(rows, month, today), catalog, months: knownMonths(),
+    rows, totals: totalsOf(rows, month, today), catalog, months: knownMonths(), archived: parts.flatMap(x => x.archived),
   };
 }
 
@@ -471,7 +485,7 @@ function guard(user: PlanUser, b: any): { month: string; mp: PlanMp; state: stri
   return { month: b.month, mp: b.mp, state };
 }
 
-export function saveLine(user: PlanUser, b: any): void {
+export function saveLine(user: PlanUser, b: any): { qty: number; price: number } {
   const { month, mp } = guard(user, b);
   const article = up(b?.article);
   if (!article || article.length > 120) throw new PlanError('Укажите артикул');
@@ -497,13 +511,40 @@ export function saveLine(user: PlanUser, b: any): void {
   logChange(user, month, mp, article, 'дата старта', cur?.start_date, next.start_date);
   logChange(user, month, mp, article, 'новинка', cur?.is_new ?? 0, next.is_new);
   if (b.status !== undefined) setStatus(user, mp, article, b.status);
+  // Ответ читаем из базы: экран пишет «сохранено», только сверив с тем, что реально записано.
+  const saved = d.prepare('SELECT qty, price_manual FROM plan_line WHERE month = ? AND mp = ? AND article = ?').get(month, mp, article) as any;
+  return { qty: Number(saved?.qty ?? -1), price: Number(saved?.price_manual ?? -1) };
 }
+
+/**
+ * В архив и обратно. Права те же, что на правку месяца. В неутверждённых месяцах количество обнуляется
+ * (цена, название и прочее остаются): иначе при утверждении товар вернулся бы в план сам.
+ * В утверждённом месяце строка доживает до конца месяца.
+ */
+export function setArchived(user: PlanUser, b: any, on: boolean): void {
+  const { month, mp } = guard(user, b);
+  const article = up(b?.article);
+  if (!article) throw new PlanError('Укажите артикул');
+  const d = getDb();
+  d.prepare('INSERT OR IGNORE INTO plan_article (mp, article, status) VALUES (?, ?, ?)').run(mp, article, 'Рабочий');
+  d.prepare('UPDATE plan_article SET archived_from = ? WHERE mp = ? AND article = ?').run(on ? month : null, mp, article);
+  if (on) {
+    const lines = d.prepare(`SELECT month, qty FROM plan_line WHERE mp = ? AND article = ? AND month >= ? AND qty > 0
+      AND month NOT IN (SELECT month FROM plan_month WHERE mp = ? AND state = 'approved')`).all(mp, article, month, mp) as any[];
+    for (const l of lines) {
+      d.prepare('UPDATE plan_line SET qty = 0 WHERE month = ? AND mp = ? AND article = ?').run(l.month, mp, article);
+      logChange(user, String(l.month), mp, article, 'план, шт', String(l.qty), '0 (архив)');
+    }
+  }
+  logChange(user, month, mp, article, 'архив', on ? '' : 'в архиве', on ? 'в архиве' : 'возвращён');
+}
+
 
 function setStatus(user: PlanUser, mp: PlanMp, article: string, status: unknown): void {
   const next = STATUS(status);
   const d = getDb();
   const cur = (d.prepare('SELECT status FROM plan_article WHERE mp = ? AND article = ?').get(mp, article) as any)?.status ?? 'Рабочий';
-  d.prepare('INSERT OR REPLACE INTO plan_article (mp, article, status) VALUES (?, ?, ?)').run(mp, article, next);
+  d.prepare('INSERT INTO plan_article (mp, article, status) VALUES (?, ?, ?) ON CONFLICT(mp, article) DO UPDATE SET status = excluded.status').run(mp, article, next);
   logChange(user, currentMonth(), mp, article, 'статус', cur, next);
 }
 
@@ -541,7 +582,8 @@ export function copyPrevious(user: PlanUser, b: any): number {
   const { month, mp } = guard(user, b);
   const prev = shiftMonth(month, -1);
   const d = getDb();
-  const rows = d.prepare('SELECT article, qty, is_new, name FROM plan_line WHERE month = ? AND mp = ? AND qty > 0').all(prev, mp) as any[];
+  const rows = d.prepare(`SELECT l.article, l.qty, l.is_new, l.name FROM plan_line l LEFT JOIN plan_article a ON a.mp = l.mp AND a.article = l.article
+    WHERE l.month = ? AND l.mp = ? AND l.qty > 0 AND (a.archived_from IS NULL OR a.archived_from > ?)`).all(prev, mp, month) as any[];
   const ins = d.prepare(`INSERT OR IGNORE INTO plan_line (month, mp, article, qty, is_new, name, updated_by, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?)`);
   let n = 0;
   d.exec('BEGIN');
@@ -597,7 +639,9 @@ export async function handlePlan(req: any, res: any, sub: string, user: PlanUser
     }
     const b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
     switch (sub) {
-      case 'line': saveLine(user, b); break;
+      case 'line': return res.status(200).json({ ok: true, saved: saveLine(user, b) });
+      case 'archive': setArchived(user, b, true); break;
+      case 'unarchive': setArchived(user, b, false); break;
       case 'remove': removeLine(user, b); break;
       case 'rename': renameLine(user, b); break;
       case 'basis': setBasis(user, b); break;

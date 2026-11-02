@@ -13,7 +13,11 @@ export type PriceSource = 'manual' | 'frozen' | 'avg7' | 'avg30' | 'avg90' | 'no
 
 export type PlanDay = { date: string; cnt: number };
 
+export type PlanArchived = { mp: PlanView; article: string; name: string; photo: string; qty: number; fact: number; factRub: number; stock: number | null };
+
 export type PlanRow = {
+  /** Товар в архиве, но остаётся в утверждённом плане этого месяца. */
+  archived: boolean;
   mp: PlanView;
   article: string;
   name: string;
@@ -76,6 +80,7 @@ export type PlanResponse = {
   rows: PlanRow[]; totals: PlanTotals;
   catalog: { article: string; name: string }[];
   months: string[];
+  archived: PlanArchived[];
 };
 
 export type PlanStatRow = {

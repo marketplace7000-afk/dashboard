@@ -280,41 +280,37 @@ function MonthPlan({ view, month, setMonth }: { view: PlanView; month: string; s
                 <thead>
                   <tr>
                     <th className="l stick">{sortBtn('article', 'Товар')}</th>
-                    <th title="FBO на этой площадке, FBS на всех своих складах (общие для WB и Ozon) и товар в пути">Остаток, шт</th>
+                    <th title="FBO на этой площадке, FBS на всех своих складах (общие для WB и Ozon) и товар в пути">Остаток</th>
                     <th>{sortBtn('pace7', 'Темп 7 дн', 'Заказов в день за последние 7 полных дней')}</th>
                     <th title="Заказы по вчера + темп за 7 дней × оставшиеся дни">{sortBtn('forecast', 'Прогноз')}</th>
-                    <th className="l" aria-label="Факт или план" />
-                    <th>Штуки<span className="p-sorts">{sortBtn('fact', 'факт')}{sortBtn('qty', 'план')}</span></th>
-                    <th title="Факт: рубли ÷ штуки с начала месяца. План: чек, на который умножается количество">Средний чек</th>
-                    <th>Рубли<span className="p-sorts">{sortBtn('factRub', 'факт')}{sortBtn('planRub', 'план')}</span></th>
-                    <th title="Чёрная риска: сколько должно быть к вчерашнему дню при ровных продажах">{sortBtn('pct', 'Выполнение плана')}</th>
-                    <th>{sortBtn('drr', 'Реклама, %', 'Расход на рекламу ÷ заказы в рублях')}</th>
+                    <th>{sortBtn('qty', 'План, шт')}</th>
+                    <th>{sortBtn('fact', 'Факт, шт')}</th>
+                    <th title="Чек, на который умножается количество плана. Чек по факту — в подробностях товара">Чек плана</th>
+                    <th>{sortBtn('planRub', 'План, ₽')}</th>
+                    <th>{sortBtn('factRub', 'Факт, ₽')}</th>
+                    <th className="l" title="Чёрная риска: сколько должно быть к вчерашнему дню при ровных продажах">{sortBtn('pct', 'Выполнение')}</th>
+                    <th>{sortBtn('drr', 'Реклама', 'Расход на рекламу ÷ заказы в рублях')}</th>
                     <th>{sortBtn('marginPct', 'Маржа', 'Из отчёта финансиста, последний заполненный месяц')}</th>
                     <th className="l">Статус</th>
                     <th aria-label="Действия" />
                   </tr>
                 </thead>
                 <tbody key={`${view}|${month}`}>
-                  <tr className="cm-row p-fact plan-total">
-                    <td className="l stick" rowSpan={2}><b>Итого, все товары</b></td>
-                    <td rowSpan={2} />
-                    <td rowSpan={2}>{t.pace7 === null ? '–' : n1(t.pace7)}</td>
-                    <td rowSpan={2}>{t.forecast === null ? '–' : n0(t.forecast)}</td>
-                    <td className="p-lab">Факт</td>
-                    <td className="pair">{n0(t.fact)}</td>
-                    <td className="pair">{t.fact > 0 ? rub(t.factRub / t.fact) : '–'}</td>
-                    <td className="pair">{rub(t.factRub)}</td>
-                    <td rowSpan={2}><Progress p={t.pct} pRub={t.pctRub} tone={pctClass(t.pct, t.expected, t.qty)} expected={t.expected} qty={t.qty} showMark={data.period === 'current'} outside={false} /></td>
-                    <td rowSpan={2}>{pct1(t.drr)}</td>
-                    <td rowSpan={2}>{pct1(t.marginPct)}</td>
-                    <td rowSpan={2} />
-                    <td rowSpan={2} />
-                  </tr>
-                  <tr className="cm-row p-plan plan-total">
-                    <td className="p-lab">План</td>
-                    <td className="pair"><b>{n0(t.qty)}</b></td>
-                    <td className="pair">{t.qty > 0 ? rub(t.planRub / t.qty) : '–'}</td>
-                    <td className="pair">{rub(t.planRub)}</td>
+                  <tr className="cm-row plan-total">
+                    <td className="l stick">Итого, все товары</td>
+                    <td />
+                    <td>{t.pace7 === null ? '–' : n1(t.pace7)}</td>
+                    <td>{t.forecast === null ? '–' : n0(t.forecast)}</td>
+                    <td>{n0(t.qty)}</td>
+                    <td>{n0(t.fact)}</td>
+                    <td>{t.qty > 0 ? rub(t.planRub / t.qty) : '–'}</td>
+                    <td>{rub(t.planRub)}</td>
+                    <td>{rub(t.factRub)}</td>
+                    <td className="l"><Progress p={t.pct} tone={pctClass(t.pct, t.expected, t.qty)} expected={t.expected} qty={t.qty} showMark={data.period === 'current'} outside={false} /></td>
+                    <td>{pct1(t.drr)}</td>
+                    <td>{pct1(t.marginPct)}</td>
+                    <td />
+                    <td />
                   </tr>
                   {rows.map(r => (
                     <PlanLine key={r.article} r={r} data={data} open={open.has(r.article)}
@@ -434,13 +430,13 @@ function NumInput({ value, disabled, onSave, label, width = 96 }: { value: numbe
   );
 }
 
-function Progress({ p, pRub, tone, expected, qty, showMark, outside }: { p: number | null; pRub: number | null; tone: string; expected: number | null; qty: number; showMark: boolean; outside: boolean }) {
+function Progress({ p, tone, expected, qty, showMark, outside }: { p: number | null; tone: string; expected: number | null; qty: number; showMark: boolean; outside: boolean }) {
   return (
     <div className="p-prog">
+      <b className={tone}>{p === null ? (outside ? 'вне плана' : '–') : pct1(p)}</b>
       <div className="plan-prog"><i className={tone} style={{ width: `${p === null ? 0 : Math.min(100, p)}%` }} />
         {showMark && expected !== null && qty > 0 && <u style={{ left: `${Math.min(100, expected / qty * 100)}%` }} title={`По графику к вчера: ${n0(expected)} шт`} />}
       </div>
-      <div className="v"><b className={tone}>{p === null ? (outside ? 'вне плана' : '–') : pct1(p)}</b>{pRub !== null && <span>в рублях {pct1(pRub)}</span>}</div>
     </div>
   );
 }
@@ -457,8 +453,8 @@ function PlanLine({ r, data, open, onToggle, post, onArchive }: { r: PlanRow; da
   const rowCls = `cm-row ${open ? 'p-open' : ''} ${r.qty <= 0 && r.fact > 0 ? 'outside' : ''} ${r.archived ? 'is-archived' : ''}`;
   return (
     <Fragment>
-      <tr className={`p-fact ${rowCls}`} onClick={onToggle} aria-expanded={open}>
-        <td className="l stick" rowSpan={2}>
+      <tr className={rowCls} onClick={onToggle} aria-expanded={open}>
+        <td className="l stick">
           <div className="cm-prod">
             {r.photo ? <img src={r.photo} alt="" loading="lazy" /> : <span className="ph" />}
             <div className="t">
@@ -468,57 +464,47 @@ function PlanLine({ r, data, open, onToggle, post, onArchive }: { r: PlanRow; da
             </div>
           </div>
         </td>
-        <td rowSpan={2}>
-          {r.stock === null ? '–' : (
-            <div className="p-stock">
-              <span>FBO</span><b>{n0(r.stockFbo)}</b>
-              <span>FBS</span><b>{n0(r.stockFbs)}</b>
-              {!!r.transit && <><span className="go">Едет</span><b className="go">{n0(r.transit)}</b></>}
-            </div>
-          )}
-          {r.stockShort && <div className="p-short" title={r.stockShortShared ? 'Свои склады общие для площадок: вместе с планом другой площадки товара не хватит' : 'Оставшийся план больше остатка и товара в пути'}>{r.stockShortShared ? `не хватит с учётом ${data.view === 'wb' ? 'Ozon' : data.view === 'ozon' ? 'WB' : 'обеих площадок'}` : 'не хватит'}</div>}
+        <td>
+          <div className="p-stock">
+            {r.stock === null ? '–' : <span>FBO <b>{n0(r.stockFbo)}</b> · FBS <b>{n0(r.stockFbs)}</b></span>}
+            {!!r.transit && <span className="go">едет {n0(r.transit)}</span>}
+            {r.stockShort && <span className="short" title={r.stockShortShared ? 'Свои склады общие для площадок: вместе с планом другой площадки товара не хватит' : 'Оставшийся план больше остатка и товара в пути'}>{r.stockShortShared ? `не хватит с учётом ${data.view === 'wb' ? 'Ozon' : data.view === 'ozon' ? 'WB' : 'обеих площадок'}` : 'не хватит'}</span>}
+          </div>
         </td>
-        <td rowSpan={2}>{r.pace7 === null ? '–' : n1(r.pace7)}</td>
-        <td rowSpan={2}><span className={r.forecast !== null && r.qty > 0 && r.forecast < r.qty ? 'warn' : ''}>{r.forecast === null ? '–' : n0(r.forecast)}</span></td>
-        <td className="p-lab">Факт</td>
-        <td className="pair">{n0(r.fact)}{r.mp === 'all' && (r.wb || r.ozon) && <div className="cm-sub">WB {n0(r.wb?.fact ?? 0)} · Ozon {n0(r.ozon?.fact ?? 0)}</div>}</td>
-        <td className="pair">{r.fact > 0 ? rub(r.factRub / r.fact) : '–'}</td>
-        <td className="pair">{rub(r.factRub)}</td>
-        <td rowSpan={2}><Progress p={r.pct} pRub={r.pctRub} tone={rowTone(r, data)} expected={r.expected} qty={r.qty} showMark={data.period === 'current'} outside={r.fact > 0} /></td>
-        <td rowSpan={2}>{pct1(r.drr)}</td>
-        <td rowSpan={2}>
-          <b className={r.marginPct === null ? 'muted' : r.marginPct < 0 ? 'bad' : r.marginPct < 15 ? 'warn' : 'good'} title={r.marginMonth ? `Отчёт финансиста, ${shortMonth(r.marginMonth)}` : undefined}>{r.marginPct === null ? '–' : pct1(r.marginPct)}</b>
+        <td className="pq">{r.pace7 === null ? '–' : n1(r.pace7)}</td>
+        <td className="pq">{r.forecast === null ? '–' : n0(r.forecast)}</td>
+        <td className="pq" onClick={r.mp === 'all' ? undefined : e => e.stopPropagation()}>
+          {r.mp === 'all'
+            ? <>{n0(r.qty)}{(r.wb || r.ozon) && <div className="cm-sub">WB {n0(r.wb?.qty ?? 0)} · Ozon {n0(r.ozon?.qty ?? 0)}</div>}</>
+            : <NumInput value={r.qty} disabled={!canNumbers} label={`План ${r.article}`} onSave={saveQty} />}
         </td>
-        <td className="l" rowSpan={2} onClick={e => e.stopPropagation()}>
+        <td className="pm">{n0(r.fact)}{r.mp === 'all' && (r.wb || r.ozon) && <div className="cm-sub">WB {n0(r.wb?.fact ?? 0)} · Ozon {n0(r.ozon?.fact ?? 0)}</div>}</td>
+        <td className="pq" title={SOURCE[r.priceSource]} onClick={priceEditable ? e => e.stopPropagation() : undefined}>
+          {priceEditable
+            ? <NumInput value={r.price} disabled={false} width={116} label={`Цена ${r.article}`} onSave={savePrice} />
+            : <span className={r.price <= 0 ? 'bad' : ''}>{r.price > 0 ? rub(r.price) : 'нет цены'}</span>}
+        </td>
+        <td className="pq">{r.planRub > 0 ? rub(r.planRub) : '–'}</td>
+        <td className="pm">{rub(r.factRub)}</td>
+        <td className="l"><Progress p={r.pct} tone={rowTone(r, data)} expected={r.expected} qty={r.qty} showMark={data.period === 'current'} outside={r.fact > 0} /></td>
+        <td className="pq">{pct1(r.drr)}</td>
+        <td className={`pq ${r.marginPct !== null && r.marginPct < 0 ? 'bad' : r.marginPct !== null && r.marginPct < 15 ? 'warn' : ''}`} title={r.marginMonth ? `Отчёт финансиста, ${shortMonth(r.marginMonth)}` : undefined}>{pct1(r.marginPct)}</td>
+        <td className="l" onClick={e => e.stopPropagation()}>
           {can && !r.isNew
-            ? <select className={`plan-st st-${r.status}`} value={r.status} aria-label="Статус товара" onChange={e => post('line', { article: r.article, status: e.target.value })}>
+            ? <select className="plan-st" value={r.status} aria-label="Статус товара" onChange={e => post('line', { article: r.article, status: e.target.value })}>
                 <option>Рабочий</option><option>Вывод</option><option>Новинка</option>
               </select>
-            : <span className={`plan-st st-${r.status}`}>{r.status}</span>}
+            : <span className="plan-st">{r.status}</span>}
           {preSale && <div className="cm-sub">{r.startDate ? `старт ${ddmm(r.startDate)}` : 'ещё не в продаже'}</div>}
         </td>
-        <td rowSpan={2}>
+        <td>
           <span className="plan-acts">
             {can && onArchive && !r.archived && <button className="cm-mark" title="Убрать в архив" aria-label={`Убрать в архив: ${r.article}`} onClick={e => { e.stopPropagation(); onArchive(); }}><ArchiveIcon size={18} /></button>}
             <button className="plan-exp" aria-expanded={open} aria-label={`Подробнее: ${r.article}`}>{open ? <CaretDownIcon size={20} /> : <CaretRightIcon size={20} />}</button>
           </span>
         </td>
       </tr>
-      <tr className={`p-plan ${rowCls}`} onClick={onToggle}>
-        <td className="p-lab">План</td>
-        <td className="pair">
-          {r.mp === 'all'
-            ? <><b>{n0(r.qty)}</b>{(r.wb || r.ozon) && <div className="cm-sub">WB {n0(r.wb?.qty ?? 0)} · Ozon {n0(r.ozon?.qty ?? 0)}</div>}</>
-            : <NumInput value={r.qty} disabled={!canNumbers} label={`План ${r.article}`} onSave={saveQty} />}
-        </td>
-        <td className="pair" title={SOURCE[r.priceSource]}>
-          {priceEditable
-            ? <NumInput value={r.price} disabled={false} width={116} label={`Цена ${r.article}`} onSave={savePrice} />
-            : <span className={r.price <= 0 ? 'bad' : ''}>{r.price > 0 ? rub(r.price) : 'нет цены'}</span>}
-        </td>
-        <td className="pair">{r.planRub > 0 ? rub(r.planRub) : '–'}</td>
-      </tr>
-      {open && <tr className="plan-detail"><td colSpan={13}><Detail r={r} data={data} post={post} /></td></tr>}
+      {open && <tr className="plan-detail"><td colSpan={14}><Detail r={r} data={data} post={post} /></td></tr>}
     </Fragment>
   );
 }
@@ -534,6 +520,8 @@ function Detail({ r, data, post }: { r: PlanRow; data: PlanResponse; post: PostF
       <div className="plan-det-side">
         <dl className="plan-facts">
           {r.needPerDay !== null && <><dt>Нужно в день</dt><dd className={r.behind ? 'bad' : ''}>{n0(r.needPerDay)} шт</dd></>}
+          <dt>Чек по факту</dt><dd>{r.fact > 0 ? rub(r.factRub / r.fact) : '–'}</dd>
+          <dt>Выполнение в рублях</dt><dd>{pct1(r.pctRub)}</dd>
           <dt>Реклама</dt><dd>{rub(r.ads)}</dd>
           <dt>Откуда чек плана</dt><dd>{SOURCE[r.priceSource]}</dd>
           {r.prevFact !== null && <><dt>Заказов в прошлом месяце</dt><dd>{n0(r.prevFact)} шт</dd></>}

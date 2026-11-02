@@ -1,3 +1,6 @@
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url('./fonts/inter-cyrillic.woff2') format('woff2-variations'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url('./fonts/inter-latin.woff2') format('woff2-variations'); unicode-range: U+0000-00FF, U+2000-206F, U+2212; }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url('./fonts/inter-latin-ext.woff2') format('woff2-variations'); unicode-range: U+20BD; }
 /* «План» (src/pages/Plan.tsx). С 02.11.2026 размеры и таблицы как в «Ведении карточек»: классы .cm-*, текст 18, цифры 21. */
 .plan .muted { color: var(--muted); }
 .plan-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -84,30 +87,40 @@
 .plan-found button:hover { background: var(--bg-3); }
 .plan-found button.on { border-color: var(--accent); background: var(--accent-soft, #e8effd); }
 
-/* Две строки на товар: сверху факт, снизу план. Остальное — общая ячейка на обе строки. */
-.plan-table.cm-table.cm-list > tbody > tr.cm-row > td { padding: 8px 12px; font-size: 19px; vertical-align: middle; border-bottom: 0; }
-.plan-table.cm-table.cm-list > tbody > tr.cm-row > td:first-child { font-size: 18px; }
-.plan-table > tbody > tr.p-fact > td { border-top: 2px solid #d5d9e1; }
-.plan-table > tbody > tr.p-fact > td.pair { font-weight: 700; padding-bottom: 5px; }
-.plan-table > tbody > tr.p-plan > td.pair { background: #f7f9fd; padding-top: 5px; padding-bottom: 5px; color: #39414f; }
-.plan-table > tbody > tr.plan-total > td, .plan-table > tbody > tr.plan-total > td.pair { background: var(--accent-soft, #e8effd); }
-.plan-table > tbody > tr.p-open > td { background: var(--accent-soft, #e8effd); }
-.plan-table.cm-table.cm-list > tbody > tr.cm-row > td.p-lab { font-size: 15px; font-weight: 600; color: var(--muted); text-align: left; padding-right: 0; }
-.plan-table thead th .p-sorts { display: block; font-size: 15px; font-weight: 500; margin-top: 2px; }
-.plan-table thead th .p-sorts button + button { margin-left: 9px; }
-.plan-table .plan-num { font-size: 19px; font-weight: 700; padding: 4px 8px; }
-.plan-table .plan-mark { width: 18px; }
-.plan .cm-prod { min-width: 270px; }
-.p-stock { display: grid; grid-template-columns: auto auto; gap: 1px 10px; justify-content: end; font-size: 17px; line-height: 1.3; }
-.p-stock span { color: var(--muted); text-align: left; }
-.p-stock b { font-weight: 600; text-align: right; }
+/* Таблица: одна строка на товар, спокойный стиль (одобрен владельцем 02.11). Разделяют воздух и насыщенность, а не рамки и заливки. */
+.plan { font-family: "Inter", "Golos Text", "Segoe UI", system-ui, sans-serif; }
+.plan button, .plan input, .plan select, .plan textarea { font-family: inherit; }
+.plan-table { --p-q: #5f6470; font-variant-numeric: tabular-nums; }
+.plan-table.cm-table.cm-list > thead > tr > th { font-size: 15px; font-weight: 600; color: var(--text); background: var(--card, #fff); border-bottom: 0; padding: 14px 10px; }
+.plan-table.cm-table.cm-list > tbody > tr.cm-row > td { padding: 13px 10px; font-size: 17px; font-weight: 400; vertical-align: middle; border-top: 1px solid #eef0f3; border-bottom: 0; }
+.plan-table.cm-table.cm-list > tbody > tr.cm-row > td.pq { color: var(--p-q); }
+.plan-table.cm-table.cm-list > tbody > tr.cm-row > td.pq.warn { color: #b45309; }
+.plan-table.cm-table.cm-list > tbody > tr.cm-row > td.pq.bad { color: var(--bad); }
+.plan-table.cm-table.cm-list > tbody > tr.cm-row > td.pm { font-weight: 600; }
+.plan-table.cm-table.cm-list > tbody > tr.plan-total > td, .plan-table.cm-table.cm-list > tbody > tr.plan-total > td.stick { font-weight: 600; border-top: 0; }
+.plan-table .stick { border-right: 1px solid #e2e5ea; }
+.plan-table tr.p-open > td { background: var(--accent-soft, #e8effd); }
+.plan-table .cm-sub { font-size: 14px; font-weight: 400; color: var(--muted); }
+.plan-table .cm-prod b { font-weight: 600; font-size: 17px; }
+.plan .cm-prod { min-width: 260px; }
+.plan .cm-prod img, .plan .cm-prod .ph { width: 40px; height: 52px; }
+.plan .cm-prod .nm { font-size: 14px; -webkit-line-clamp: 1; line-clamp: 1; }
+.plan-table .plan-num { font-size: 17px; font-weight: 400; padding: 3px 7px; color: inherit; }
+.plan-table .plan-mark { width: 16px; }
+.plan-table .plan-num:disabled { padding-right: 0; }
+.plan-table .plan-cell:has(.plan-num:disabled) .plan-mark { display: none; }
+.plan-table .plan-st { font-size: 16px; font-weight: 400; color: var(--p-q); background: transparent; padding: 0; }
+.plan-table .plan-acts .cm-mark { opacity: .55; }
+.plan-table .plan-acts .cm-mark:hover { opacity: 1; }
+.p-stock { display: grid; justify-items: end; font-size: 15px; line-height: 1.35; color: var(--muted); white-space: nowrap; }
+.p-stock b { font-weight: 500; color: var(--text); }
 .p-stock .go { color: var(--accent); }
-.p-short { font-size: 15px; font-weight: 600; color: var(--bad); margin-top: 3px; white-space: normal; max-width: 130px; margin-left: auto; line-height: 1.2; }
-.p-prog { width: 170px; margin-left: auto; display: grid; gap: 7px; }
-.p-prog .plan-prog { width: 100%; margin: 0; height: 10px; }
-.p-prog .v { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.p-prog .v b { font-size: 19px; }
-.p-prog .v span { font-size: 15px; color: var(--muted); }
+.p-stock .short { color: var(--bad); font-weight: 500; }
+.p-prog { width: 100px; display: grid; gap: 6px; }
+.p-prog b { font-weight: 600; }
+.p-prog .plan-prog { width: 100%; margin: 0; height: 5px; border-radius: 3px; }
+.p-prog .plan-prog i { border-radius: 3px; }
+.p-prog .plan-prog u { top: -3px; height: 11px; }
 .plan-facts { display: grid; grid-template-columns: auto auto; gap: 4px 14px; font-size: 17px; margin: 0; }
 .plan-facts dt { color: var(--muted); }
 .plan-facts dd { margin: 0; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
@@ -125,9 +138,3 @@
 
 .rnp-plan { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 28px; font-size: 17px; }
 .rnp-plan.low { border-left: 4px solid var(--bad); }
-
-/* Штуки, средний чек и рубли: заголовок и обе строки значений по центру столбца */
-.plan-table.cm-table.cm-list > thead > tr > th:nth-child(n+6):nth-child(-n+8),
-.plan-table.cm-table.cm-list > tbody > tr.cm-row > td.pair { text-align: center; }
-.plan-table td.pair .plan-cell { justify-content: center; padding-right: 24px; }
-.plan-table td.pair .plan-num { text-align: center; }

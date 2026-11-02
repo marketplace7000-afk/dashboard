@@ -1,7 +1,7 @@
 /**
  * Расчёты раздела «План» (02.11.2026). Запуск: npm run check
  */
-import { avgCheck, calcPace, monthEnd, pctOf, pickPrice, planDaySeries, planStatus, shiftMonth } from '../shared/plan';
+import { avgCheck, calcPace, monthEnd, pctOf, pickPrice, planDaySeries, planStatus, sharedStockShort, shiftMonth } from '../shared/plan';
 
 let failed = 0;
 function check(name: string, actual: unknown, expected: unknown): void {
@@ -72,6 +72,14 @@ check('статус: выполнен', st(29).key, 'done');
 check('статус: первый день — ждём', planStatus({ qty: 30, startDate: null, daily: [] }, '2026-11', '2026-11-01').key, 'wait');
 check('статус: новинка до старта — ждём', planStatus({ qty: 12, startDate: '2026-11-25', daily: [] }, '2026-11', '2026-11-03').key, 'wait');
 check('статус: меньше штуки — не отставание', planStatus({ qty: 3, startDate: null, daily: [] }, '2026-11', '2026-11-03').key, 'ok');
+
+// Общие склады: FBS 100, у каждой площадки осталось по 80 шт плана.
+const side = (remain: number, fbo = 0, transit = 0) => ({ remain, fbo, transit });
+check('склад: по 80 шт на двоих при FBS 100 — не хватит', sharedStockShort(side(80), side(80), 100), true);
+check('склад: вторая площадка не мешает', sharedStockShort(side(80), side(0), 100), false);
+check('склад: FBO второй площадки закрывает её план', sharedStockShort(side(80), side(80, 80), 100), false);
+check('склад: поставка в пути учитывается', sharedStockShort(side(80), side(80, 0, 70), 100), false);
+check('склад: своего FBO хватает — предупреждения нет', sharedStockShort(side(80, 80), side(200), 100), false);
 
 if (failed) { console.error(`check-plan: ошибок ${failed}`); process.exit(1); }
 console.log('check-plan: всё верно');

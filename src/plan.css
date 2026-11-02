@@ -39,8 +39,6 @@
 .plan-table tr.outside > td { background: #fffaf0; }
 .plan-table tr.is-archived > td { background: #f6f7f9; }
 .plan-table tr.open > td { background: var(--accent-soft, #e8effd); }
-.plan-table tr.plan-total > td { background: #f8f9fb; font-weight: 650; position: sticky; top: 44px; z-index: 1; border-bottom: 2px solid var(--border); }
-.plan-table tr.plan-total > td.stick { z-index: 2; }
 .plan .cm-prod { min-width: 320px; }
 .plan .cm-prod .ph { width: 52px; height: 68px; border-radius: 8px; flex-shrink: 0; background: var(--bg-3); }
 .plan .cm-prod .t { min-width: 0; }
@@ -85,6 +83,45 @@
 .plan-found button { text-align: left; font-size: 18px; border: 1px solid transparent; border-radius: 8px; background: transparent; padding: 8px 11px; cursor: pointer; color: var(--text); }
 .plan-found button:hover { background: var(--bg-3); }
 .plan-found button.on { border-color: var(--accent); background: var(--accent-soft, #e8effd); }
+
+/* Две строки на товар: сверху факт, снизу план. Остальное — общая ячейка на обе строки. */
+.plan-table.cm-table.cm-list > tbody > tr.cm-row > td { padding: 8px 12px; font-size: 19px; vertical-align: middle; border-bottom: 0; }
+.plan-table.cm-table.cm-list > tbody > tr.cm-row > td:first-child { font-size: 18px; }
+.plan-table > tbody > tr.p-fact > td { border-top: 2px solid #d5d9e1; }
+.plan-table > tbody > tr.p-fact > td.pair { font-weight: 700; padding-bottom: 5px; }
+.plan-table > tbody > tr.p-plan > td.pair { background: #f7f9fd; padding-top: 5px; padding-bottom: 5px; color: #39414f; }
+.plan-table > tbody > tr.plan-total > td, .plan-table > tbody > tr.plan-total > td.pair { background: var(--accent-soft, #e8effd); }
+.plan-table > tbody > tr.p-open > td { background: var(--accent-soft, #e8effd); }
+.plan-table.cm-table.cm-list > tbody > tr.cm-row > td.p-lab { font-size: 15px; font-weight: 600; color: var(--muted); text-align: left; padding-right: 0; }
+.plan-table thead th .p-sorts { display: block; font-size: 15px; font-weight: 500; margin-top: 2px; }
+.plan-table thead th .p-sorts button + button { margin-left: 9px; }
+.plan-table .plan-num { font-size: 19px; font-weight: 700; padding: 4px 8px; }
+.plan-table .plan-mark { width: 18px; }
+.plan .cm-prod { min-width: 270px; }
+.p-stock { display: grid; grid-template-columns: auto auto; gap: 1px 10px; justify-content: end; font-size: 17px; line-height: 1.3; }
+.p-stock span { color: var(--muted); text-align: left; }
+.p-stock b { font-weight: 600; text-align: right; }
+.p-stock .go { color: var(--accent); }
+.p-short { font-size: 15px; font-weight: 600; color: var(--bad); margin-top: 3px; white-space: normal; max-width: 130px; margin-left: auto; line-height: 1.2; }
+.p-prog { width: 170px; margin-left: auto; display: grid; gap: 7px; }
+.p-prog .plan-prog { width: 100%; margin: 0; height: 10px; }
+.p-prog .v { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.p-prog .v b { font-size: 19px; }
+.p-prog .v span { font-size: 15px; color: var(--muted); }
+.plan-facts { display: grid; grid-template-columns: auto auto; gap: 4px 14px; font-size: 17px; margin: 0; }
+.plan-facts dt { color: var(--muted); }
+.plan-facts dd { margin: 0; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Окно подтверждения и версии плана */
+.plan-dlg-wrap { position: fixed; inset: 0; z-index: 60; background: rgba(17, 20, 24, .45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.plan-dlg { background: #fff; border-radius: 16px; padding: 24px; width: 100%; max-width: 580px; max-height: 90vh; overflow: auto; display: grid; gap: 14px; font-size: 18px; }
+.plan-dlg h2 { margin: 0; font-size: 24px; }
+.plan-dlg ul { margin: 6px 0 0; padding-left: 22px; display: grid; gap: 5px; }
+.plan-dlg label { display: flex; gap: 10px; align-items: flex-start; font-weight: 600; }
+.plan-dlg input { width: 20px; height: 20px; flex-shrink: 0; margin-top: 3px; }
+.plan-dlg-btns { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.plan-vers { display: grid; gap: 8px; }
+.plan-ver { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
 
 .rnp-plan { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 28px; font-size: 17px; }
 .rnp-plan.low { border-left: 4px solid var(--bad); }

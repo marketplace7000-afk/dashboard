@@ -17,7 +17,7 @@ import { mkdirSync } from 'node:fs';
 import { mskDate } from './mskDate';
 import { planArticleFacts, rnpLatestStocks, rnpLinks } from './rnp';
 import {
-  addDays, avgCheck, calcPace, monthEnd, monthStart, pctOf, pickPrice, shiftMonth,
+  addDays, avgCheck, calcPace, monthEnd, monthStart, pctOf, pickPrice, sharedStockShort, shiftMonth,
   type PlanBasis, type PlanDay, type PlanArchived, type PlanMp, type PlanResponse, type PlanRnp, type PlanRow, type PlanStatRow, type PlanStats, type PlanStatus, type PlanTotals, type PlanView,
 } from '../../shared/plan';
 
@@ -25,7 +25,7 @@ let DatabaseSync: any = null;
 try { DatabaseSync = require('node:sqlite').DatabaseSync; } catch { DatabaseSync = null; }
 
 const DB_DIR = process.env.CACHE_DIR || join(process.cwd(), '.av-cache');
-const PLAN_SHEET_ID = '1T2uoBroyhe-Mm22uZcbTlB0LwY_JzcOFZf3NrJKyFcM';
+/** Единственная внешняя таблица раздела: маржа, реклама и заказы прошлых месяцев — из отчёта финансового менеджера. */
 const FIN_SHEET_ID = '1mqlLnACs5Bdk1gn3O0vyHIW6Qgg6NfVMjV-TQXsdA74';
 /** Год таблицы финансиста: в ней есть только номер месяца. */
 const FIN_YEAR = 2026;
@@ -64,6 +64,9 @@ function getDb(): any {
       mp TEXT NOT NULL, month TEXT NOT NULL, article TEXT NOT NULL, fact REAL, fact_rub REAL, ads REAL,
       PRIMARY KEY (mp, month, article));
     CREATE TABLE IF NOT EXISTS plan_meta (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE IF NOT EXISTS plan_version (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, month TEXT NOT NULL, mp TEXT NOT NULL, at INTEGER NOT NULL, user TEXT, reason TEXT NOT NULL,
+      state TEXT NOT NULL, basis TEXT NOT NULL, qty INTEGER NOT NULL, rub REAL NOT NULL, lines TEXT NOT NULL);
   `);
   // Архив (02.11.2026): товар скрыт начиная с этого месяца, прошлые месяцы не меняются.
   try { db.exec('ALTER TABLE plan_article ADD COLUMN archived_from TEXT'); } catch { /* столбец уже есть */ }
@@ -137,52 +140,7 @@ function latestMargins(mp: PlanMp, month: string): Map<string, { pct: number; ru
   return out;
 }
 
-// ─── Перенос истории из таблицы «AV План 2026» ──────────────────────────────
-
 const STATUS = (s: unknown): PlanStatus => { const v = String(s ?? '').trim(); return v === 'Вывод' ? 'Вывод' : v === 'Новинка' ? 'Новинка' : 'Рабочий'; };
-
-async function importSheet(): Promise<string> {
-  const { readSheetRange } = await import('./googleSheetsApi');
-  const d = getDb();
-  const lastMonth = shiftMonth(currentMonth(), -1);
-  const ins = d.prepare(`INSERT OR IGNORE INTO plan_line (month, mp, article, qty, price_frozen, is_new, name, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, '', 'перенос из таблицы', ?)`);
-  const st = d.prepare('INSERT OR IGNORE INTO plan_article (mp, article, status) VALUES (?, ?, ?)');
-  const mon = d.prepare(`INSERT OR IGNORE INTO plan_month (month, mp, state, basis, approved_by, approved_at) VALUES (?, ?, 'approved', '7d', 'таблица AV План', ?)`);
-  let lines = 0;
-  for (const [mp, sheet] of [['wb', 'План заказов Wildberries'], ['ozon', 'План заказов Ozon']] as const) {
-    const rows = await readSheetRange(PLAN_SHEET_ID, `'${sheet}'!A4:AR400`);
-    d.exec('BEGIN');
-    try {
-      for (const r of rows) {
-        const art = up(r?.[0]);
-        if (!art) continue;
-        const status = STATUS(r[1]);
-        st.run(mp, art, status);
-        const price = num(r[2]) > 0 ? num(r[2]) : num(r[3]);
-        for (let m = 1; m <= 12; m++) {
-          const month = `${FIN_YEAR}-${String(m).padStart(2, '0')}`;
-          if (month > lastMonth) continue;
-          const qty = Math.round(num(r[8 + (m - 1) * 3]));
-          if (qty <= 0) continue;
-          mon.run(month, mp, Date.now());
-          ins.run(month, mp, art, qty, price, status === 'Новинка' ? 1 : 0, Date.now());
-          lines++;
-        }
-      }
-      d.exec('COMMIT');
-    } catch (e) { d.exec('ROLLBACK'); throw e; }
-  }
-  return `перенесено строк плана: ${lines}`;
-}
-
-let importing: Promise<void> | null = null;
-function ensureImport(): void {
-  if (metaGet('sheet:imported') || importing) return;
-  importing = importSheet()
-    .then(r => { metaSet('sheet:imported', `${Date.now()} ${r}`); })
-    .catch(e => { console.warn('[plan] перенос из таблицы не удался:', (e as Error).message); })
-    .finally(() => { importing = null; });
-}
 
 // ─── Сборка месяца ──────────────────────────────────────────────────────────
 
@@ -327,7 +285,7 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; ar
       expected: pace.expected, forecast: pace.forecast, needPerDay: pace.needPerDay, pace7, behind: pace.behind,
       ads, drr: factRub > 0 ? (ads / factRub) * 100 : null,
       marginPct: m ? m.pct : null, marginRub: m ? m.rub : null, marginMonth: m ? m.month : null,
-      stock, stockFbo, stockFbs, transit, stockShort: !isPast && stock !== null && remain > stock + (transit ?? 0),
+      stock, stockFbo, stockFbs, transit, stockShort: !isPast && stock !== null && remain > stock + (transit ?? 0), stockShortShared: false,
       prevFact: pf === null ? null : Math.round(pf), orders30: sum(article, addDays(today, -30), yesterday).cnt, daily,
     });
   }
@@ -383,6 +341,16 @@ function totalsOf(rows: PlanRow[], month: string, today: string): PlanTotals {
   };
 }
 
+/** Добавляет предупреждение «не хватит», которое появляется только с учётом плана второй площадки. */
+function applySharedStock(rows: PlanRow[], others: PlanRow[]): void {
+  const other = new Map(others.map(r => [r.article, r]));
+  const side = (r: PlanRow | undefined) => ({ remain: Math.max(0, (r?.qty ?? 0) - (r?.fact ?? 0)), fbo: r?.stockFbo ?? 0, transit: r?.transit ?? 0 });
+  for (const r of rows) {
+    if (r.stockShort || r.stockFbs === null) continue;
+    if (sharedStockShort(side(r), side(other.get(r.article)), r.stockFbs)) { r.stockShort = true; r.stockShortShared = true; }
+  }
+}
+
 /** Строка «Все площадки»: артикул один, значения WB и Ozon складываются. */
 function mergeRows(wb: PlanRow[], oz: PlanRow[]): PlanRow[] {
   const by = new Map<string, PlanRow>();
@@ -400,6 +368,8 @@ function mergeRows(wb: PlanRow[], oz: PlanRow[]): PlanRow[] {
     x.expected = x.expected === null && r.expected === null ? null : (x.expected ?? 0) + (r.expected ?? 0);
     x.prevFact = x.prevFact === null && r.prevFact === null ? null : (x.prevFact ?? 0) + (r.prevFact ?? 0);
     x.orders30 += r.orders30; x.behind = x.behind || r.behind; x.stockShort = x.stockShort || r.stockShort;
+    x.stockShortShared = x.stockShortShared || r.stockShortShared;
+    x.transit = x.transit === null && r.transit === null ? null : (x.transit ?? 0) + (r.transit ?? 0);
     x.price = x.qty > 0 ? x.planRub / x.qty : x.price;
     x.pct = pctOf(x.fact, x.qty); x.pctRub = pctOf(x.factRub, x.planRub); x.drr = x.factRub > 0 ? (x.ads / x.factRub) * 100 : null;
     // FBO складывается по площадкам, а свои склады общие: их считаем один раз.
@@ -429,8 +399,7 @@ function canEditMonth(u: PlanUser, month: string, state: string): boolean {
 }
 
 export async function getPlan(viewIn: unknown, monthIn: unknown, user: PlanUser): Promise<PlanResponse> {
-  ensureImport(); ensureFinance();
-  if (importing) await importing;
+  ensureFinance();
   if (finLoading && !metaGet('fin:at')) await finLoading;
   const month = isMonth(monthIn) ? monthIn : currentMonth();
   const view: PlanView = viewIn === 'ozon' ? 'ozon' : viewIn === 'all' ? 'all' : 'wb';
@@ -438,6 +407,14 @@ export async function getPlan(viewIn: unknown, monthIn: unknown, user: PlanUser)
   const from = monthStart(month), to = monthEnd(month);
   const period = to < today ? 'past' : from > today ? 'future' : 'current';
   const parts = view === 'all' ? [await buildMp('wb', month), await buildMp('ozon', month)] : [await buildMp(view, month)];
+  // Свои склады общие для WB и Ozon: хватит ли товара, зависит от плана обеих площадок.
+  if (period !== 'past') {
+    if (view === 'all') { applySharedStock(parts[0].rows, parts[1].rows); applySharedStock(parts[1].rows, parts[0].rows); }
+    else {
+      try { applySharedStock(parts[0].rows, (await buildMp(view === 'wb' ? 'ozon' : 'wb', month)).rows); }
+      catch (e) { console.warn('[plan] план второй площадки не прочитан:', (e as Error)?.message); }
+    }
+  }
   const rows = view === 'all' ? mergeRows(parts[0].rows, parts[1].rows) : parts[0].rows;
   const states = new Set(parts.map(p => p.head.state));
   const state = states.size > 1 ? 'mixed' : ([...states][0] as 'draft' | 'approved');
@@ -458,8 +435,7 @@ export async function getPlan(viewIn: unknown, monthIn: unknown, user: PlanUser)
 }
 
 export async function getPlanStats(viewIn: unknown, articleIn: unknown): Promise<PlanStats> {
-  ensureImport(); ensureFinance();
-  if (importing) await importing;
+  ensureFinance();
   const view: PlanView = viewIn === 'ozon' ? 'ozon' : viewIn === 'all' ? 'all' : 'wb';
   const article = articleIn ? up(articleIn) : null;
   const today = mskDate(0);
@@ -481,7 +457,7 @@ const rowsHaveLine = (rows: PlanRow[]) => rows.some(r => r.hasLine);
 
 /** Для РНП: план текущего месяца по площадке и по артикулам. */
 export async function getPlanForRnp(mpIn: unknown): Promise<PlanRnp> {
-  ensureImport(); ensureFinance();
+  ensureFinance();
   const mp: PlanMp = mpIn === 'ozon' ? 'ozon' : 'wb';
   const month = currentMonth();
   const today = mskDate(0);
@@ -518,7 +494,7 @@ function guard(user: PlanUser, b: any): { month: string; mp: PlanMp; state: stri
 }
 
 export function saveLine(user: PlanUser, b: any): { qty: number; price: number } {
-  const { month, mp } = guard(user, b);
+  const { month, mp, state } = guard(user, b);
   const article = up(b?.article);
   if (!article || article.length > 120) throw new PlanError('Укажите артикул');
   const d = getDb();
@@ -532,6 +508,10 @@ export function saveLine(user: PlanUser, b: any): { qty: number; price: number }
     comment: b.comment !== undefined ? String(b.comment).slice(0, 500) : cur?.comment ?? '',
   };
   if (next.qty < 0) throw new PlanError('План не может быть отрицательным');
+  // Утверждённый план не меняется случайным вводом, даже у владельца: сначала «Открыть для правок».
+  if (state === 'approved' && (next.qty !== (cur?.qty ?? 0) || next.price_manual !== (cur?.price_manual ?? 0))) {
+    throw new PlanError('План утверждён. Чтобы изменить числа, сначала откройте его для правок');
+  }
   if (next.start_date && (next.start_date > monthEnd(month))) throw new PlanError('Дата старта позже конца месяца');
   d.prepare(`INSERT INTO plan_line (month, mp, article, qty, price_manual, price_frozen, is_new, name, start_date, comment, updated_by, updated_at)
     VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
@@ -581,7 +561,8 @@ function setStatus(user: PlanUser, mp: PlanMp, article: string, status: unknown)
 }
 
 export function removeLine(user: PlanUser, b: any): void {
-  const { month, mp } = guard(user, b);
+  const { month, mp, state } = guard(user, b);
+  if (state === 'approved') throw new PlanError('План утверждён. Чтобы убрать строку, сначала откройте его для правок');
   const article = up(b?.article);
   const d = getDb();
   const cur = d.prepare('SELECT qty FROM plan_line WHERE month = ? AND mp = ? AND article = ?').get(month, mp, article) as any;
@@ -607,6 +588,8 @@ export function setBasis(user: PlanUser, b: any): void {
   if (state === 'approved') throw new PlanError('План утверждён: средний чек уже зафиксирован');
   const basis: PlanBasis = b?.basis === '30d' ? '30d' : '7d';
   getDb().prepare('UPDATE plan_month SET basis = ? WHERE month = ? AND mp = ?').run(basis, month, mp);
+  // Срок выбрали явно: чек считается заново. Просто открыть и утвердить план чек не меняет.
+  getDb().prepare('UPDATE plan_line SET price_frozen = 0 WHERE month = ? AND mp = ?').run(month, mp);
   logChange(user, month, mp, '', 'средний чек за', '', basis === '7d' ? '7 дней' : '30 дней');
 }
 
@@ -646,12 +629,68 @@ export async function approve(user: PlanUser, b: any, on: boolean): Promise<void
       d.exec('COMMIT');
     } catch (e) { d.exec('ROLLBACK'); throw e; }
     logChange(user, month, mp, '', 'статус плана', 'черновик', 'утверждён');
+    await saveVersion(user, month, mp, 'утверждён');
   } else {
-    d.prepare('UPDATE plan_line SET price_frozen = 0 WHERE month = ? AND mp = ?').run(month, mp);
+    // Копия на случай, если этот план утвердили ещё до появления версий. Чек остаётся зафиксированным.
+    await saveVersion(user, month, mp, 'открыт для правок');
     d.prepare(`UPDATE plan_month SET state = 'draft', approved_by = NULL, approved_at = NULL WHERE month = ? AND mp = ?`).run(month, mp);
     logChange(user, month, mp, '', 'статус плана', 'утверждён', 'черновик');
   }
 }
+
+// ─── Версии плана: копия всех строк месяца, из которой план можно вернуть ───
+
+const LINE_COLS = 'article, qty, price_manual, price_frozen, is_new, name, start_date, comment';
+
+/** Сохраняет копию. Если строки не изменились с прошлой копии, новую не создаёт. */
+async function saveVersion(user: PlanUser, month: string, mp: PlanMp, reason: string): Promise<void> {
+  const d = getDb();
+  const head = d.prepare('SELECT state, basis FROM plan_month WHERE month = ? AND mp = ?').get(month, mp) as any;
+  const rows = d.prepare(`SELECT ${LINE_COLS} FROM plan_line WHERE month = ? AND mp = ? ORDER BY article`).all(month, mp) as any[];
+  const lines = JSON.stringify(rows);
+  const last = d.prepare('SELECT lines, state FROM plan_version WHERE month = ? AND mp = ? ORDER BY id DESC LIMIT 1').get(month, mp) as any;
+  if (last?.lines === lines) return;
+  const qty = rows.reduce((s, r) => s + Number(r.qty), 0);
+  // Сумма как на экране: у строки без зафиксированного чека цена берётся из текущего среднего.
+  let rubTotal = rows.reduce((s, r) => s + Number(r.qty) * (Number(r.price_manual) || Number(r.price_frozen)), 0);
+  try { rubTotal = (await buildMp(mp, month)).rows.reduce((s, r) => s + r.planRub, 0); } catch { /* копия важнее точной суммы в подписи */ }
+  d.prepare('INSERT INTO plan_version (month, mp, at, user, reason, state, basis, qty, rub, lines) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(month, mp, Date.now(), user.name, reason, head?.state ?? 'draft', head?.basis ?? '7d', qty, rubTotal, lines);
+}
+
+export function getVersions(monthIn: unknown, mpIn: unknown): { ok: true; rows: unknown[] } {
+  const month = isMonth(monthIn) ? monthIn : currentMonth();
+  const mp = mpIn === 'ozon' ? 'ozon' : 'wb';
+  const rows = getDb().prepare('SELECT id, at, user, reason, state, qty, rub FROM plan_version WHERE month = ? AND mp = ? ORDER BY id DESC LIMIT 30').all(month, mp);
+  return { ok: true, rows };
+}
+
+/** Возврат версии. Текущий план сначала сохраняется, поэтому и этот шаг можно отменить. */
+export async function restoreVersion(user: PlanUser, b: any): Promise<void> {
+  if (user.role !== 'owner') throw new PlanError('Вернуть версию плана может только владелец');
+  const { month, mp } = guard(user, b);
+  const d = getDb();
+  const v = d.prepare('SELECT * FROM plan_version WHERE id = ? AND month = ? AND mp = ?').get(Number(b?.id), month, mp) as any;
+  if (!v) throw new PlanError('Такой версии плана нет');
+  await saveVersion(user, month, mp, 'перед возвратом версии');
+  const before = new Map((d.prepare('SELECT article, qty FROM plan_line WHERE month = ? AND mp = ?').all(month, mp) as any[]).map(r => [String(r.article), Number(r.qty)]));
+  const lines = JSON.parse(String(v.lines)) as any[];
+  const ins = d.prepare(`INSERT INTO plan_line (month, mp, article, qty, price_manual, price_frozen, is_new, name, start_date, comment, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const at = Date.now();
+  d.exec('BEGIN');
+  try {
+    d.prepare('DELETE FROM plan_line WHERE month = ? AND mp = ?').run(month, mp);
+    for (const l of lines) ins.run(month, mp, l.article, l.qty, l.price_manual, l.price_frozen, l.is_new, l.name, l.start_date, l.comment, user.name, at);
+    const approved = v.state === 'approved';
+    d.prepare('UPDATE plan_month SET state = ?, basis = ?, approved_by = ?, approved_at = ? WHERE month = ? AND mp = ?')
+      .run(v.state, v.basis, approved ? user.name : null, approved ? at : null, month, mp);
+    d.exec('COMMIT');
+  } catch (e) { d.exec('ROLLBACK'); throw e; }
+  const after = new Map(lines.map(l => [String(l.article), Number(l.qty)]));
+  for (const a of new Set([...before.keys(), ...after.keys()])) logChange(user, month, mp, a, 'план, шт (возврат версии)', before.get(a) ?? 0, after.get(a) ?? 0);
+  logChange(user, month, mp, '', 'возврат версии плана', '', `${n0Ru(Number(v.qty))} шт`);
+}
+const n0Ru = (v: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(v);
 
 export function getLog(monthIn: unknown, mpIn: unknown): { ok: true; rows: unknown[] } {
   const month = isMonth(monthIn) ? monthIn : currentMonth();
@@ -667,6 +706,7 @@ export async function handlePlan(req: any, res: any, sub: string, user: PlanUser
       if (sub === 'stats') return res.status(200).json(await getPlanStats(req.query.view, req.query.article));
       if (sub === 'rnp') return res.status(200).json(await getPlanForRnp(req.query.mp));
       if (sub === 'log') return res.status(200).json(getLog(req.query.month, req.query.mp));
+      if (sub === 'versions') return res.status(200).json(getVersions(req.query.month, req.query.mp));
       return res.status(200).json(await getPlan(req.query.view, req.query.month, user));
     }
     const b = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
@@ -680,6 +720,7 @@ export async function handlePlan(req: any, res: any, sub: string, user: PlanUser
       case 'copy': return res.status(200).json({ ok: true, copied: copyPrevious(user, b) });
       case 'approve': await approve(user, b, true); break;
       case 'unapprove': await approve(user, b, false); break;
+      case 'restore': await restoreVersion(user, b); break;
       default: return res.status(404).json({ error: 'not_found' });
     }
     return res.status(200).json({ ok: true });

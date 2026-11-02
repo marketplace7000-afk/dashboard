@@ -56,6 +56,8 @@ export type PlanRow = {
   transit: number | null;
   /** Хватит ли остатка и едущего товара на оставшийся план; null — неизвестно. */
   stockShort: boolean;
+  /** Своего товара хватало бы, не хватает только с учётом плана второй площадки. */
+  stockShortShared: boolean;
   prevFact: number | null;
   orders30: number;
   daily: PlanDay[];
@@ -203,3 +205,19 @@ export function planStatus(p: Pick<PlanRnpArticle, 'qty' | 'startDate' | 'daily'
     : factToYesterday >= expected * 0.8 ? 'near' : 'bad';
   return { key, pct, expected, factToYesterday };
 }
+
+/**
+ * Хватит ли товара с учётом обеих площадок. Свои склады (FBS) общие: каждая площадка берёт из них то,
+ * что не закрывается её FBO и поставками в пути. Предупреждаем площадку, которой нужны свои склады,
+ * если вместе площадкам нужно больше, чем на них лежит.
+ */
+export function sharedStockShort(
+  me: { remain: number; fbo: number; transit: number },
+  other: { remain: number; fbo: number; transit: number },
+  fbs: number,
+): boolean {
+  const need = (s: typeof me) => Math.max(0, s.remain - s.fbo - s.transit);
+  return need(me) > 0 && need(me) + need(other) > fbs;
+}
+
+export type PlanVersion = { id: number; at: number; user: string | null; reason: string; state: string; qty: number; rub: number };

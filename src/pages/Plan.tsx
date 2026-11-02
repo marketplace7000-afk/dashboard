@@ -14,7 +14,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { CaretDownIcon, CaretRightIcon, CaretLeftIcon, PlusIcon, TrashIcon, CheckCircleIcon, CheckIcon, ArrowClockwiseIcon, ArrowSquareOutIcon, CopyIcon, ArchiveIcon } from '@phosphor-icons/react';
 import '../plan.css';
 import { apiGet, apiPost, errText } from '../api/http';
-import { shiftMonth, type PlanArchived, type PlanMp, type PlanResponse, type PlanRow, type PlanStats, type PlanView } from '../../shared/plan';
+import { planStatus, shiftMonth, type PlanArchived, type PlanMp, type PlanResponse, type PlanRow, type PlanStats, type PlanVersion, type PlanView } from '../../shared/plan';
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
@@ -22,6 +22,7 @@ const n0 = (v: number | null | undefined) => (v === null || v === undefined || !
 const n1 = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v) ? '–' : nf1.format(v));
 const rub = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v) ? '–' : `${nf0.format(v)} ₽`);
 const pct = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v) ? '–' : `${nf0.format(v)} %`);
+const pct1 = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v) ? '–' : `${nf1.format(v)} %`);
 const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
 const monthName = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
 const shortMonth = (m: string) => `${MONTHS[Number(m.slice(5, 7)) - 1].slice(0, 3)}. ${m.slice(2, 4)}`;
@@ -29,7 +30,7 @@ const ddmm = (d: string | null) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}` : '
 const moscowMonth = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 7);
 
 type Filter = 'all' | 'behind' | 'outside' | 'loss' | 'new' | 'short';
-type SortKey = 'planRub' | 'qty' | 'fact' | 'pct' | 'needPerDay' | 'pace7' | 'ads' | 'marginPct' | 'article';
+type SortKey = 'planRub' | 'factRub' | 'qty' | 'fact' | 'pct' | 'forecast' | 'pace7' | 'drr' | 'marginPct' | 'article';
 type PostFn = (path: string, body: object) => Promise<any | null>;
 const SOURCE: Record<string, string> = {
   manual: 'плановая цена', frozen: 'зафиксирован', avg7: 'чек за 7 дней', avg30: 'чек за 30 дней', avg90: 'чек за 90 дней', none: 'задайте цену',
@@ -50,6 +51,38 @@ function pctClass(p: number | null, expected: number | null, qty: number) {
   if (p === null) return '';
   const ok = expected !== null && qty > 0 ? expected / qty * 100 : 100;
   return p >= ok ? 'good' : p >= ok * 0.8 ? 'warn' : 'bad';
+}
+
+/** Цвет полосы товара — по тому же правилу, что и статус в РНП. Для месяцев без заказов по дням — по проценту. */
+function rowTone(r: PlanRow, data: PlanResponse): string {
+  if (r.qty <= 0) return '';
+  if (!r.daily.length || data.period !== 'current') return pctClass(r.pct, r.expected, r.qty);
+  const k = planStatus(r, data.month, data.today).key;
+  return k === 'done' || k === 'ok' ? 'good' : k === 'near' ? 'warn' : k === 'bad' ? 'bad' : '';
+}
+
+/** Окно подтверждения: действие с планом выполняется только после галочки. */
+function ConfirmDialog({ title, keep, change, tick, action, onYes, onNo }: { title: string; keep: string[]; change: string[]; tick: string; action: string; onYes: () => void; onNo: () => void }) {
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onNo(); };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [onNo]);
+  return (
+    <div className="plan-dlg-wrap" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="plan-dlg">
+        <h2>{title}</h2>
+        <div><b>Что сохранится</b><ul>{keep.map(x => <li key={x}>{x}</li>)}</ul></div>
+        <div><b>Что изменится</b><ul>{change.map(x => <li key={x}>{x}</li>)}</ul></div>
+        <label><input type="checkbox" checked={ok} autoFocus onChange={e => setOk(e.target.checked)} /> {tick}</label>
+        <div className="plan-dlg-btns">
+          <button className="btn" onClick={onNo}>Отмена</button>
+          <button className="btn btn-primary" disabled={!ok} onClick={onYes}>{action}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function Plan() {
@@ -90,6 +123,7 @@ function MonthPlan({ view, month, setMonth }: { view: PlanView; month: string; s
   const [adding, setAdding] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
+  const [reopening, setReopening] = useState(false);
   const seq = useRef(0);
 
   const load = useCallback(async () => {
@@ -174,19 +208,26 @@ function MonthPlan({ view, month, setMonth }: { view: PlanView; month: string; s
         {data && !mpEdit && <span className="muted">Правка плана — на листе площадки</span>}
         <span className="plan-spacer" />
         {data && mpEdit && !approved && data.period !== 'past' && (
-          <label className="plan-basis" title="Количество × средний чек = план в рублях. При утверждении цена фиксируется.">Средний чек за
+          <label className="plan-basis" title="Количество × средний чек = план в рублях. При утверждении цена фиксируется. Если сменить срок, чек всех строк считается заново">Средний чек за
             <select className="input" value={data.basis} disabled={!data.canEdit} onChange={e => post('basis', { basis: e.target.value })}>
               <option value="7d">7 дней</option>
               <option value="30d">30 дней</option>
             </select>
           </label>
         )}
-        {data?.canEdit && <button className="btn" onClick={() => setAdding(a => !a)}><PlusIcon size={17} /> Товар или новинка</button>}
+        {data?.canEdit && !approved && <button className="btn" onClick={() => setAdding(a => !a)}><PlusIcon size={17} /> Товар или новинка</button>}
         {data?.canEdit && !approved && <button className="btn" onClick={() => post('copy', {})} title="Перенести количества прошлого месяца в пустые строки"><CopyIcon size={17} /> Из прошлого месяца</button>}
         {data?.canApprove && !approved && <button className="btn btn-primary" onClick={() => post('approve', {})}>Утвердить план</button>}
-        {data?.canApprove && approved && <button className="btn" onClick={() => post('unapprove', {})}>Вернуть в черновик</button>}
+        {data?.canApprove && approved && <button className="btn" onClick={() => setReopening(true)}>Открыть для правок</button>}
         {mpEdit && <button className="btn" onClick={() => setLogOpen(o => !o)}>История правок</button>}
       </div>
+      {reopening && (
+        <ConfirmDialog title="Открыть план для правок?" action="Открыть для правок"
+          keep={['Все количества и цены плана', 'Зафиксированный средний чек', 'Копия утверждённого плана, её можно вернуть из «Истории правок»']}
+          change={['Менеджеры снова смогут менять числа', 'В РНП появится пометка «план ещё не утверждён»', 'План нужно будет утвердить заново']}
+          tick={`Понимаю, что план ${view === 'wb' ? 'WB' : 'Ozon'} на ${monthName(month)} снова станет редактируемым`}
+          onNo={() => setReopening(false)} onYes={() => { setReopening(false); void post('unapprove', {}); }} />
+      )}
       {msg && <div className="plan-alert" role="alert">{msg}</div>}
       {undo && <div className="plan-ok">{undo.text} <button className="btn btn-sm" onClick={undo.run}>Отменить</button></div>}
       {!data && <div className="cm-card muted">Загружаю план…</div>}
@@ -219,7 +260,7 @@ function MonthPlan({ view, month, setMonth }: { view: PlanView; month: string; s
       )}
 
       {data && adding && mpEdit && <AddPanel data={data} onClose={() => setAdding(false)} onSave={async b => { if (await post('line', b)) setAdding(false); }} />}
-      {data && logOpen && mpEdit && <LogPanel mp={view as PlanMp} month={month} />}
+      {data && logOpen && mpEdit && <LogPanel mp={view as PlanMp} month={month} canRestore={data.canApprove} onRestore={id => post('restore', { id })} stamp={`${data.state}|${data.approvedAt ?? ''}`} />}
 
       {data && (
         <>
@@ -239,39 +280,41 @@ function MonthPlan({ view, month, setMonth }: { view: PlanView; month: string; s
                 <thead>
                   <tr>
                     <th className="l stick">{sortBtn('article', 'Товар')}</th>
-                    <th className="l">Статус</th>
-                    <th>{sortBtn('qty', 'План, шт')}</th>
-                    <th title="На что умножается количество">Средний чек</th>
-                    <th>{sortBtn('planRub', 'План, ₽')}</th>
-                    <th>{sortBtn('fact', 'Факт, шт')}</th>
-                    <th>{sortBtn('pct', 'Выполнение')}</th>
-                    <th>Факт, ₽</th>
-                    <th>{sortBtn('needPerDay', 'Нужно в день', '(план − заказы по вчера) ÷ оставшиеся дни')}</th>
+                    <th title="FBO на этой площадке, FBS на всех своих складах (общие для WB и Ozon) и товар в пути">Остаток, шт</th>
                     <th>{sortBtn('pace7', 'Темп 7 дн', 'Заказов в день за последние 7 полных дней')}</th>
-                    <th title="Заказы по вчера + темп за 7 дней × оставшиеся дни">Прогноз</th>
-                    <th>{sortBtn('ads', 'Реклама')}</th>
+                    <th title="Заказы по вчера + темп за 7 дней × оставшиеся дни">{sortBtn('forecast', 'Прогноз')}</th>
+                    <th className="l" aria-label="Факт или план" />
+                    <th>Штуки<span className="p-sorts">{sortBtn('fact', 'факт')}{sortBtn('qty', 'план')}</span></th>
+                    <th title="Факт: рубли ÷ штуки с начала месяца. План: чек, на который умножается количество">Средний чек</th>
+                    <th>Рубли<span className="p-sorts">{sortBtn('factRub', 'факт')}{sortBtn('planRub', 'план')}</span></th>
+                    <th title="Чёрная риска: сколько должно быть к вчерашнему дню при ровных продажах">{sortBtn('pct', 'Выполнение плана')}</th>
+                    <th>{sortBtn('drr', 'Реклама, %', 'Расход на рекламу ÷ заказы в рублях')}</th>
                     <th>{sortBtn('marginPct', 'Маржа', 'Из отчёта финансиста, последний заполненный месяц')}</th>
-                    <th title="FBO на этой площадке + FBS на всех своих складах. Те же числа, что в разделе «Остатки». Свои склады общие для WB и Ozon">Остаток</th>
+                    <th className="l">Статус</th>
                     <th aria-label="Действия" />
                   </tr>
                 </thead>
                 <tbody key={`${view}|${month}`}>
-                  <tr className="cm-row plan-total">
-                    <td className="l stick"><b>Итого, все товары</b></td>
-                    <td />
-                    <td><b>{n0(t.qty)}</b></td>
-                    <td />
-                    <td><b>{rub(t.planRub)}</b></td>
-                    <td><b>{n0(t.fact)}</b></td>
-                    <td><b className={pctClass(t.pct, t.expected, t.qty)}>{pct(t.pct)}</b></td>
-                    <td><b>{rub(t.factRub)}</b>{t.pctRub !== null && <div className="cm-sub">{pct(t.pctRub)}</div>}</td>
-                    <td><b>{t.needPerDay === null ? '–' : n1(t.needPerDay)}</b></td>
-                    <td>{t.pace7 === null ? '–' : n1(t.pace7)}</td>
-                    <td>{t.forecast === null ? '–' : n0(t.forecast)}</td>
-                    <td>{rub(t.ads)}{t.drr !== null && <div className="cm-sub">{pct(t.drr)}</div>}</td>
-                    <td>{pct(t.marginPct)}</td>
-                    <td />
-                    <td />
+                  <tr className="cm-row p-fact plan-total">
+                    <td className="l stick" rowSpan={2}><b>Итого, все товары</b></td>
+                    <td rowSpan={2} />
+                    <td rowSpan={2}>{t.pace7 === null ? '–' : n1(t.pace7)}</td>
+                    <td rowSpan={2}>{t.forecast === null ? '–' : n0(t.forecast)}</td>
+                    <td className="p-lab">Факт</td>
+                    <td className="pair">{n0(t.fact)}</td>
+                    <td className="pair">{t.fact > 0 ? rub(t.factRub / t.fact) : '–'}</td>
+                    <td className="pair">{rub(t.factRub)}</td>
+                    <td rowSpan={2}><Progress p={t.pct} pRub={t.pctRub} tone={pctClass(t.pct, t.expected, t.qty)} expected={t.expected} qty={t.qty} showMark={data.period === 'current'} outside={false} /></td>
+                    <td rowSpan={2}>{pct1(t.drr)}</td>
+                    <td rowSpan={2}>{pct1(t.marginPct)}</td>
+                    <td rowSpan={2} />
+                    <td rowSpan={2} />
+                  </tr>
+                  <tr className="cm-row p-plan plan-total">
+                    <td className="p-lab">План</td>
+                    <td className="pair"><b>{n0(t.qty)}</b></td>
+                    <td className="pair">{t.qty > 0 ? rub(t.planRub / t.qty) : '–'}</td>
+                    <td className="pair">{rub(t.planRub)}</td>
                   </tr>
                   {rows.map(r => (
                     <PlanLine key={r.article} r={r} data={data} open={open.has(r.article)}
@@ -391,19 +434,31 @@ function NumInput({ value, disabled, onSave, label, width = 96 }: { value: numbe
   );
 }
 
+function Progress({ p, pRub, tone, expected, qty, showMark, outside }: { p: number | null; pRub: number | null; tone: string; expected: number | null; qty: number; showMark: boolean; outside: boolean }) {
+  return (
+    <div className="p-prog">
+      <div className="plan-prog"><i className={tone} style={{ width: `${p === null ? 0 : Math.min(100, p)}%` }} />
+        {showMark && expected !== null && qty > 0 && <u style={{ left: `${Math.min(100, expected / qty * 100)}%` }} title={`По графику к вчера: ${n0(expected)} шт`} />}
+      </div>
+      <div className="v"><b className={tone}>{p === null ? (outside ? 'вне плана' : '–') : pct1(p)}</b>{pRub !== null && <span>в рублях {pct1(pRub)}</span>}</div>
+    </div>
+  );
+}
+
 function PlanLine({ r, data, open, onToggle, post, onArchive }: { r: PlanRow; data: PlanResponse; open: boolean; onToggle: () => void; post: PostFn; onArchive: (() => void) | null }) {
   const can = data.canEdit;
-  const priceEditable = can && data.state !== 'approved' && (r.isNew || r.priceSource === 'none' || r.priceSource === 'manual');
-  const tone = pctClass(r.pct, r.expected, r.qty);
-  const width = r.pct === null ? 0 : Math.min(100, r.pct);
+  // Утверждённый план не правится случайно, даже владельцем: сначала «Открыть для правок».
+  const canNumbers = can && data.state !== 'approved';
+  const priceEditable = canNumbers && (r.isNew || r.priceSource === 'none' || r.priceSource === 'manual');
   const preSale = r.isNew && !r.inSale;
   // Галочка ставится, только если сервер вернул именно то число, что ввели.
   const saveQty = async (qty: number) => (await post('line', { article: r.article, qty }))?.saved?.qty === qty;
   const savePrice = async (price: number) => (await post('line', { article: r.article, price }))?.saved?.price === price;
+  const rowCls = `cm-row ${open ? 'p-open' : ''} ${r.qty <= 0 && r.fact > 0 ? 'outside' : ''} ${r.archived ? 'is-archived' : ''}`;
   return (
     <Fragment>
-      <tr className={`cm-row ${open ? 'open' : ''} ${r.qty <= 0 && r.fact > 0 ? 'outside' : ''} ${r.archived ? 'is-archived' : ''}`} onClick={onToggle} aria-expanded={open}>
-        <td className="l stick">
+      <tr className={`p-fact ${rowCls}`} onClick={onToggle} aria-expanded={open}>
+        <td className="l stick" rowSpan={2}>
           <div className="cm-prod">
             {r.photo ? <img src={r.photo} alt="" loading="lazy" /> : <span className="ph" />}
             <div className="t">
@@ -413,7 +468,28 @@ function PlanLine({ r, data, open, onToggle, post, onArchive }: { r: PlanRow; da
             </div>
           </div>
         </td>
-        <td className="l" onClick={e => e.stopPropagation()}>
+        <td rowSpan={2}>
+          {r.stock === null ? '–' : (
+            <div className="p-stock">
+              <span>FBO</span><b>{n0(r.stockFbo)}</b>
+              <span>FBS</span><b>{n0(r.stockFbs)}</b>
+              {!!r.transit && <><span className="go">Едет</span><b className="go">{n0(r.transit)}</b></>}
+            </div>
+          )}
+          {r.stockShort && <div className="p-short" title={r.stockShortShared ? 'Свои склады общие для площадок: вместе с планом другой площадки товара не хватит' : 'Оставшийся план больше остатка и товара в пути'}>{r.stockShortShared ? `не хватит с учётом ${data.view === 'wb' ? 'Ozon' : data.view === 'ozon' ? 'WB' : 'обеих площадок'}` : 'не хватит'}</div>}
+        </td>
+        <td rowSpan={2}>{r.pace7 === null ? '–' : n1(r.pace7)}</td>
+        <td rowSpan={2}><span className={r.forecast !== null && r.qty > 0 && r.forecast < r.qty ? 'warn' : ''}>{r.forecast === null ? '–' : n0(r.forecast)}</span></td>
+        <td className="p-lab">Факт</td>
+        <td className="pair">{n0(r.fact)}{r.mp === 'all' && (r.wb || r.ozon) && <div className="cm-sub">WB {n0(r.wb?.fact ?? 0)} · Ozon {n0(r.ozon?.fact ?? 0)}</div>}</td>
+        <td className="pair">{r.fact > 0 ? rub(r.factRub / r.fact) : '–'}</td>
+        <td className="pair">{rub(r.factRub)}</td>
+        <td rowSpan={2}><Progress p={r.pct} pRub={r.pctRub} tone={rowTone(r, data)} expected={r.expected} qty={r.qty} showMark={data.period === 'current'} outside={r.fact > 0} /></td>
+        <td rowSpan={2}>{pct1(r.drr)}</td>
+        <td rowSpan={2}>
+          <b className={r.marginPct === null ? 'muted' : r.marginPct < 0 ? 'bad' : r.marginPct < 15 ? 'warn' : 'good'} title={r.marginMonth ? `Отчёт финансиста, ${shortMonth(r.marginMonth)}` : undefined}>{r.marginPct === null ? '–' : pct1(r.marginPct)}</b>
+        </td>
+        <td className="l" rowSpan={2} onClick={e => e.stopPropagation()}>
           {can && !r.isNew
             ? <select className={`plan-st st-${r.status}`} value={r.status} aria-label="Статус товара" onChange={e => post('line', { article: r.article, status: e.target.value })}>
                 <option>Рабочий</option><option>Вывод</option><option>Новинка</option>
@@ -421,49 +497,28 @@ function PlanLine({ r, data, open, onToggle, post, onArchive }: { r: PlanRow; da
             : <span className={`plan-st st-${r.status}`}>{r.status}</span>}
           {preSale && <div className="cm-sub">{r.startDate ? `старт ${ddmm(r.startDate)}` : 'ещё не в продаже'}</div>}
         </td>
-        <td>
-          {r.mp === 'all'
-            ? <><b>{n0(r.qty)}</b>{(r.wb || r.ozon) && <div className="cm-sub">WB {n0(r.wb?.qty ?? 0)} · Ozon {n0(r.ozon?.qty ?? 0)}</div>}</>
-            : <NumInput value={r.qty} disabled={!can} label={`План ${r.article}`} onSave={saveQty} />}
-          {r.prevFact !== null && r.mp !== 'all' && <div className="cm-sub" title="Заказов в прошлом месяце">пр. мес. {n0(r.prevFact)}</div>}
-        </td>
-        <td>
-          {priceEditable
-            ? <NumInput value={r.price} disabled={false} width={116} label={`Цена ${r.article}`} onSave={savePrice} />
-            : <span className={r.price <= 0 ? 'bad' : ''}>{r.price > 0 ? rub(r.price) : 'нет цены'}</span>}
-          <div className="cm-sub">{SOURCE[r.priceSource]}</div>
-        </td>
-        <td><b>{r.planRub > 0 ? rub(r.planRub) : '–'}</b></td>
-        <td><b>{n0(r.fact)}</b>{r.mp === 'all' && (r.wb || r.ozon) && <div className="cm-sub">WB {n0(r.wb?.fact ?? 0)} · Ozon {n0(r.ozon?.fact ?? 0)}</div>}</td>
-        <td>
-          <div className="plan-prog"><i className={tone} style={{ width: `${width}%` }} />
-            {r.expected !== null && r.qty > 0 && data.period === 'current' && <u style={{ left: `${Math.min(100, r.expected / r.qty * 100)}%` }} title={`По графику к вчера: ${n0(r.expected)} шт`} />}
-          </div>
-          <b className={tone}>{r.pct === null ? (r.fact > 0 ? 'вне плана' : '–') : pct(r.pct)}</b>
-        </td>
-        <td>{rub(r.factRub)}{r.pctRub !== null && <div className="cm-sub">{pct(r.pctRub)}</div>}</td>
-        <td><b className={r.behind ? 'bad' : ''}>{r.needPerDay === null ? '–' : n1(r.needPerDay)}</b></td>
-        <td>{r.pace7 === null ? '–' : n1(r.pace7)}</td>
-        <td>{r.forecast === null ? '–' : n0(r.forecast)}</td>
-        <td>{rub(r.ads)}{r.drr !== null && <div className="cm-sub">{pct(r.drr)}</div>}</td>
-        <td>
-          <b className={r.marginPct === null ? 'muted' : r.marginPct < 0 ? 'bad' : r.marginPct < 15 ? 'warn' : 'good'}>{r.marginPct === null ? '–' : `${n1(r.marginPct)} %`}</b>
-          {r.marginMonth && <div className="cm-sub">{shortMonth(r.marginMonth)}</div>}
-        </td>
-        <td>
-          <span className={r.stockShort ? 'bad' : ''}>{n0(r.stock)}</span>
-          {r.stock !== null && <div className="cm-sub">FBO {n0(r.stockFbo)} · FBS {n0(r.stockFbs)}</div>}
-          {!!r.transit && <div className="cm-sub">едет {n0(r.transit)}</div>}
-          {r.stockShort && <div className="cm-sub bad">не хватит</div>}
-        </td>
-        <td>
+        <td rowSpan={2}>
           <span className="plan-acts">
             {can && onArchive && !r.archived && <button className="cm-mark" title="Убрать в архив" aria-label={`Убрать в архив: ${r.article}`} onClick={e => { e.stopPropagation(); onArchive(); }}><ArchiveIcon size={18} /></button>}
             <button className="plan-exp" aria-expanded={open} aria-label={`Подробнее: ${r.article}`}>{open ? <CaretDownIcon size={20} /> : <CaretRightIcon size={20} />}</button>
           </span>
         </td>
       </tr>
-      {open && <tr className="plan-detail"><td colSpan={15}><Detail r={r} data={data} post={post} /></td></tr>}
+      <tr className={`p-plan ${rowCls}`} onClick={onToggle}>
+        <td className="p-lab">План</td>
+        <td className="pair">
+          {r.mp === 'all'
+            ? <><b>{n0(r.qty)}</b>{(r.wb || r.ozon) && <div className="cm-sub">WB {n0(r.wb?.qty ?? 0)} · Ozon {n0(r.ozon?.qty ?? 0)}</div>}</>
+            : <NumInput value={r.qty} disabled={!canNumbers} label={`План ${r.article}`} onSave={saveQty} />}
+        </td>
+        <td className="pair" title={SOURCE[r.priceSource]}>
+          {priceEditable
+            ? <NumInput value={r.price} disabled={false} width={116} label={`Цена ${r.article}`} onSave={savePrice} />
+            : <span className={r.price <= 0 ? 'bad' : ''}>{r.price > 0 ? rub(r.price) : 'нет цены'}</span>}
+        </td>
+        <td className="pair">{r.planRub > 0 ? rub(r.planRub) : '–'}</td>
+      </tr>
+      {open && <tr className="plan-detail"><td colSpan={13}><Detail r={r} data={data} post={post} /></td></tr>}
     </Fragment>
   );
 }
@@ -472,11 +527,19 @@ function Detail({ r, data, post }: { r: PlanRow; data: PlanResponse; post: PostF
   const [to, setTo] = useState('');
   let cum = 0;
   const can = data.canEdit;
+  const canNumbers = can && data.state !== 'approved';
   const days = r.daily.filter(d => d.date <= data.today).map(d => { cum += d.cnt; return { ...d, cum }; }).reverse();
   return (
     <div className="plan-det">
       <div className="plan-det-side">
-        {r.isNew && can && (
+        <dl className="plan-facts">
+          {r.needPerDay !== null && <><dt>Нужно в день</dt><dd className={r.behind ? 'bad' : ''}>{n0(r.needPerDay)} шт</dd></>}
+          <dt>Реклама</dt><dd>{rub(r.ads)}</dd>
+          <dt>Откуда чек плана</dt><dd>{SOURCE[r.priceSource]}</dd>
+          {r.prevFact !== null && <><dt>Заказов в прошлом месяце</dt><dd>{n0(r.prevFact)} шт</dd></>}
+          {r.marginMonth && <><dt>Маржа за</dt><dd>{shortMonth(r.marginMonth)}</dd></>}
+        </dl>
+        {r.isNew && canNumbers && (
           <>
             <label>Плановая цена, ₽ <NumInput value={r.priceSource === 'manual' ? r.price : 0} disabled={false} width={130} label="Плановая цена" onSave={async price => (await post('line', { article: r.article, price }))?.saved?.price === price} /></label>
             <label>Дата старта продаж <input type="date" className="input plan-txt" defaultValue={r.startDate ?? ''} onBlur={e => { if ((e.target.value || null) !== r.startDate) void post('line', { article: r.article, startDate: e.target.value || null }); }} /></label>
@@ -485,7 +548,7 @@ function Detail({ r, data, post }: { r: PlanRow; data: PlanResponse; post: PostF
         )}
         {can && <label>Комментарий <textarea className="input plan-txt" rows={2} defaultValue={r.comment} onBlur={e => { if (e.target.value !== r.comment) void post('line', { article: r.article, comment: e.target.value }); }} /></label>}
         {!can && r.comment && <p>{r.comment}</p>}
-        {can && r.hasLine && <button className="btn" onClick={() => post('remove', { article: r.article })}><TrashIcon size={17} /> Убрать из плана</button>}
+        {canNumbers && r.hasLine && <button className="btn" onClick={() => post('remove', { article: r.article })}><TrashIcon size={17} /> Убрать из плана</button>}
       </div>
       {days.length > 0 ? (
         <table className="cm-table">
@@ -544,11 +607,38 @@ function AddPanel({ data, onClose, onSave }: { data: PlanResponse; onClose: () =
   );
 }
 
-function LogPanel({ mp, month }: { mp: PlanMp; month: string }) {
+function LogPanel({ mp, month, canRestore, onRestore, stamp }: { mp: PlanMp; month: string; canRestore: boolean; onRestore: (id: number) => Promise<any | null>; stamp: string }) {
   const [rows, setRows] = useState<Array<{ at: number; user: string; article: string; field: string; before: string; after: string }> | null>(null);
-  useEffect(() => { apiGet<{ rows: any[] }>(`/api/plan/log?mp=${mp}&month=${month}`).then(r => setRows(r.data.rows)).catch(() => setRows([])); }, [mp, month]);
+  const [versions, setVersions] = useState<PlanVersion[] | null>(null);
+  const [back, setBack] = useState<PlanVersion | null>(null);
+  useEffect(() => {
+    apiGet<{ rows: any[] }>(`/api/plan/log?mp=${mp}&month=${month}`).then(r => setRows(r.data.rows)).catch(() => setRows([]));
+    apiGet<{ rows: PlanVersion[] }>(`/api/plan/versions?mp=${mp}&month=${month}`).then(r => setVersions(r.data.rows)).catch(() => setVersions([]));
+  }, [mp, month, stamp]);
+  const when = (at: number) => new Date(at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   return (
     <section className="cm-card plan-add">
+      <span className="cm-now">Версии плана</span>
+      {!versions ? <p className="muted">Загружаю…</p> : !versions.length ? <p className="muted">Копий пока нет. Первая появится при утверждении плана или при открытии его для правок.</p> : (
+        <div className="plan-vers">
+          {versions.map(v => (
+            <div className="plan-ver" key={v.id}>
+              <span><b>{when(v.at)}</b> <span className="muted">· {v.reason}{v.user ? `, ${v.user}` : ''} · {n0(v.qty)} шт · {rub(v.rub)}</span></span>
+              {canRestore && <button className="btn btn-sm" onClick={() => setBack(v)}>Вернуть эту версию</button>}
+            </div>
+          ))}
+        </div>
+      )}
+      {back && (
+        <ConfirmDialog title="Вернуть эту версию плана?" action="Вернуть версию"
+          keep={['Текущий план сохранится отдельной копией, и его тоже можно будет вернуть', 'Заказы и факт не изменятся']}
+          change={[`План станет как в версии от ${when(back.at)}: ${n0(back.qty)} шт, ${rub(back.rub)}`, back.state === 'approved' ? 'План будет утверждён' : 'План будет открыт для правок']}
+          tick="Понимаю, что текущие числа плана будут заменены"
+          onNo={() => setBack(null)} onYes={() => { const id = back.id; setBack(null); void onRestore(id).then(() => {
+            apiGet<{ rows: any[] }>(`/api/plan/log?mp=${mp}&month=${month}`).then(r => setRows(r.data.rows)).catch(() => {});
+            apiGet<{ rows: PlanVersion[] }>(`/api/plan/versions?mp=${mp}&month=${month}`).then(r => setVersions(r.data.rows)).catch(() => {});
+          }); }} />
+      )}
       <span className="cm-now">История правок</span>
       {!rows ? <p className="muted">Загружаю…</p> : !rows.length ? <p className="muted">Правок пока нет.</p> : (
         <div className="cm-scroll">

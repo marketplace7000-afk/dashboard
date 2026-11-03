@@ -108,7 +108,7 @@ async function fetchPrices(H: Record<string, string>): Promise<any[]> {
   return out;
 }
 
-/** Комиссии FBS по предметам кабинета (у китайского кабинета свои ставки). */
+/** Комиссии по предметам кабинета: у китайского кабинета поле kgvpChina. */
 async function fetchCommissions(H: Record<string, string>): Promise<Map<string, number>> {
   const res = await fetchWithRetry('https://common-api.wildberries.ru/api/v1/tariffs/commission?locale=ru',
     { method: 'GET', headers: H }, { maxRetries: 2, timeoutMs: 30_000 });
@@ -116,7 +116,8 @@ async function fetchCommissions(H: Record<string, string>): Promise<Map<string, 
   const j: any = await res.json();
   const m = new Map<string, number>();
   for (const r of j?.report ?? []) {
-    const v = num(r?.kgvpMarketplace);
+    // У китайского кабинета ставка приходит в kgvpChina (проверено 03.11 токеном Global).
+    const v = num(r?.kgvpChina ?? r?.kgvpMarketplace);
     if (r?.subjectID != null && v > 0) m.set(String(r.subjectID), v);
   }
   return m;

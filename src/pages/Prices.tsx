@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { LiveOzonPricing } from '../components/LiveOzonPricing';
 import { LiveWbPricing } from '../components/LiveWbPricing';
+import { LiveWbGlobalPricing } from '../components/LiveWbGlobalPricing';
 import { Repricer } from '../components/Repricer';
 import { PriceAdvice } from '../components/PriceAdvice';
 
 // Третья вкладка — репрайсер. Он про WB и живёт рядом с ценами, а не в
 // «Конкурентах»: там разовый поиск по выдаче, здесь работа с нашим прайсом.
-type MpScope = 'wb' | 'ozon' | 'repricer';
+// «WB Global» (03.11.2026) — второй кабинет WB, китайская компания, цены в юанях.
+type MpScope = 'wb' | 'wbg' | 'ozon' | 'repricer';
 
 export function Prices() {
   const [mp, setMp] = useState<MpScope>('wb');
@@ -43,6 +45,11 @@ export function Prices() {
           Wildberries
           <span className="muted" style={{ marginLeft: 6 }}>live API</span>
         </button>
+        <button className={`mp-tab ${mp === 'wbg' ? 'active' : ''}`} onClick={() => setMp('wbg')}>
+          <span className="mp-tab-dot" style={{ background: '#8a2be2' }} />
+          WB Global
+          <span className="muted" style={{ marginLeft: 6 }}>юани</span>
+        </button>
         <button className={`mp-tab ${mp === 'ozon' ? 'active' : ''}`} onClick={() => setMp('ozon')}>
           <span className="mp-tab-dot" style={{ background: '#005bff' }} />
           Ozon
@@ -55,9 +62,11 @@ export function Prices() {
         </button>
       </div>
 
-      {mp !== 'repricer' && <PriceAdvice mp={mp} />}
+      {(mp === 'wb' || mp === 'ozon') && <PriceAdvice mp={mp} />}
 
       {mp === 'wb' && <LiveWbPricing />}
+
+      {mp === 'wbg' && <LiveWbGlobalPricing />}
 
       {mp === 'ozon' && <LiveOzonPricing />}
 

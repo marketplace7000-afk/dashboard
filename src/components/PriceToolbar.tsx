@@ -10,7 +10,7 @@ export type PriceSort = 'price' | 'margin' | 'roi' | 'name';
 const SORTS: [PriceSort, string][] = [['price', 'цена'], ['margin', 'маржа'], ['roi', 'ROI'], ['name', 'название']];
 
 export function PriceToolbar({
-  mode, onMode, counts, saleHint, search, onSearch, searchPlaceholder, sortBy, onSort, checkedAt, checkedHint, loading,
+  mode, onMode, counts, saleHint, search, onSearch, searchPlaceholder, sortBy, onSort, checkedAt, checkedHint, loading, checkedLabel = 'витрина проверена',
 }: {
   mode: ListMode;
   onMode: (m: ListMode) => void;
@@ -24,6 +24,8 @@ export function PriceToolbar({
   checkedAt: string;
   checkedHint: string;
   loading?: boolean;
+  /** Подпись перед временем (по умолчанию «витрина проверена»). */
+  checkedLabel?: string;
 }) {
   const modes: [ListMode, string, number, string][] = [
     ['sale', 'В продаже', counts.sale, saleHint],
@@ -58,7 +60,7 @@ export function PriceToolbar({
         </label>
         <span className="pr-spacer" />
         {loading && <span className="muted pr-upd"><SpinnerIcon size={14} className="spin" /> загрузка…</span>}
-        <span className="muted pr-upd" title={checkedHint}><ClockIcon size={15} /> витрина проверена {checkedAt}</span>
+        <span className="muted pr-upd" title={checkedHint}><ClockIcon size={15} /> {checkedLabel} {checkedAt}</span>
       </div>
     </section>
   );

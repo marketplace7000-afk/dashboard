@@ -126,3 +126,17 @@ export type ProductEconRow = {
   returnFact?: EconVal;
   buyoutFact?: EconVal;
 };
+
+/** Кабинет WB Global (второй токен, цены в юанях) — см. api/_lib/wbGlobal.ts. */
+export type WbGlobalRow = {
+  nmId: number; vendorCode: string; title: string; subject: string; photo: string;
+  priceCny: number; discount: number; discountedCny: number; clubCny: number; currency: string;
+  commission: number | null;
+  dims: { length: number; width: number; height: number; weightKg: number } | null;
+  volumeL: number; stock: number | null; cost: number | null; costKey: string | null;
+};
+export const wbGlobalRes = createSideResource<{
+  rows: WbGlobalRow[]; configured: boolean;
+  cnyRate: { value: number; date: string } | null;
+  errors: string[]; fetchedAt: number;
+}>('/api/wb-global');

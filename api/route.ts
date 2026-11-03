@@ -26,6 +26,7 @@ import { getOzonBuyerPrices } from './_lib/ozonBuyerPrices';
 import { getWbBoxTariffs } from './_lib/wbBoxTariffs';
 import { getWbStock } from './_lib/wbStock';
 import { getWbCardEcon } from './_lib/wbCardEcon';
+import { getWbGlobal } from './_lib/wbGlobal';
 import { pingAnthropic } from './_lib/anthropic';
 import { readRecentAgg, getDailyLimitRub, getUsdRate } from './_lib/aiUsage';
 import { getLatestSnapshot } from './_lib/history';
@@ -797,6 +798,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(data);
     } catch (e: any) {
       return res.status(502).json({ error: 'wb_card_econ_failed', detail: String(e?.message ?? e) });
+    }
+  }
+
+  // ─── /api/wb-global — кабинет WB Global (цены в юанях, второй токен) ───────
+  if (section === 'wb-global') {
+    try {
+      const noCache = req.headers['x-av-no-cache'] === '1';
+      const data = await getWbGlobal(noCache);
+      res.setHeader('x-av-cache-age', String(Math.round((Date.now() - data.fetchedAt) / 1000)));
+      return res.status(200).json(data);
+    } catch (e: any) {
+      return res.status(502).json({ error: 'wb_global_failed', detail: String(e?.message ?? e) });
     }
   }
 

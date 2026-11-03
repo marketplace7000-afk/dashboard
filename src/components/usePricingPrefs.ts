@@ -17,7 +17,7 @@ import { archiveSKU, unarchiveSKU, getArchivedSKUs } from '../utils/procurementL
 import type { KnobBase } from '../utils/knobs';
 import type { ListMode } from './PriceToolbar';
 
-export type PricingPrefix = 'prices-wb' | 'prices-ozon';
+export type PricingPrefix = 'prices-wb' | 'prices-ozon' | 'prices-wbg';
 export type KnobMap = Record<number, Record<string, string>>;
 
 const num = (v: any) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };

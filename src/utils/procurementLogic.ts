@@ -70,6 +70,7 @@ export type ArchiveScope =
   | 'procurement'   // Прогноз закупок
   | 'prices-ozon'   // Цены · Ozon
   | 'prices-wb'     // Цены · WB
+  | 'prices-wbg'    // Цены · WB Global
   | 'distribution'  // Распределение
   | 'card-audit'    // Аудит карточек
   | 'margins';      // Маржинальность

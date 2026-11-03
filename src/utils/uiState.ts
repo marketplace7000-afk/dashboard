@@ -6,7 +6,7 @@
 // подтягиваем чужие изменения, уведомляя подписчиков (компоненты перечитывают себя).
 // Синхронизируются только ключи настроек — кэши данных (wb:*, ozon:*) остаются локальными.
 
-const SYNC_PREFIXES = ['avtovibe_', 'prices-wb:', 'prices-ozon:'];
+const SYNC_PREFIXES = ['avtovibe_', 'prices-wb:', 'prices-ozon:', 'prices-wbg:'];
 type Snapshot = { rev: number; state: Record<string, string> };
 
 let rev = -1;

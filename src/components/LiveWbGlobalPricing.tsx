@@ -4,7 +4,7 @@
  * себестоимость — в рублях, расчёт ведём в рублях по курсу.
  *
  * Формула — src/utils/wbGlobalProfit.ts (как в калькуляторе клиента 5.1 +
- * округление логистики по оферте №29). Данные — /api/wb-global.
+ * поправки по отчёту финменеджера: эквайринг 0, ФФ 45 ₽ за заказ, логистика без округления). Данные — /api/wb-global.
  */
 import { useState, Fragment } from 'react';
 import { CaretDownIcon, CaretUpIcon, SpinnerIcon, ImageIcon, ArchiveIcon, ArrowCounterClockwiseIcon, KeyIcon } from '@phosphor-icons/react';

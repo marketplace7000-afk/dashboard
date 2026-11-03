@@ -25,8 +25,10 @@ near(r.margin, 17.822, 0.001, 'маржа');
 near(r.roi!, 36.8164, 0.001, 'ROI');
 near(r.breakevenCny! * 12.58, 15229.3205, 0.05, 'безубыточность');
 
-// Округление логистики вверх (оферта п. 13.1.11): 2.3 л → 8 + 1.3×2 = 10.6 → 11 ¥.
-assert.equal(wbgLogisticsCny(2.3, 8, 2), 11);
+// Логистика без округления — как в детализации WB (отчёт финменеджера):
+// 1,56 л → 9,12 ¥ (MANIC-STICK), 4,96 л → 15,92 ¥ (SODA-SIPHON), меньше литра → 8 ¥.
+assert.equal(wbgLogisticsCny(1.56, 8, 2), 9.12);
+assert.equal(wbgLogisticsCny(4.96, 8, 2), 15.92);
 assert.equal(wbgLogisticsCny(0.2, 8, 2), 8);
 assert.equal(wbgLogisticsCny(3, 8, 2), 12);
 // Безубыточность: при этой цене прибыль ≈ 0.

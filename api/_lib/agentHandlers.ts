@@ -23,9 +23,17 @@ function body(req: VercelRequest): any {
 }
 
 /** Наши артикулы для задания showcase_prices: WB — nmId+серая цена (якорь), Ozon — из кэша цен. */
-async function fillShowcaseParams(marketplace: Marketplace): Promise<Record<string, unknown>> {
+async function fillShowcaseParams(marketplace: Marketplace, cabinet?: unknown): Promise<Record<string, unknown>> {
   const params: Record<string, unknown> = { marketplace };
   try {
+    // WB Global (китайский кабинет, 04.11.2026): карточки товаров в наличии —
+    // агент снимает зачёркнутую цену и цену покупателя, сервер считает курс WB.
+    if (marketplace === 'wb' && cabinet === 'global') {
+      const { wbGlobalShowcaseSkus } = await import('./wbGlobal');
+      params.cabinet = 'global';
+      params.skus = await wbGlobalShowcaseSkus();
+      return params;
+    }
     if (marketplace === 'wb') {
       const { cacheGet, makeUpstreamCacheKey } = await import('./cache');
       const key = makeUpstreamCacheKey('wb:discounts', 'GET', 'api/v2/list/goods/filter', '?limit=1000', undefined);
@@ -109,7 +117,7 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     if (!task) { res.status(204).end(); return; }
     // Дозаполнить параметры showcase_prices списком наших товаров на момент выдачи.
     if (task.type === 'showcase_prices' && !(task.params.skus?.length)) {
-      const filled = await fillShowcaseParams(task.params.marketplace);
+      const filled = await fillShowcaseParams(task.params.marketplace, task.params.cabinet);
       task.params = { ...task.params, ...filled };
     }
     // Отзывы Ozon: id компании в кабинете = Client-Id Seller API.
@@ -197,7 +205,7 @@ export async function handleAgentsPanel(req: VercelRequest, res: VercelResponse,
         const type = String(b?.type || 'showcase_prices') as AgentTaskType;
         const mp = (b?.marketplace === 'ozon' ? 'ozon' : 'wb') as Marketplace;
         const params = type === 'showcase_prices'
-          ? { ...(await fillShowcaseParams(mp)), ...(Array.isArray(b?.skus) && b.skus.length ? { skus: b.skus } : {}) }
+          ? { ...(await fillShowcaseParams(mp, b?.cabinet ?? b?.params?.cabinet)), ...(Array.isArray(b?.skus) && b.skus.length ? { skus: b.skus } : {}) }
           : { marketplace: mp, ...(b?.params ?? {}) };
         const t = createTask(type, params, 'panel');
         res.status(200).json({ ok: true, task: t });

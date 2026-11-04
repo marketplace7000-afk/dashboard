@@ -20,7 +20,8 @@ import { roiStatus, ROI_STATUS_COLOR } from '../utils/roiLogic';
 const COLOR = '#8a2be2';
 
 const GPARAMS: GParamField[] = [
-  { key: 'rate', label: 'Курс ₽ за ¥ (пусто — ЦБ)' },
+  { key: 'rateWb', label: 'Курс WB для цен на сайте (пусто — замер агента)' },
+  { key: 'rate', label: 'Курс ЦБ для денег (пусто — ЦБ)' },
   { key: 'spp', label: 'СПП', suffix: '%' },
   { key: 'buyout', label: '% выкупа', suffix: '%' },
   { key: 'fulfillment', label: 'Фулфилмент', suffix: '₽' },
@@ -46,6 +47,10 @@ export function LiveWbGlobalPricing() {
   const cbr = data?.cnyRate?.value ?? null;
   const rate = gp('rate', cbr ?? WBG_DEFAULTS.rate);
   const rateFromCbr = gp('rate', -1) === -1 && cbr != null;
+  // Курс витрины WB: замер Агента 1 (наценка к ЦБ × свежий ЦБ) или ЦБ × 1,05.
+  const wbr = data?.wbRate ?? null;
+  const rateWb = gp('rateWb', wbr?.value ?? Math.round(rate * 1.05 * 10000) / 10000);
+  const rateWbManual = gp('rateWb', -1) !== -1;
 
   const compute = (r: WbGlobalRow, k: Record<string, string>) => {
     const kn = (key: KnobKey): number | undefined => {
@@ -57,10 +62,12 @@ export function LiveWbGlobalPricing() {
     const inp: WbgInput = {
       priceCny: kn('priceCny') ?? r.discountedCny,
       rate,
+      rateWb,
       cost: kn('cost') ?? r.cost ?? 0,
       extra: kn('extra') ?? 0,
       commission: kn('commission') ?? r.commission ?? WBG_DEFAULTS.commission,
-      spp: kn('spp') ?? gp('spp', WBG_DEFAULTS.spp),
+      // СПП: вручную в строке → глобальный параметр → замер витрины товара → медиана замера → 10 %.
+      spp: kn('spp') ?? gp('spp', r.showcase?.spp ?? wbr?.spp ?? WBG_DEFAULTS.spp),
       buyout: kn('buyout') ?? gp('buyout', WBG_DEFAULTS.buyout),
       fulfillment: gp('fulfillment', WBG_DEFAULTS.fulfillment),
       drr: kn('drr') ?? gp('drr', WBG_DEFAULTS.drr),
@@ -142,8 +149,13 @@ export function LiveWbGlobalPricing() {
       />
       <PriceKpis items={[
         { label: 'Товаров в списке', value: rows.length },
-        { label: 'Курс ₽ за ¥', value: rate.toLocaleString('ru-RU'),
-          hint: rateFromCbr ? `Курс ЦБ на ${data.cnyRate?.date ?? '—'}. Покупателю WB показывает цену по своему курсу — не выше курса ЦБ более чем на 10 % (оферта, п. 5.1.1)` : 'Курс задан вручную в глобальных параметрах' },
+        { label: 'Курс WB (цены на сайте)', value: rateWb.toLocaleString('ru-RU'),
+          hint: rateWbManual ? 'Курс витрины задан вручную в глобальных параметрах'
+            : wbr?.source === 'showcase'
+              ? `По ценам на сайте WB: Агент 1 открыл карточки как покупатель ${wbr.measuredAt ? fmtDateClock(wbr.measuredAt) : ''} (${wbr.samples} товаров). WB берёт курс ЦБ × ${wbr.markup.toLocaleString('ru-RU')}; курс пересчитывается от свежего ЦБ каждый день${wbr.spp != null ? `. СПП на витрине — ${wbr.spp}%` : ''}`
+              : 'Замера витрины ещё не было — взят курс ЦБ × 1,05 (так было 04.11). Агент 1 снимает витрину в 06:25, 13:25 и 20:25' },
+        { label: 'Курс ЦБ (деньги)', value: rate.toLocaleString('ru-RU'),
+          hint: rateFromCbr ? `Курс ЦБ на ${data.cnyRate?.date ?? '—'}. По нему считаются выручка, налог и прибыль — как в отчёте финменеджера` : 'Курс задан вручную в глобальных параметрах' },
         { label: 'Средняя маржа', value: avgMargin == null ? '—' : `${avgMargin}%`, hint: 'Средняя маржа по видимым товарам с себестоимостью' },
         ...(noCost ? [{ label: 'Без себестоимости', value: noCost, hint: 'Артикул не найден в таблице «Склад» — маржу не считаем. Себестоимость можно вписать вручную в раскрытой строке' }] : []),
       ]} />
@@ -160,8 +172,8 @@ export function LiveWbGlobalPricing() {
               <tr>
                 <th style={{ width: '6%' }}></th>
                 <th style={{ width: '23%' }}>Артикул</th>
-                <th className="right" style={{ width: '14%' }} title="Цена продавца со скидкой в кабинете WB Global, в юанях, и в рублях по курсу">Цена продавца</th>
-                <th className="right" style={{ width: '15%' }} title="Цена для покупателя: цена в рублях × (1 − СПП)">Цена покупателя</th>
+                <th className="right" style={{ width: '14%' }} title="Цена продавца со скидкой в кабинете WB Global, в юанях, и в рублях по курсу WB — как на сайте">Цена продавца</th>
+                <th className="right" style={{ width: '15%' }} title="Цена для покупателя на сайте: цена ¥ × курс WB × (1 − СПП). Ниже — что агент видел на витрине">Цена покупателя</th>
                 <th className="right" style={{ width: '11%' }} title="Себестоимость из таблицы «Склад», ₽">Себест.</th>
                 <th className="right" style={{ width: '13%' }} title="Чистая прибыль на единицу, % и ₽">Маржа</th>
                 <th className="right" style={{ width: '9%' }}>ROI</th>
@@ -189,12 +201,15 @@ export function LiveWbGlobalPricing() {
                       </td>
                       <td className="right" style={{ whiteSpace: 'nowrap' }}>
                         <b>{inp.priceCny > 0 ? fmtCny(inp.priceCny) : '—'}</b>
-                        <div className="muted" style={{ fontSize: 16 }}>{inp.priceCny > 0 ? fmt(Math.round(inp.priceCny * rate)) : ''}</div>
+                        <div className="muted" style={{ fontSize: 16 }}>{inp.priceCny > 0 ? fmt(Math.round(inp.priceCny * rateWb)) : ''}</div>
                         {r.currency && r.currency !== 'CNY' && <div style={{ fontSize: 15, color: 'var(--warn)' }} title="WB вернул цену не в юанях — проверьте кабинет">валюта {r.currency}</div>}
                       </td>
                       <td className="right" style={{ whiteSpace: 'nowrap' }}>
-                        <b style={{ color: 'var(--good)' }}>{calc ? fmt(Math.round(calc.buyer)) : inp.priceCny > 0 ? fmt(Math.round(inp.priceCny * rate * (1 - inp.spp / 100))) : '—'}</b>
+                        <b style={{ color: 'var(--good)' }}>{inp.priceCny > 0 ? fmt(Math.round(inp.priceCny * rateWb * (1 - inp.spp / 100))) : '—'}</b>
                         <div className="muted" style={{ fontSize: 16 }}>СПП {inp.spp}%</div>
+                        {r.showcase && <div className="muted" style={{ fontSize: 15 }}
+                          title={`Агент 1 видел на карточке WB ${fmtDateClock(r.showcase.at)}${r.showcase.walletRub ? `; с WB Кошельком — ${fmt(r.showcase.walletRub)}` : ''}. Если цену меняли позже — новая появится после следующего прохода агента`}>
+                          на сайте {fmt(r.showcase.priceRub)}</div>}
                       </td>
                       <td className="right" style={{ whiteSpace: 'nowrap' }}>
                         {inp.cost > 0 ? `${Math.round(inp.cost).toLocaleString('ru-RU')} ₽`
@@ -299,10 +314,11 @@ function Details({ r, k, inp, calc, edited, onKnob, onReset }: {
         {!calc ? <div className="muted">Нужны цена и себестоимость</div> : (
           <div style={{ display: 'grid', gap: 3 }}>
             <div className="flex-between" style={{ fontSize: 17, fontWeight: 600 }}>
-              <span>Цена в кабинете ({fmtCny(inp.priceCny)} × {inp.rate})</span><span style={{ color: 'var(--good)' }}>{fmt(Math.round(calc.price))}</span>
+              <span>Выручка ({fmtCny(inp.priceCny)} × курс ЦБ {inp.rate})</span><span style={{ color: 'var(--good)' }}>{fmt(Math.round(calc.price))}</span>
             </div>
             <div className="flex-between muted" style={{ fontSize: 17 }}>
-              <span>↳ цена покупателя (СПП {inp.spp}%) — справочно</span><span>{fmt(Math.round(calc.buyer))}</span>
+              <span>↳ на сайте WB (× курс WB {inp.rateWb}): со скидкой продавца / покупателю при СПП {inp.spp}%</span>
+              <span style={{ whiteSpace: 'nowrap' }}>{fmt(Math.round(calc.priceShown))} / {fmt(Math.round(calc.buyerShown))}</span>
             </div>
             {lines.map((x, i) => (
               <div key={i} className="flex-between muted" style={{ fontSize: 17, gap: 12 }}>

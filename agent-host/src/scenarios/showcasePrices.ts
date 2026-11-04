@@ -369,10 +369,89 @@ async function ozonDirectCards(page: Page, task: AgentTask, settings: AgentSetti
 
 // ─── Точка входа сценария ───────────────────────────────────────────────────
 
+// ─── WB Global (китайский кабинет): карточки как покупатель → курс WB ───────
+
+/**
+ * 04.11.2026. Цена в кабинете WB Global — в юанях, покупатель видит рубли по
+ * «курсу WB». Агент открывает карточки товаров в наличии (их даёт сервер) и
+ * снимает блок цены: зачёркнутая = цена ¥ до скидки × курс, обычная = цена
+ * покупателя без Кошелька, красная = с Кошельком. Курс и СПП считает сервер.
+ * Вёрстка карточки осень-2026: [class*=priceBlockPriceWrap], 2 числа (цена,
+ * зачёркнутая) или 3 (с Кошельком, без Кошелька, зачёркнутая).
+ */
+type GlobalItems = Record<string, { price: number; oldPrice?: number; wallet?: number }>;
+
+async function runWbGlobalShowcase(page: Page, task: AgentTask, settings: AgentSettings): Promise<void> {
+  const skus = (task.params.skus ?? []).map(String).filter(Boolean);
+  if (!skus.length) {
+    await api.log(task.id, 'warn', 'WB Global: сервер не передал товары в наличии — снимать нечего');
+    await api.complete(task.id, 'WB Global: нет товаров в наличии', { total: 0 });
+    return;
+  }
+  const items: GlobalItems = {};
+  let notFound = 0;
+  for (let i = 0; i < skus.length; i++) {
+    const nm = skus[i];
+    await pacedGoto(page, `https://www.wildberries.ru/catalog/${nm}/detail.aspx`, settings, task.id, settings.card_pause_ms);
+    const body = await page.evaluate(() => document.body?.innerText ?? '');
+    if (looksLikeChallenge(page.url(), body)) throw new Challenge('wb', 'captcha');
+    await page.waitForSelector('[class*="priceBlockPriceWrap"]', { timeout: 15_000 }).catch(() => {});
+    // Код строкой — см. scrapeOzonTiles (__name).
+    const nums = await (page.evaluate(`(() => {
+      const w = document.querySelector('[class*="priceBlockPriceWrap"]');
+      if (!w) return [];
+      const out = [];
+      for (const el of Array.from(w.querySelectorAll('*'))) {
+        if (el.children.length) continue;
+        const t = (el.textContent || '').trim();
+        if (!t.includes('\\u20bd')) continue;
+        const n = Number(t.replace(/[^\\d]/g, ''));
+        if (Number.isFinite(n) && n > 0 && n < 100000000) out.push(n);
+      }
+      return out;
+    })()`) as Promise<number[]>).catch(() => [] as number[]);
+    const uniq = [...new Set(nums)];
+    if (uniq.length) {
+      const old = uniq.length >= 2 ? Math.max(...uniq) : 0;
+      const rest = uniq.filter(v => v !== old).sort((a, b) => b - a);
+      const price = rest[0] ?? uniq[0];
+      const wallet = rest.length >= 2 ? rest[rest.length - 1] : undefined;
+      items[nm] = { price, ...(old > price ? { oldPrice: old } : {}), ...(wallet && wallet < price ? { wallet } : {}) };
+    } else {
+      notFound++;
+      await api.log(task.id, 'warn', `WB Global ${nm}: блок цены не найден (нет в продаже или сменилась вёрстка)`);
+    }
+    checkCancelled(await api.progress(task.id, {
+      stage: 'direct_cards', stage_index: 3, stages_total: STAGES.length,
+      items_done: i + 1, items_total: skus.length, current_item: nm,
+      message: `WB Global: карточки ${i + 1} из ${skus.length}, снято ${Object.keys(items).length}`,
+    }, i === 0));
+  }
+  checkCancelled(await api.progress(task.id, {
+    stage: 'ingest', stage_index: 4, stages_total: STAGES.length,
+    items_done: 0, items_total: 1, message: `Отправка в дашборд: ${Object.keys(items).length} цен WB Global`,
+  }, true));
+  if (Object.keys(items).length) {
+    const ok = await api.ingest('wb-global-showcase-ingest', items);
+    if (!ok) throw new Error('ingest WB Global не прошёл');
+  }
+  await api.complete(task.id,
+    `WB Global: снято ${Object.keys(items).length} из ${skus.length}${notFound ? `, без цены ${notFound}` : ''}`,
+    { found_direct: Object.keys(items).length, missing: notFound, total: skus.length });
+}
+
 export async function runShowcasePrices(task: AgentTask, settings: AgentSettings): Promise<void> {
   const mp = task.params.marketplace === 'ozon' ? 'ozon' : 'wb';
   const page = await newPage();
   try {
+    if (mp === 'wb' && task.params.cabinet === 'global') {
+      checkCancelled(await api.progress(task.id, {
+        stage: 'open_showcase', stage_index: 1, stages_total: STAGES.length,
+        message: `WB Global: открываю карточки товаров в наличии (${task.params.skus?.length ?? 0})`,
+      }, true));
+      await runWbGlobalShowcase(page, task, settings);
+      return;
+    }
     checkCancelled(await api.progress(task.id, {
       stage: 'open_showcase', stage_index: 1, stages_total: STAGES.length,
       message: mp === 'wb' ? 'WB: подготовка (card.wb.ru батчами)' : 'Ozon: открываю витрину продавца',

@@ -426,6 +426,14 @@ function ensureDefaultSchedules(d: any): void {
     d.prepare('INSERT INTO agent_schedules(type, params, cron, enabled, next_run_at, created_at) VALUES (?, ?, ?, 1, ?, ?)')
       .run(s.type, J(s.light ? { marketplace: s.marketplace, light: true } : { marketplace: s.marketplace }), s.cron, nextCronRun(s.cron, now()), now());
   }
+  // WB Global (04.11.2026): Агент 1 снимает витрину китайского кабинета — из неё
+  // курс WB и СПП для листа «WB Global». Через 25 минут после основного прохода WB.
+  const g = d.prepare(`SELECT 1 FROM agent_schedules WHERE type = 'showcase_prices' AND json_extract(params, '$.cabinet') = 'global'`).get();
+  if (!g) {
+    const cron = '25 6,13,20 * * *';
+    d.prepare('INSERT INTO agent_schedules(type, params, cron, enabled, next_run_at, created_at) VALUES (?, ?, ?, 1, ?, ?)')
+      .run('showcase_prices', J({ marketplace: 'wb', cabinet: 'global' }), cron, nextCronRun(cron, now()), now());
+  }
 }
 
 // ─── Правила очереди ────────────────────────────────────────────────────────
@@ -494,7 +502,7 @@ export function liveState() {
   const lastRuns: Record<string, ReturnType<typeof rowToTask>> = {};
   for (const r of d.prepare(`SELECT * FROM agent_tasks WHERE status IN ('done','failed') ORDER BY finished_at DESC LIMIT 300`).all()) {
     const tk = rowToTask(r);
-    const key = `${tk.type}:${tk.params?.marketplace ?? ''}`;
+    const key = `${tk.type}:${tk.params?.marketplace ?? ''}${tk.params?.cabinet ? `:${tk.params.cabinet}` : ''}`;
     if (!lastRuns[key]) lastRuns[key] = tk;
   }
   return { ok: true, hosts, tasks: active, queued, finished_today: finished, last_runs: lastRuns, pauses: activePauses(), runs, schedules, stages: SCENARIO_STAGES, titles: TASK_TYPE_TITLES, settings: s, now: t };

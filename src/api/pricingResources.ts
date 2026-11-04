@@ -134,9 +134,14 @@ export type WbGlobalRow = {
   commission: number | null;
   dims: { length: number; width: number; height: number; weightKg: number } | null;
   volumeL: number; stock: number | null; cost: number | null; costKey: string | null;
+  /** Последний замер витрины Агентом 1: цена покупателя ₽ и СПП товара. */
+  showcase?: { priceRub: number; oldRub: number; walletRub?: number; spp: number | null; at: number } | null;
 };
+/** Курс, по которому WB показывает покупателю рубли (замер витрины или ЦБ × 1,05). */
+export type WbgRate = { value: number; source: 'showcase' | 'estimate'; markup: number; measuredAt: number | null; samples: number; spp: number | null };
 export const wbGlobalRes = createSideResource<{
   rows: WbGlobalRow[]; configured: boolean;
   cnyRate: { value: number; date: string } | null;
+  wbRate?: WbgRate | null;
   errors: string[]; fetchedAt: number;
 }>('/api/wb-global');

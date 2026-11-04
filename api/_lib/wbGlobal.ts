@@ -22,6 +22,8 @@ import { fetchWithRetry } from './fetchRetry';
 import { cacheGet, cacheSet, isFresh } from './cache';
 import { fetchAllWbCards } from './wbCards';
 import { resolveCost } from './costs';
+import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 const CACHE_KEY = 'wb-global:v1';
 const TTL_MS = 10 * 60_000;
@@ -58,6 +60,27 @@ export type WbGlobalRow = {
   /** Себестоимость из таблицы «Склад», ₽. */
   cost: number | null;
   costKey: string | null;
+  /** Витрина WB (Агент 1): цена покупателя, ₽, и СПП этого товара, % — если снимали. */
+  showcase?: { priceRub: number; oldRub: number; walletRub?: number; spp: number | null; at: number } | null;
+};
+
+/**
+ * Курс, по которому WB показывает покупателю цену в рублях (04.11.2026).
+ * Оферта: «курс Вайлдберриз», не выше ЦБ более чем на 10 %. Замер 04.11 на 7
+ * товарах: зачёркнутая цена на витрине = цена ¥ до скидки × 12,791 = курс ЦБ
+ * 12,1816 × 1,05 ровно. Источник — Агент 1 (сценарий showcase_prices,
+ * cabinet=global): открывает карточки как покупатель, сервер делит рубли на юани.
+ * Наценку к ЦБ (markup) храним, а курс каждый день пересчитываем от свежего ЦБ.
+ */
+export type WbgRate = {
+  value: number;
+  /** showcase — замер с витрины; estimate — замеров ещё нет, ЦБ × 1,05. */
+  source: 'showcase' | 'estimate';
+  markup: number;
+  measuredAt: number | null;
+  samples: number;
+  /** Средняя (медианная) СПП по снятым товарам, %. */
+  spp: number | null;
 };
 
 export type WbGlobal = {
@@ -65,12 +88,104 @@ export type WbGlobal = {
   configured: boolean;
   /** Курс ЦБ ¥ → ₽ на дату. */
   cnyRate: { value: number; date: string } | null;
+  /** Курс витрины WB (см. WbgRate). */
+  wbRate?: WbgRate | null;
   errors: string[];
   fetchedAt: number;
 };
 
 const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+// ─── Замеры витрины (Агент 1) ───────────────────────────────────────────────
+
+type ShowcaseItem = { price: number; oldPrice?: number; wallet?: number };
+type ShowcaseFile = {
+  measuredAt: number;
+  cbr: number | null;
+  rate: number;
+  markup: number;
+  samples: number;
+  spp: number | null;
+  byNm: Record<string, { priceRub: number; oldRub: number; walletRub?: number; spp: number | null; rate: number | null; cny: number; at: number }>;
+};
+// av-data не трогает деплой (rsync exclude) — замеры переживают выкатку.
+const SHOW_FILE = process.env.WBG_SHOWCASE_FILE || join(process.cwd(), 'av-data', 'wb-global-showcase.json');
+const EST_MARKUP = 1.05;
+
+function readShowcase(): ShowcaseFile | null {
+  try {
+    if (existsSync(SHOW_FILE)) { const j = JSON.parse(readFileSync(SHOW_FILE, 'utf8')); if (j?.byNm) return j; }
+  } catch (e) { console.warn('[wb-global] не прочитал замеры витрины:', (e as Error).message); }
+  return null;
+}
+
+const median = (a: number[]) => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+
+/**
+ * Принять цены витрины от агента: { nmId: { price — без Кошелька, oldPrice —
+ * зачёркнутая, wallet — с Кошельком } }. Курс товара = зачёркнутая ₽ / цена ¥
+ * до скидки; курс кабинета — медиана (выбросы дальше 2 % отбрасываем: у
+ * отдельной карточки WB может рисовать «старую» цену по-своему).
+ * СПП товара = 1 − цена покупателя / (цена ¥ со скидкой × курс).
+ */
+export async function ingestWbGlobalShowcase(items: Record<string, ShowcaseItem>): Promise<{ rate: number | null; markup: number | null; samples: number; spp: number | null }> {
+  const data = await getWbGlobalRaw();
+  const cbr = data.cnyRate?.value ?? null;
+  const rowBy = new Map(data.rows.map(r => [String(r.nmId), r]));
+  const at = Date.now();
+  const raw: { nm: string; rate: number }[] = [];
+  for (const [nm, it] of Object.entries(items ?? {})) {
+    const r = rowBy.get(nm);
+    const old = num(it?.oldPrice);
+    if (r && r.priceCny > 0 && old > 0) raw.push({ nm, rate: old / r.priceCny });
+  }
+  const prev = readShowcase();
+  if (!raw.length) return { rate: prev?.rate ?? null, markup: prev?.markup ?? null, samples: 0, spp: prev?.spp ?? null };
+  const m0 = median(raw.map(x => x.rate));
+  const good = raw.filter(x => Math.abs(x.rate / m0 - 1) <= 0.02);
+  const rate = Math.round(median(good.map(x => x.rate)) * 10000) / 10000;
+  const byNm: ShowcaseFile['byNm'] = { ...(prev?.byNm ?? {}) };
+  const spps: number[] = [];
+  for (const [nm, it] of Object.entries(items ?? {})) {
+    const r = rowBy.get(nm);
+    const price = num(it?.price);
+    if (!r || !(price > 0)) continue;
+    const base = r.discountedCny * rate;
+    const sppRaw = base > 0 ? (1 - price / base) * 100 : NaN;
+    const spp = Number.isFinite(sppRaw) && sppRaw > -1 && sppRaw < 70 ? Math.max(0, Math.round(sppRaw * 10) / 10) : null;
+    if (spp != null) spps.push(spp);
+    const own = raw.find(x => x.nm === nm);
+    byNm[nm] = { priceRub: price, oldRub: num(it?.oldPrice), ...(num(it?.wallet) > 0 ? { walletRub: num(it?.wallet) } : {}),
+      spp, rate: own ? Math.round(own.rate * 10000) / 10000 : null, cny: r.discountedCny, at };
+  }
+  const spp = spps.length ? Math.round(median(spps) * 10) / 10 : null;
+  const markup = cbr ? Math.round(rate / cbr * 10000) / 10000 : (prev?.markup ?? EST_MARKUP);
+  const file: ShowcaseFile = { measuredAt: at, cbr, rate, markup, samples: good.length, spp, byNm };
+  try {
+    mkdirSync(dirname(SHOW_FILE), { recursive: true });
+    writeFileSync(SHOW_FILE + '.tmp', JSON.stringify(file, null, 2), 'utf8');
+    renameSync(SHOW_FILE + '.tmp', SHOW_FILE);
+  } catch (e) { console.warn('[wb-global] не записал замеры витрины:', (e as Error).message); }
+  console.warn(`[wb-global] витрина: курс ${rate} (ЦБ ${cbr ?? '—'}, ×${markup}), по ${good.length} из ${raw.length} товаров, СПП ${spp ?? '—'}%`);
+  return { rate, markup, samples: good.length, spp };
+}
+
+/** Курс витрины на сегодня: наценка последнего замера к ЦБ × свежий ЦБ. */
+function wbRateFor(cbr: number | null, sc: ShowcaseFile | null): WbgRate | null {
+  if (sc && sc.markup > 0) {
+    const value = cbr ? Math.round(cbr * sc.markup * 10000) / 10000 : sc.rate;
+    return { value, source: 'showcase', markup: sc.markup, measuredAt: sc.measuredAt, samples: sc.samples, spp: sc.spp };
+  }
+  if (!cbr) return null;
+  return { value: Math.round(cbr * EST_MARKUP * 10000) / 10000, source: 'estimate', markup: EST_MARKUP, measuredAt: null, samples: 0, spp: null };
+}
+
+/** Товары в наличии — их карточки агент открывает на витрине. */
+export async function wbGlobalShowcaseSkus(): Promise<string[]> {
+  const d = await getWbGlobalRaw();
+  return d.rows.filter(r => r.discountedCny > 0 && (r.stock == null || r.stock > 0)).map(r => String(r.nmId));
+}
 
 /** Курс юаня ЦБ РФ (за 1 ¥). Публичный зеркальный JSON ЦБ, кэш 6 ч. */
 export async function getCnyRate(): Promise<{ value: number; date: string } | null> {
@@ -226,7 +341,24 @@ async function compute(): Promise<WbGlobal> {
   return { rows, configured: true, cnyRate, errors, fetchedAt: Date.now() };
 }
 
+/** Подмешать замеры витрины: они меняются отдельно от данных кабинета. */
+function withShowcase(d: WbGlobal): WbGlobal {
+  const sc = readShowcase();
+  return {
+    ...d,
+    wbRate: wbRateFor(d.cnyRate?.value ?? null, sc),
+    rows: d.rows.map(r => {
+      const x = sc?.byNm[String(r.nmId)];
+      return { ...r, showcase: x ? { priceRub: x.priceRub, oldRub: x.oldRub, walletRub: x.walletRub, spp: x.spp, at: x.at } : null };
+    }),
+  };
+}
+
 export async function getWbGlobal(noCache = false): Promise<WbGlobal> {
+  return withShowcase(await getWbGlobalRaw(noCache));
+}
+
+async function getWbGlobalRaw(noCache = false): Promise<WbGlobal> {
   const cached = await cacheGet<WbGlobal>(CACHE_KEY);
   // Токен добавили/убрали — старый набор не годится.
   const tokenChanged = !!cached?.data && cached.data.configured !== !!wbGlobalToken();

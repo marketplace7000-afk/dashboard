@@ -9,7 +9,9 @@
 //   - фулфилмент 45 ₽ за заказ (у финменеджера «заказы × 45 ₽»), на продажу — 45 / выкуп;
 //   - логистика НЕ округляется: в отчёте 9,12 ¥, 15,92 ¥, 16,55 ¥ и т.п. =
 //     8 + (V − 1) × 2 ровно. Объём меньше литра считается за литр.
-// Курс у финменеджера — курс ЦБ на дату продажи (не «курс WB»).
+// Курс у финменеджера — курс ЦБ на дату продажи (не «курс WB»): по нему считаем деньги.
+// Покупателю WB показывает рубли по своему курсу (04.11.2026 = ЦБ × 1,05, замер
+// Агентом 1 с витрины) — по нему только цены «как на сайте» (priceShown, buyerShown).
 //
 //   цена ₽          = цена ¥ × курс
 //   цена покупателя = цена ₽ × (1 − СПП)        — только для налога и справки
@@ -24,7 +26,8 @@
 
 export type WbgInput = {
   priceCny: number;     // цена продавца со скидкой, ¥
-  rate: number;         // ₽ за 1 ¥
+  rate: number;         // ₽ за 1 ¥ — курс ЦБ, для денег
+  rateWb?: number;      // ₽ за 1 ¥ — курс витрины WB, для цен «как видит покупатель»
   cost: number;         // себестоимость, ₽
   extra: number;        // доп. расходы на единицу, ₽
   commission: number;   // %
@@ -42,6 +45,8 @@ export type WbgInput = {
 
 export type WbgResult = {
   price: number; buyer: number;
+  /** Цена со скидкой продавца и цена покупателя в рублях по курсу WB — как на сайте. */
+  priceShown: number; buyerShown: number;
   logisticsCny: number;
   commission: number; logistics: number; fulfillment: number; advertising: number; acquiring: number;
   gross: number; payful: number; tax: number; cash: number;
@@ -66,6 +71,8 @@ export function calcWbGlobal(i: WbgInput): WbgResult | null {
   const b = Math.max(1, i.buyout) / 100;
   const price = i.priceCny * i.rate;
   const buyer = price * (1 - i.spp / 100);
+  const priceShown = i.priceCny * (i.rateWb && i.rateWb > 0 ? i.rateWb : i.rate);
+  const buyerShown = priceShown * (1 - i.spp / 100);
   const logisticsCny = wbgLogisticsCny(i.volumeL, i.logFirst, i.logExtra);
   const logistics = logisticsCny * i.rate / b;
   const fulfillment = i.fulfillment / b;
@@ -84,7 +91,7 @@ export function calcWbGlobal(i: WbgInput): WbgResult | null {
   const fixed = (logistics + fulfillment) * pf + i.cost + i.extra;
   const breakevenRub = k > 0 ? fixed / k : null;
   return {
-    price, buyer, logisticsCny, commission, logistics, fulfillment, advertising, acquiring,
+    price, buyer, priceShown, buyerShown, logisticsCny, commission, logistics, fulfillment, advertising, acquiring,
     gross, payful, tax, cash, cost: i.cost, extra: i.extra, profit,
     margin: price > 0 ? profit / price * 100 : 0,
     roi: i.cost > 0 ? profit / i.cost * 100 : null,

@@ -164,7 +164,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Ingest витрин принимает ключ агента наравне с сессией (ТЗ, принцип VIII):
   // хост шлёт цены сюда же, куда их слал ручной сценарий.
-  const agentIngestOk = (section === 'wb-showcase-ingest' || section === 'ozon-showcase-ingest')
+  const agentIngestOk = (section === 'wb-showcase-ingest' || section === 'ozon-showcase-ingest' || section === 'wb-global-showcase-ingest')
     && (await import('./_lib/agentQueue')).agentKeyOk(req as any);
 
   // ─── Все остальные секции требуют auth ───────────────────────────────────
@@ -798,6 +798,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(data);
     } catch (e: any) {
       return res.status(502).json({ error: 'wb_card_econ_failed', detail: String(e?.message ?? e) });
+    }
+  }
+
+  // ─── /api/wb-global-showcase-ingest — цены витрины WB Global от Агента 1 ──
+  // Из них сервер считает курс WB (₽ за ¥) и СПП по товарам.
+  if (section === 'wb-global-showcase-ingest') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
+    try {
+      const { ingestWbGlobalShowcase } = await import('./_lib/wbGlobal');
+      const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body ?? {});
+      const items = (body?.items ?? {}) as Record<string, { price: number; oldPrice?: number; wallet?: number }>;
+      const data = await ingestWbGlobalShowcase(items);
+      return res.status(200).json({ ok: true, received: Object.keys(items).length, ...data });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
     }
   }
 

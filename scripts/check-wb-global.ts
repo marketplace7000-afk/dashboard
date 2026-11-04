@@ -1,7 +1,7 @@
 // Проверка формулы WB Global на эталоне из калькулятора клиента (v5.1, расчёт
 // CARLINKIT-ULTRA2-KRUG-8-128-DUBL, сохранён в калькуляторе). Запуск: tsx scripts/check-wb-global.ts
 import assert from 'node:assert/strict';
-import { calcWbGlobal, wbgLogisticsCny } from '../src/utils/wbGlobalProfit';
+import { calcWbGlobal, wbgLogisticsCny, WBG_DEFAULTS } from '../src/utils/wbGlobalProfit';
 
 const near = (a: number, b: number, eps = 0.01, what = '') =>
   assert.ok(Math.abs(a - b) <= eps, `${what}: ${a} ≠ ${b}`);
@@ -37,3 +37,12 @@ const be = calcWbGlobal({ priceCny: r.breakevenCny!, rate: 12.58, cost: 10048, e
 near(be.profit, 0, 0.01, 'прибыль в точке безубыточности');
 assert.equal(calcWbGlobal({ priceCny: 0, rate: 12, cost: 1, extra: 0, commission: 20, spp: 0, buyout: 90, fulfillment: 0, drr: 0, acquiring: 0, tax: 0, payful: 0, volumeL: 1, logFirst: 8, logExtra: 2 }), null);
 console.log('check-wb-global: ok');
+
+// 04.11.2026: цены «как на сайте» — по курсу WB, деньги — по ЦБ.
+{
+  const r = calcWbGlobal({ ...WBG_DEFAULTS, priceCny: 8680, rate: 12.1816, rateWb: 12.791, cost: 50000, extra: 0, commission: 20, spp: 20, volumeL: 50 } as any)!;
+  if (Math.round(r.priceShown) !== 111026) throw new Error('priceShown ' + r.priceShown);
+  if (Math.abs(r.buyerShown - 88818) > 5) throw new Error('buyerShown ' + r.buyerShown);
+  if (Math.round(r.price) !== Math.round(8680 * 12.1816)) throw new Error('price must use CBR');
+  console.log('check-wb-global: rateWb ok');
+}

@@ -101,7 +101,7 @@ export async function fail(taskId: number, body: FailReq): Promise<void> {
   await call(`/api/agent/tasks/${taskId}/fail`, body).catch(() => null);
 }
 
-export async function ingest(path: 'wb-showcase-ingest' | 'ozon-showcase-ingest', items: Record<string, { price: number; oldPrice?: number }>): Promise<boolean> {
+export async function ingest(path: 'wb-showcase-ingest' | 'ozon-showcase-ingest' | 'wb-global-showcase-ingest', items: Record<string, { price: number; oldPrice?: number; wallet?: number }>): Promise<boolean> {
   try {
     const r = await call<{ ok: boolean }>(`/api/${path}`, { items });
     return r.status === 200 && !!r.json?.ok;

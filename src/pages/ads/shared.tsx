@@ -8,6 +8,17 @@ import type { Ads2Mp, Ads2ActionKind, Ads2Issue } from '../../../shared/ads2';
 
 export type SetToast = (t: { ok: boolean; text: string }) => void;
 
+/**
+ * Поиск, фильтр и сортировка вкладок, которые переживают смену периода (05.11.2026, просьба владельца:
+ * артикул в поиске сбрасывался при выборе «вчера», «7 дней» и т. п.). Вкладки пересоздаются при смене
+ * дат, поэтому значения держит раздел, а не сама вкладка. У каждой площадки память своя.
+ */
+export type Kept = Map<string, unknown>;
+export function useKept<T>(kept: Kept | undefined, key: string, init: T): [T, (v: T) => void] {
+  const [v, setV] = useState<T>(() => (kept?.has(key) ? (kept.get(key) as T) : init));
+  return [v, (x: T) => { kept?.set(key, x); setV(x); }];
+}
+
 export const STATUS: Record<string, { label: string; cls: string }> = {
   active: { label: 'активна', cls: 'good' }, paused: { label: 'пауза', cls: '' }, ready: { label: 'готова', cls: 'info' },
   out_of_budget: { label: 'нет бюджета', cls: 'warn' }, planned: { label: 'запланирована', cls: 'info' },

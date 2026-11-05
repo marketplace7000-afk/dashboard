@@ -6,19 +6,19 @@ import {
 import { apiPost, errText } from '../../api/http';
 import { nf1, rub, rub2, num, pct, ddmm, kRub, ProductCell } from '../ads2ui';
 import { NO_ADS_REASON_LABEL, type Ads2Overview, type Ads2Product } from '../../../shared/ads2';
-import { IssueIcon, StatusChip, type SetToast } from './shared';
+import { IssueIcon, StatusChip, useKept, type Kept, type SetToast } from './shared';
 
 
 type PFilter = 'all' | 'ads' | 'noads' | 'issues' | 'flagged' | 'archive';
 type PSort = 'revenue' | 'spend' | 'drr' | 'stock';
 
-export function Products({ d, openProduct, onChanged, setToast }: {
-  d: Ads2Overview; openProduct: (k: string) => void; onChanged: () => void; setToast: SetToast;
+export function Products({ d, openProduct, onChanged, setToast, kept }: {
+  d: Ads2Overview; openProduct: (k: string) => void; onChanged: () => void; setToast: SetToast; kept?: Kept;
 }) {
-  const [q, setQ] = useState('');
-  const [f, setF] = useState<PFilter>('all');
-  const [sort, setSort] = useState<PSort>('revenue');
-  const [dir, setDir] = useState<1 | -1>(-1);
+  const [q, setQ] = useKept(kept, 'products:q', '');
+  const [f, setF] = useKept<PFilter>(kept, 'products:f', 'all');
+  const [sort, setSort] = useKept<PSort>(kept, 'products:sort', 'revenue');
+  const [dir, setDir] = useKept<1 | -1>(kept, 'products:dir', -1);
   const [shown, setShown] = useState(60);
   // Архив (карточки под самовыкуп, дубли): отмечаем пачкой — галочки в строках или «выбрать все найденные».
   const [sel, setSel] = useState<Set<string>>(new Set());

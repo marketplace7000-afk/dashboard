@@ -5,7 +5,7 @@ import {
 } from '@phosphor-icons/react';
 import { nf1, nf2, rub, rub2, num, pct, ProductCell } from '../ads2ui';
 import type { Ads2Mp, Ads2Overview, Ads2Campaign, Ads2CampaignItem, Ads2Stat } from '../../../shared/ads2';
-import { PAYMENT, StatusChip, bidTypeLabel, type Pending } from './shared';
+import { PAYMENT, StatusChip, bidTypeLabel, useKept, type Kept, type Pending } from './shared';
 
 
 /**
@@ -197,12 +197,12 @@ function CampaignItems({ c, ask, mp, cols }: { c: Ads2Campaign; ask: (p: Pending
 
 type CFilter = 'active' | 'paused' | 'all';
 
-export function Campaigns({ d, ask, openId, setOpenId }: { d: Ads2Overview; ask: (p: Pending) => void; openId: string | null; setOpenId: (id: string | null) => void }) {
-  const [f, setF] = useState<CFilter>('active');
-  const [q, setQ] = useState('');
+export function Campaigns({ d, ask, openId, setOpenId, kept }: { d: Ads2Overview; ask: (p: Pending) => void; openId: string | null; setOpenId: (id: string | null) => void; kept?: Kept }) {
+  const [f, setF] = useKept<CFilter>(kept, 'campaigns:f', 'active');
+  const [q, setQ] = useKept(kept, 'campaigns:q', '');
   const { cols, keys, toggle, reset, all } = useCols(d.mp);
-  const [sortKey, setSortKey] = useState<ColKey>('spend');
-  const [dir, setDir] = useState<1 | -1>(-1);
+  const [sortKey, setSortKey] = useKept<ColKey>(kept, 'campaigns:sort', 'spend');
+  const [dir, setDir] = useKept<1 | -1>(kept, 'campaigns:dir', -1);
   const sortCol = COLS.find(c => c.key === sortKey)!;
   const isActive = (c: Ads2Campaign) => c.status === 'active' || c.status === 'out_of_budget';
   const list = useMemo(() => {

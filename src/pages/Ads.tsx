@@ -23,7 +23,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, useRef } from 'rea
 import { ArrowsClockwiseIcon } from '@phosphor-icons/react';
 import { apiGet, apiPost, errText } from '../api/http';
 import type { Ads2Mp, Ads2Overview } from '../../shared/ads2';
-import { useActions } from './ads/shared';
+import { useActions, type Kept } from './ads/shared';
 import { Overview } from './ads/Overview';
 import { Products, ProductDrawer } from './ads/Products';
 import { Campaigns } from './ads/Campaigns';
@@ -76,6 +76,8 @@ function Board({ mp }: { mp: Ads2Mp }) {
   const [syncing, setSyncing] = useState(false);
   const [productKey, setProductKey] = useState<string | null>(null);
   const [openCamp, setOpenCamp] = useState<string | null>(null);
+  // Поиск и фильтры вкладок живут дольше вкладки: та пересоздаётся при смене дат.
+  const [kept] = useState<Kept>(() => new Map());
 
   // Номер запроса: при быстром переключении фильтров старый ответ мог прийти
   // позже нового и затереть его (прожарка 20.10.2026) — применяем только последний.
@@ -142,8 +144,8 @@ function Board({ mp }: { mp: Ads2Mp }) {
       {data && (
         <Fragment key={`${mp}-${from}-${to}`}>
           {tab === 'overview' && <Overview d={data} openProduct={setProductKey} />}
-          {tab === 'products' && <Products d={data} openProduct={setProductKey} onChanged={load} setToast={setToast} />}
-          {tab === 'campaigns' && <Campaigns d={data} ask={ask} openId={openCamp} setOpenId={setOpenCamp} />}
+          {tab === 'products' && <Products d={data} openProduct={setProductKey} onChanged={load} setToast={setToast} kept={kept} />}
+          {tab === 'campaigns' && <Campaigns d={data} ask={ask} openId={openCamp} setOpenId={setOpenCamp} kept={kept} />}
           {tab === 'autopilot' && <Autopilot d={data} setToast={setToast} reload={load} />}
           {tab === 'log' && <Journal mp={mp} names={names} />}
         </Fragment>

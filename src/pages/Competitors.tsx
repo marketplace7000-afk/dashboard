@@ -168,6 +168,7 @@ function compareNms(p: Ads2WatchProduct): number[] {
 // ─── Отчёт «Сравнение карточек» → «Показатели» (27.10.2026) ──────────────────
 // Значения кабинета WB как есть: ничего не пересчитываем; чего WB не отдал — «Нет данных».
 const NO = <span className="muted">Нет данных</span>;
+const mpNameOf = (mp: Ads2Mp) => (mp === 'wb' ? 'WB' : 'Ozon');
 const v0 = (v: number | null | undefined, unit = '') => (v == null || !Number.isFinite(v) ? NO : <>{nf1.format(v)}{unit}</>);
 const dmy = (d: string) => d.split('-').reverse().join('.');
 const REP_ROWS: { label: string; tip?: string; get: (r: Ads2WbRepRow) => React.ReactNode }[] = [
@@ -292,7 +293,10 @@ function WatchProduct({ p, mp, passAt, dataAt = null, showIgnored, onData, setTo
         <div className="cmp-prod-id">
           {p.photo ? <img src={p.photo} alt="" loading="lazy" onError={e => { e.currentTarget.style.visibility = 'hidden'; }} /> : <span className="ad2-noimg" />}
           <div>
-            <div className="cmp-art">{p.key}</div>
+            <div className="cmp-art">{p.key}
+              {p.stockSince && Date.now() - p.stockSince < 14 * 86_400_000 && <span className="chip good ad2-chipsm cmp-new" title="Остаток на складе появился недавно">в продаже с {new Date(p.stockSince).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}</span>}
+              {p.inStock && !p.links.some(l => l.status === 'active') && <span className="chip warn ad2-chipsm cmp-new">{p.links.some(l => l.status === 'suggested') ? 'конкуренты ждут подтверждения' : 'нет конкурентов'}</span>}
+            </div>
             <div className="muted cmp-name">{our?.url ? <a href={our.url} target="_blank" rel="noreferrer">{p.name}</a> : p.name}{p.ourId ? ` · ${p.ourId}` : ''}</div>
           </div>
         </div>
@@ -458,13 +462,18 @@ function ComparePanel({ st, picked, onClear, onData, setToast }: {
 
 function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2Mp; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void }) {
   const [q, setQ] = useState('');
-  const [all, setAll] = useState(false);
+  // Какие товары: с конкурентами / в продаже без подтверждённых конкурентов (05.11.2026) / все.
+  const [mode, setMode] = useState<'with' | 'none' | 'all'>('with');
+  const setAll = (on: boolean) => setMode(on ? 'all' : 'with');
   const [onlyPending, setOnlyPending] = useState(false);
   const [showIgnored, setShowIgnored] = useState(false);
   const [more, setMore] = useState(15);
   const [per, setPer] = useState<OzPer>(() => { try { return localStorage.getItem('cmp:ozPer') === '28' ? 28 : 7; } catch { return 7; } });
   const pickPer = (v: OzPer) => { setPer(v); try { localStorage.setItem('cmp:ozPer', String(v)); } catch { /* приватное окно */ } };
   const withLinks = d.watch.filter(p => p.links.length > 0);
+  // В продаже, а подтверждённых конкурентов нет (предложенные системой ещё не считаются) — новинки сверху.
+  const bare = d.watch.filter(p => p.inStock && !p.links.some(l => l.status === 'active'))
+    .sort((a, b) => (b.stockSince ?? 0) - (a.stockSince ?? 0) || a.key.localeCompare(b.key, 'ru'));
   const gone = d.watch.filter(p => p.our?.hidden);
   // Выбор товаров для недельных сравнений WB — на сервере (29.10.2026): отметки видят все менеджеры и не теряются.
   const picks = useMemo(() => new Set(d.wbCompare?.picks ?? []), [d.wbCompare?.picks]);
@@ -477,7 +486,7 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
   const pendingOf = (p: Ads2WatchProduct) => p.links.filter(l => l.status === 'suggested').length;
   const pending = d.watch.reduce((s, p) => s + pendingOf(p), 0);
   const needle = q.trim().toLowerCase();
-  const list = (all ? d.watch : withLinks)
+  const list = (mode === 'all' ? d.watch : mode === 'none' ? bare : withLinks)
     .filter(p => !onlyPending || pendingOf(p) > 0)
     .filter(p => !needle || p.key.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle) || p.ourId.includes(needle)
       || p.links.some(l => l.id.includes(needle) || l.title.toLowerCase().includes(needle)));
@@ -485,7 +494,8 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
     <>
       <section className="card cmp-card">
         <div className="cmp-head">
-          <h2>Конкуренты по товарам {pending > 0 && <span className="chip info">ждут решения: {pending}</span>}</h2>
+          <h2>Конкуренты по товарам {pending > 0 && <span className="chip info">ждут решения: {pending}</span>}
+            {bare.length > 0 && <button className="chip warn cmp-bare-chip" onClick={() => { setMode('none'); setMore(15); }} title="Наши товары в продаже без подтверждённых конкурентов">без конкурентов: {bare.length}</button>}</h2>
           <RefreshBar d={d} mp={mp} onData={onData} setToast={setToast} />
         </div>
         <p className="muted cmp-lead">
@@ -500,8 +510,9 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
             <input className="input" placeholder="Наш артикул, название или артикул конкурента" value={q} onChange={e => { setQ(e.target.value); setMore(15); }} />
           </label>
           <div className="period-switch" role="group" aria-label="Какие товары">
-            <button className={`period-btn ${!all ? 'active' : ''}`} onClick={() => setAll(false)}>С конкурентами <span className="ad2-cnt">{withLinks.length}</span></button>
-            <button className={`period-btn ${all ? 'active' : ''}`} onClick={() => setAll(true)}>Все товары <span className="ad2-cnt">{d.watch.length}</span></button>
+            <button className={`period-btn ${mode === 'with' ? 'active' : ''}`} onClick={() => { setMode('with'); setMore(15); }}>С конкурентами <span className="ad2-cnt">{withLinks.length}</span></button>
+            <button className={`period-btn ${mode === 'none' ? 'active' : ''}`} onClick={() => { setMode('none'); setMore(15); }} title="Наши товары в продаже, к которым не подтверждён ни один конкурент">Без конкурентов <span className="ad2-cnt">{bare.length}</span></button>
+            <button className={`period-btn ${mode === 'all' ? 'active' : ''}`} onClick={() => { setMode('all'); setMore(15); }}>Все товары <span className="ad2-cnt">{d.watch.length}</span></button>
           </div>
           {mp === 'ozon' && (
             <div className="period-switch" role="group" aria-label="Период продаж Ozon" title="Продажи, выручка, корзина, ДРР и реклама/акции — из «Товаров на Ozon» за выбранный период">
@@ -526,7 +537,14 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
           </div>
         </section>
       )}
-      {list.length === 0 && <div className="card muted">{all || needle || onlyPending ? 'Ничего не найдено.' : 'Привязок пока нет. Предложения появятся после ночного прохода агента; своего конкурента можно привязать в «Все товары».'}</div>}
+      {mode === 'none' && (
+        <div className="card cmp-bare-note">
+          <b>В продаже без конкурентов: {bare.length}.</b> Наши товары с остатком на складе, к которым не подтверждён ни один конкурент — новинки сверху.
+          Привяжите конкурента кнопкой «+ Конкурент» у товара или подтвердите предложенного системой. Товар, поступивший в продажу, появляется здесь в течение 5 минут.
+          {(d.unmapped ?? 0) > 0 && <span className="muted"> Ещё {d.unmapped} {mpNameOf(mp)}-карточ{(d.unmapped ?? 0) === 1 ? 'ка' : 'ек'} с остатком пока нет в справочнике товаров — появятся после его обновления (несколько часов).</span>}
+        </div>
+      )}
+      {list.length === 0 && <div className="card muted">{mode === 'none' ? 'Все наши товары в продаже уже с конкурентами.' : mode === 'all' || needle || onlyPending ? 'Ничего не найдено.' : 'Привязок пока нет. Предложения появятся после ночного прохода агента; своего конкурента можно привязать в «Все товары».'}</div>}
       {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} dataAt={d.refresh.fullAt} per={per} showIgnored={showIgnored} onData={onData} setToast={setToast}
         pick={mp === 'wb' && d.wbCompare ? { on: picks.has(p.key), toggle: () => togglePick(p.key) } : undefined}
         report={mp === 'wb' && p.ourId ? d.wbReports?.[p.ourId] : undefined} />)}

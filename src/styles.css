@@ -1718,6 +1718,10 @@ code {
   .cmp-rep-table col.cmp-rep-lab { width: 190px; }
   .sa .ad2-table.cmp-rep-table th, .sa .ad2-table.cmp-rep-table td, .cmp-rep-table th, .cmp-rep-table td { font-size: 16px; padding: 10px; }
 }
+/* «Без конкурентов» (05.11.2026) */
+.cmp-bare-chip { border: 0; cursor: pointer; font: inherit; font-size: 15px; margin-left: 6px; }
+.cmp-bare-note { font-size: 17px; line-height: 1.5; border-left: 4px solid var(--warn); }
+.cmp-new { margin-left: 8px; vertical-align: middle; }
 /* Ozon: расширенные показатели (05.11.2026) */
 .oz-rep-tools { display: flex; gap: 8px; margin-left: auto; }
 .oz-rep-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 17px; }

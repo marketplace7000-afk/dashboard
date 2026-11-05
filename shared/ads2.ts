@@ -194,7 +194,13 @@ export type Ads2CompRefresh = {
 };
 
 /** Наш товар (ключ — наш артикул продавца) и его конкуренты. */
-export type Ads2WatchProduct = { key: string; ourId: string; name: string; photo: string; our: Ads2WatchLink | null; links: Ads2WatchLink[] };
+export type Ads2WatchProduct = {
+  key: string; ourId: string; name: string; photo: string; our: Ads2WatchLink | null; links: Ads2WatchLink[];
+  /** Наш товар сейчас в продаже: остаток > 0 по РНП или по 5-минутному снимку остатков площадки (05.11.2026). */
+  inStock?: boolean;
+  /** Когда остаток стал > 0 (мс; 0 или null — давно) — для пометки «новинка». */
+  stockSince?: number | null;
+};
 
 /** «Сравнение карточек» WB раз в неделю (26.10.2026): лимиты и последний запуск. */
 export type Ads2WbCompare = {
@@ -243,6 +249,8 @@ export type Ads2Competitors = {
   watch: Ads2WatchProduct[];
   /** Наши товары для выбора при добавлении: артикул и название. */
   catalog: { key: string; name: string }[];
+  /** Сколько карточек с остатком ещё нет в справочнике товаров (появятся после его обновления). */
+  unmapped?: number;
   wbCompare?: Ads2WbCompare;
   /** Последний отчёт сравнения по каждому нашему товару WB: наш nmId → набор. */
   wbReports?: Record<string, Ads2WbReport>;

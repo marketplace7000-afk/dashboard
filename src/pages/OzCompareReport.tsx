@@ -149,7 +149,7 @@ export function OzCompareReport({ p, perDefault, dataAt, setToast }: {
     if (cur.includes(id)) return cur.filter(x => x !== id);
     return cur.length >= 3 ? cur : [...cur, id];
   });
-  if (!pool.length && !p.our) return null;
+  if (!pool.length) return null;
   const cards: Card[] = [
     ...(p.our ? [toCard(p.our, per, true, p.name, p.photo)] : []),
     ...sel.map(id => pool.find(l => l.id === id)!).map(l => toCard(l, per, false)),

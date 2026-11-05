@@ -9,6 +9,7 @@ import { adsDb, listFlags, type AdMp } from './store';
 import { DEFAULT_AGENT_SETTINGS } from '../../../shared/agents';
 import type { Ads2CompRefresh, Ads2Competitors, Ads2OzMarketItem, Ads2WatchLink, Ads2WatchProduct, Ads2WbPosItem } from '../../../shared/ads2';
 import { ozRow } from '../../../shared/ozCompare';
+import { peekStockSince } from '../stockSince';
 import { createTask, listSchedules, listTasks, nextCronRun } from '../agentQueue';
 import {
   getAllLinks, suggestLinks, watchedIds, addLink, setLinkStatus, removeLink, parseNmId, parseOzonSku, getLatestPrices,
@@ -597,8 +598,8 @@ function metricsIndex(mp: AdMp, data: any): Map<string, Partial<Ads2WatchLink>> 
 }
 
 /** Товары с конкурентами для вкладки: сначала те, у кого есть привязки, затем наши товары из снимка. */
-export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; catalog: { key: string; name: string }[] } {
-  const { byKey } = ourCatalog(mp);
+export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; catalog: { key: string; name: string }[]; unmapped: number } {
+  const { byKey, byId } = ourCatalog(mp);
   const links = getAllLinks(mp);
   const idx = metricsIndex(mp, data);
   const wbPrices = mp === 'wb' ? getLatestPrices(Object.values(links).flat().map(l => l.nmId)) : {};
@@ -638,6 +639,20 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
   // и все наши товары в наличии (остаток FBO+FBS > 0, как «В продаже» в «Ценах»), а не только попавшие в снимок кабинета;
   // архив без остатка и продаж не показываем — привязать к нему всё равно можно через поле «Наш товар»
   for (const [k, v] of byKey) if (v.id && v.active) keys.add(k);
+  // 05.11.2026: всё, что сейчас в продаже, — обязательно в разделе, даже если справочник РНП (раз в несколько часов)
+  // ещё не знает товар или его номер на площадке. Остатки площадок перечитываются раз в 5 минут (stockSince.ts):
+  // WB — по номеру карточки, Ozon — по артикулу продавца.
+  const inStock = new Map<string, number>();
+  for (const [k, v] of byKey) if (v.active) inStock.set(k, 0);
+  let unmapped = 0;
+  try {
+    for (const [id, since] of Object.entries(peekStockSince(mp))) {
+      const k = mp === 'wb' ? byId.get(String(id)) : up(id);
+      if (!k) { unmapped++; continue; }
+      inStock.set(k, Math.max(inStock.get(k) ?? 0, Number(since) || 0));
+    }
+  } catch (e) { console.warn('[competitors] остатки площадки не прочитаны:', (e as Error).message); }
+  for (const k of inStock.keys()) keys.add(k);
   keys.delete('');
   // архив «Рекламы» (самовыкуп, дубли) здесь не показываем — по номеру товара на площадке
   const archived = new Set(listFlags().filter(f => f.mp === mp && f.archived).map(f => f.sku));
@@ -651,14 +666,14 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     if (our?.hidden && !byKey.get(key)?.active) { our.hidden = false; our.hiddenSince = null; }
     // Порядок — как привязаны (15.10, просьба владельца): «Подтвердить» и «Не наш» строку не двигают.
     const ls = (links[key] ?? []).map(toLink);
-    return { key, ourId, name: cat?.name || our?.title || key, photo: our?.photo ?? '', our, links: ls };
+    return { key, ourId, name: cat?.name || our?.title || key, photo: our?.photo ?? '', our, links: ls, inStock: inStock.has(key), stockSince: inStock.get(key) || null };
   });
   // Порядок товаров не зависит от решений менеджера: сначала с привязками, внутри — по нашим заказам (самые продаваемые выше).
   // Наши карточки, которых не видно покупателям, — сверху: с ними надо разбираться первыми.
   watch.sort((a, b) => Number(!!b.our?.hidden) - Number(!!a.our?.hidden) || Number(b.links.length > 0) - Number(a.links.length > 0) || (b.our?.orders ?? -1) - (a.our?.orders ?? -1) || a.key.localeCompare(b.key, 'ru'));
   for (const [k, v] of fromSnap) if (!byKey.has(k)) byKey.set(k, v);
   const catalog = [...byKey.entries()].map(([key, v]) => ({ key, name: v.name })).sort((a, b) => a.key.localeCompare(b.key)).slice(0, 2000);
-  return { watch, catalog };
+  return { watch, catalog, unmapped };
 }
 
 // ─── Обновление в течение дня ───────────────────────────────────────────────

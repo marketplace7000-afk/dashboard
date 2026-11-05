@@ -1,3 +1,4 @@
+import type { Ads2OzRow } from './ozCompare';
 /**
  * «Реклама 2.0» — общие типы сервера и экрана (этап 1, 14.10.2026).
  * Сервер: api/_lib/ads/overview.ts, экран: src/pages/Ads.tsx.
@@ -172,6 +173,8 @@ export type Ads2WatchLink = {
   noSales7?: boolean;
   /** Ozon: те же показатели «Товаров на Ozon» за 28 дней (переключатель периода в «Конкурентах»). */
   oz28?: { orders: number | null; gmv: number | null; convPdp: number | null; drr: number | null; ctr?: number | null; inAds: boolean | null; inPromo: boolean | null } | null;
+  /** Ozon: все значения «Товаров на Ozon» за 7 и 28 дней — для «Расширенных показателей» (05.11.2026). */
+  ozx?: Ads2OzRow | null; ozx28?: Ads2OzRow | null;
 };
 
 /** Обновление данных конкурентов: последний проход агента и следующий по расписанию. */

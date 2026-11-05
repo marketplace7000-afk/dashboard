@@ -1718,6 +1718,35 @@ code {
   .cmp-rep-table col.cmp-rep-lab { width: 190px; }
   .sa .ad2-table.cmp-rep-table th, .sa .ad2-table.cmp-rep-table td, .cmp-rep-table th, .cmp-rep-table td { font-size: 16px; padding: 10px; }
 }
+/* Ozon: расширенные показатели (05.11.2026) */
+.oz-rep-tools { display: flex; gap: 8px; margin-left: auto; }
+.oz-rep-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 17px; }
+.oz-rep-pick .cmp-check { padding: 4px 10px; border: 1px solid var(--border, #d0d5dd); border-radius: 8px; }
+.oz-rep-pick .cmp-check.on { border-color: var(--accent); background: var(--accent-soft); }
+.oz-rep-warn { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--warn); color: var(--text); font-size: 17px; }
+.oz-rep-table { min-width: 760px; }
+.sa .ad2-table.cmp-rep-table.oz-rep-table th, .sa .ad2-table.cmp-rep-table.oz-rep-table td, .oz-rep-table th, .oz-rep-table td { font-size: 18px; padding: 10px 14px; }
+.sa .ad2-table.cmp-rep-table.oz-rep-table tr.oz-rep-group th, .oz-rep-table tr.oz-rep-group th { text-align: left; font-size: 19px; font-weight: 700; padding-top: 18px; background: var(--bg, #fff); position: static; white-space: normal; }
+.oz-rep-group th .muted { font-size: 15px; font-weight: 400; }
+.oz-rep-i { margin-left: 6px; font-size: 13px; color: var(--muted); cursor: help; }
+.oz-rep-table td.oz-lead { color: var(--good); font-weight: 700; }
+.oz-rep-table td.oz-est { color: var(--muted); }
+.oz-bar { display: block; height: 5px; margin: 6px auto 0; max-width: 140px; border-radius: 3px; background: var(--bg-2, #eef0f3); overflow: hidden; }
+.oz-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.oz-ins h3 { margin: 4px 0; font-size: 21px; }
+.oz-ins-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.oz-ins-card { border: 1px solid var(--border, #d0d5dd); border-radius: 10px; padding: 12px 14px; font-size: 17px; display: flex; flex-direction: column; gap: 10px; }
+.oz-ins-card.ours { background: var(--accent-soft); border-color: var(--accent); }
+.oz-ins-h { font-weight: 700; }
+.oz-ins-why { font-size: 15px; margin-top: 4px; }
+@media (max-width: 760px) {
+  .oz-rep-tools { margin-left: 0; flex-wrap: wrap; }
+  .oz-rep { min-width: 0; max-width: calc(100vw - 32px); }
+  .oz-rep-pick { font-size: 15px; }
+  .oz-rep-pick .cmp-check { white-space: normal; max-width: 100%; }
+  .oz-rep-table col.cmp-rep-lab { width: 150px; }
+  .sa .ad2-table.cmp-rep-table.oz-rep-table th, .sa .ad2-table.cmp-rep-table.oz-rep-table td, .oz-rep-table th, .oz-rep-table td { font-size: 15px; padding: 8px; }
+}
 .cmp-compare-btns { display: flex; flex-wrap: wrap; gap: 8px; }
 .cmp-plan { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 14px; border-radius: 10px; background: var(--accent-soft); font-size: 17px; }
 .cmp-compare-s { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: 17px; }

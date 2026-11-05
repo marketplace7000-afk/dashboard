@@ -8,6 +8,7 @@
 import { adsDb, listFlags, type AdMp } from './store';
 import { DEFAULT_AGENT_SETTINGS } from '../../../shared/agents';
 import type { Ads2CompRefresh, Ads2Competitors, Ads2OzMarketItem, Ads2WatchLink, Ads2WatchProduct, Ads2WbPosItem } from '../../../shared/ads2';
+import { ozRow } from '../../../shared/ozCompare';
 import { createTask, listSchedules, listTasks, nextCronRun } from '../agentQueue';
 import {
   getAllLinks, suggestLinks, watchedIds, addLink, setLinkStatus, removeLink, parseNmId, parseOzonSku, getLatestPrices,
@@ -574,7 +575,7 @@ function metricsIndex(mp: AdMp, data: any): Map<string, Partial<Ads2WatchLink>> 
       price: num(x.avgPrice), gmv: num(x.gmvSum ?? x.soldSum), orders: num(x.soldCount), ordersDyn: num(x.salesDynamics),
       ordersDays: num(x.soldCount) != null ? 7 : undefined, drr: num(x.drr), convPdp: num(x.pdpToCartConversion ?? x.convToCartPdp), ctr: ozCtr(x),
       inPromo: num(x.daysInPromo) != null ? Number(x.daysInPromo) > 0 : null, inAds: num(x.daysWithTrafarets) != null ? Number(x.daysWithTrafarets) > 0 : null });
-    for (const x of data?.bySku?.weekly ?? []) put(String(x.sku), ozM(x));
+    for (const x of data?.bySku?.weekly ?? []) put(String(x.sku), { ...ozM(x), ozx: ozRow(x, 7) });
     // «Товары на Ozon» за 7 дней не включает товар без продаж за неделю (проверено 20.10 по SKU):
     // если за 28 дней он есть, а за 7 нет — за неделю продано 0, выручка 0; CTR и корзину не выдумываем.
     if (data?.bySku?.weekly) {
@@ -583,13 +584,13 @@ function metricsIndex(mp: AdMp, data: any): Map<string, Partial<Ads2WatchLink>> 
     }
     for (const x of data?.bySku?.monthly ?? []) {
       const v = ozM(x);
-      put(String(x.sku), { oz28: { orders: v.orders ?? null, gmv: v.gmv ?? null, convPdp: v.convPdp ?? null, drr: v.drr ?? null, ctr: v.ctr ?? null, inAds: v.inAds ?? null, inPromo: v.inPromo ?? null } });
+      put(String(x.sku), { ozx28: ozRow(x, 28), oz28: { orders: v.orders ?? null, gmv: v.gmv ?? null, convPdp: v.convPdp ?? null, drr: v.drr ?? null, ctr: v.ctr ?? null, inAds: v.inAds ?? null, inPromo: v.inPromo ?? null } });
     }
     for (const mk of data?.markets ?? []) for (const x of mk.items ?? []) {
       put(String(x.sku), { title: x.name || undefined, brand: x.brand || undefined, seller: x.sellerName || undefined, photo: x.photo || undefined,
         price: num(x.avgPrice), gmv: num(x.gmvSum ?? x.soldSum), orders: num(x.soldCount), ordersDyn: num(x.salesDynamics),
         ordersDays: num(x.soldCount) != null ? 7 : undefined, drr: num(x.drr), convPdp: num(x.pdpToCartConversion ?? x.convToCartPdp), ctr: ozCtr(x),
-        inPromo: num(x.daysInPromo) != null ? Number(x.daysInPromo) > 0 : null, inAds: num(x.daysWithTrafarets) != null ? Number(x.daysWithTrafarets) > 0 : null });
+        inPromo: num(x.daysInPromo) != null ? Number(x.daysInPromo) > 0 : null, inAds: num(x.daysWithTrafarets) != null ? Number(x.daysWithTrafarets) > 0 : null, ozx: ozRow(x, 7) });
     }
   }
   return m;

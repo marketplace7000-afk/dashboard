@@ -19,6 +19,7 @@ import {
 import { apiGet, apiPost, errText } from '../api/http';
 import type { Ads2Mp, Ads2Competitors, Ads2WatchLink, Ads2WatchProduct, Ads2WbCompare, Ads2WbReport, Ads2WbRepRow } from '../../shared/ads2';
 import { nf0, nf1, rub, num, pct, ddmm, kRub, when, whenRel, ProductCell, PosDyn, PctDyn, MiniLines } from './ads2ui';
+import { OzCompareReport } from './OzCompareReport';
 
 type Sheet = 'watch' | 'market';
 const SHEETS: Array<[Sheet, string]> = [['watch', 'Привязка конкурентов'], ['market', 'Позиции и рынок']];
@@ -257,8 +258,8 @@ function CompareReport({ rep }: { rep: Ads2WbReport }) {
   );
 }
 
-function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7, pick, report }: {
-  p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; showIgnored: boolean; per?: OzPer; report?: Ads2WbReport;
+function WatchProduct({ p, mp, passAt, dataAt = null, showIgnored, onData, setToast, per = 7, pick, report }: {
+  p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; dataAt?: number | null; showIgnored: boolean; per?: OzPer; report?: Ads2WbReport;
   pick?: { on: boolean; toggle: () => void }; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
 }) {
   const [adding, setAdding] = useState(false);
@@ -369,6 +370,7 @@ function WatchProduct({ p, mp, passAt, showIgnored, onData, setToast, per = 7, p
       ) : <p className="muted cmp-empty">{p.links.length ? 'Все предложенные отмечены «не наш».' : 'Конкурентов пока нет.'} Добавьте своего: «+ Конкурент».</p>}
       {hidden > 0 && <div className="muted cmp-note">Скрыто «не наших»: {hidden}</div>}
       {report && <CompareReport rep={report} />}
+      {mp === 'ozon' && <OzCompareReport p={p} perDefault={per} dataAt={dataAt} setToast={setToast} />}
     </div>
   );
 }
@@ -525,7 +527,7 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
         </section>
       )}
       {list.length === 0 && <div className="card muted">{all || needle || onlyPending ? 'Ничего не найдено.' : 'Привязок пока нет. Предложения появятся после ночного прохода агента; своего конкурента можно привязать в «Все товары».'}</div>}
-      {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} per={per} showIgnored={showIgnored} onData={onData} setToast={setToast}
+      {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} dataAt={d.refresh.fullAt} per={per} showIgnored={showIgnored} onData={onData} setToast={setToast}
         pick={mp === 'wb' && d.wbCompare ? { on: picks.has(p.key), toggle: () => togglePick(p.key) } : undefined}
         report={mp === 'wb' && p.ourId ? d.wbReports?.[p.ourId] : undefined} />)}
       {list.length > more && <button className="btn" onClick={() => setMore(m => m + 20)}>Показать ещё ({list.length - more})</button>}

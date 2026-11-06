@@ -8,11 +8,13 @@
  * пароля или «Выйти на всех устройствах» сразу выбрасывает человека из
  * кабинета. Кнопка в карточке «Вход владельца» выкидывает всех, кто вошёл
  * по общему паролю владельца.
+ * Второй лист — «Активность» (AccessActivity.tsx): кто когда работал и где.
  * Сервер: api/_lib/access.ts.
  */
 import { useEffect, useState } from 'react';
 import { PlusIcon, WarningIcon, CopyIcon, ArrowsClockwiseIcon, XIcon, EyeIcon, EyeSlashIcon, SignOutIcon } from '@phosphor-icons/react';
 import { apiGet, apiPost, errText } from '../api/http';
+import { AccessActivity } from './AccessActivity';
 
 type Role = 'owner' | 'manager' | 'buyer' | 'warehouse';
 type User = {
@@ -54,6 +56,7 @@ export function Access() {
   const [edit, setEdit] = useState<User | 'new' | null>(null);
   const [issued, setIssued] = useState<{ name: string; login: string; password: string } | null>(null);
   const [journal, setJournal] = useState<JournalRow[] | null>(null);
+  const [tab, setTab] = useState<'accounts' | 'activity'>('accounts');
 
   const load = () => apiGet<Data>('/api/access').then(r => { setData(r.data); setError(null); }).catch(e => setError(err(e)));
   useEffect(() => { load(); }, []);
@@ -71,10 +74,15 @@ export function Access() {
             <h2>Доступы сотрудников</h2>
             <p className="muted">Вы сами придумываете логин и пароль и передаёте их человеку. Он входит на e-avtovibe.ru с этим логином и паролем. Пароль виден в таблице — нажмите на глаз или «Скопировать», чтобы переслать заново.</p>
           </div>
-          <button className="btn btn-primary" onClick={() => setEdit('new')}><PlusIcon size={16} /> Добавить человека</button>
+          {tab === 'accounts' && <button className="btn btn-primary" onClick={() => setEdit('new')}><PlusIcon size={16} /> Добавить человека</button>}
+        </div>
+        <div className="row gap-8 aa-tabs">
+          <button className={`mp-tab ${tab === 'accounts' ? 'active' : ''}`} onClick={() => setTab('accounts')}>Учётки</button>
+          <button className={`mp-tab ${tab === 'activity' ? 'active' : ''}`} onClick={() => setTab('activity')}>Активность</button>
         </div>
       </div>
 
+      {tab === 'activity' ? <AccessActivity /> : <>
       <OwnerCard onError={setError} />
 
       {issued && <IssuedCard {...issued} onClose={() => setIssued(null)} />}
@@ -120,6 +128,7 @@ export function Access() {
         <UserModal data={data} user={edit === 'new' ? null : edit} onClose={() => setEdit(null)}
           onSaved={(u, pw) => { setEdit(null); if (pw) setIssued({ name: u.name, login: u.login, password: pw }); load(); }} />
       )}
+      </>}
     </div>
   );
 }

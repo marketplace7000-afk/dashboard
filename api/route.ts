@@ -61,6 +61,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Подбор пароля: 5 неудач с адреса — пауза 15 минут (api/_lib/loginGuard.ts).
       const { clientIp, loginLockedFor, noteLoginFailure, noteLoginSuccess } = await import('./_lib/loginGuard');
       const ip = clientIp(req);
+      // Журнал входов для листа «Активность» в «Доступах»; сбой журнала вход не ломает.
+      const track = (kind: 'login' | 'login_fail', uid: number | null) => import('./_lib/activity')
+        .then(a => a.noteAuthEvent(req, kind, uid, login, ip)).catch(e => console.warn('[activity]', (e as Error).message));
       const wait = loginLockedFor(ip, login);
       if (wait > 0) {
         res.setHeader('Retry-After', String(wait));
@@ -74,10 +77,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const u = loginWithPassword(login, password);
           if (!u || u.id === null) {
             noteLoginFailure(ip, login);
+            await track('login_fail', null);
             await new Promise(r => setTimeout(r, 800));
             return res.status(401).json({ error: 'wrong_password' });
           }
           noteLoginSuccess(ip, login);
+          await track('login', u.id);
           const secret = process.env.AUTH_SECRET || process.env.AUTH_PASSWORD;
           setSessionCookie(res, signSession(secret, { uid: u.id, ver: sessionVersion(u.id) }));
           return res.status(200).json({ ok: true, user: { name: u.name, role: u.role } });
@@ -87,10 +92,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (!checkPassword(password)) {
         noteLoginFailure(ip, login);
+        await track('login_fail', null);
         await new Promise(r => setTimeout(r, 800));
         return res.status(401).json({ error: 'wrong_password' });
       }
       noteLoginSuccess(ip, login);
+      await track('login', 0);
       const secret = process.env.AUTH_SECRET || process.env.AUTH_PASSWORD;
       setSessionCookie(res, signSession(secret));
       return res.status(200).json({ ok: true });
@@ -169,6 +176,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ─── Все остальные секции требуют auth ───────────────────────────────────
   if (!agentIngestOk && !requireAuth(req, res)) return;
+
+  // ─── /api/activity/ping — «человек на месте» для листа «Активность» ───────
+  // Раньше проверки разделов: пинг шлют все, включая сотрудников склада.
+  if (section === 'activity' && rest[0] === 'ping' && !agentIngestOk) {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
+    try {
+      const b = (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body ?? {}) as { section?: string; active?: boolean; view?: boolean };
+      const { notePing, OWNER_UID } = await import('./_lib/activity');
+      notePing(authUser(req).id ?? OWNER_UID, String(b.section ?? ''), !!b.active, !!b.view);
+    } catch (e) {
+      console.warn('[activity] ping:', (e as Error).message);
+    }
+    return res.status(204).end();
+  }
 
   // ─── Роли: закупщику и сотруднику склада открыт только раздел «Склад» ─────
   // (цены, реклама, финансы и себестоимость им не положены). Проверка здесь,

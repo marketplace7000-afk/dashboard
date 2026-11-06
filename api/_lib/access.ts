@@ -39,6 +39,30 @@ export async function handleAccess(req: VercelRequest, res: VercelResponse, rest
       return res.status(200).json({ ok: true });
     }
 
+    if (req.method !== 'POST' && a === 'activity') {
+      // Лист «Активность»: все учётки за день или один человек по дням (api/_lib/activity.ts).
+      const act = await import('./activity');
+      const q = req.query ?? {};
+      // Сотрудники сверху, вход по общему паролю владельца — последней строкой.
+      const people = [
+        ...users.listUsers().map(u => ({ uid: u.id, login: u.login, name: u.name, role: u.role, active: u.active })),
+        { uid: act.OWNER_UID, login: '', name: 'Вход по паролю владельца', role: 'owner', active: true },
+      ];
+      const labels = { ...users.SECTION_LABEL, access: 'Доступы', cards: 'Ведение карточек' } as Record<string, string>;
+      if (q.uid !== undefined) {
+        const p = people.find(x => x.uid === Number(q.uid));
+        if (!p) return res.status(404).json({ ok: false, error: 'Учётка не найдена' });
+        const n = Math.min(Math.max(Number(q.days) || 14, 1), 60);
+        return res.status(200).json({ ok: true, person: p, labels, days: act.daysBack(n).map(d => act.dayReport(p.uid, p.login, d)) });
+      }
+      const day = act.isDay(q.day) ? q.day : act.daysBack(1)[0];
+      return res.status(200).json({
+        ok: true, day, labels,
+        people: people.map(p => ({ ...p, report: act.dayReport(p.uid, p.login, day), lastSeen: act.lastSeen(p.uid) })),
+        unknownFailures: act.unknownFailures(day, people.map(p => p.login)),
+      });
+    }
+
     if (req.method !== 'POST') {
       if (a === 'journal') {
         return res.status(200).json({ ok: true, journal: listAudit({ entity: 'user', limit: 200 }) });

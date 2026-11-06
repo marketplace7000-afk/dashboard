@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useActivityPing } from './utils/activityPing';
 import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, PaperPlaneTiltIcon,
   GearIcon,
@@ -126,6 +127,9 @@ export function App() {
       })
       .catch(e => { noteSwallowed('auth', 'роль не получена — считаем владельцем', e); setMe(OWNER); prefetchAll(); });
   }, [logged]);
+
+  // Лист «Активность» в «Доступах»: когда человек на месте и в каком разделе.
+  useActivityPing(logged && !!me, page);
 
   // Сессия истекла — возвращаем на экран входа. Раньше каждый запрос молча
   // получал 401, а интерфейс рисовал нули, будто бизнес встал (инцидент 11.08).

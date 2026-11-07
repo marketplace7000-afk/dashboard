@@ -401,7 +401,7 @@ export function upsertSchedule(s: { id?: number; type: AgentTaskType; params?: R
  * Расписания по умолчанию (МСК). Агент 3 «Конкуренты» — ночью, раньше цен покупателя
  * в 06:00, раз в сутки: отчёты аналитики кабинетов обновляются за прошедший день (14.10.2026).
  */
-const DEFAULT_SCHEDULES: { type: AgentTaskType; marketplace: 'wb' | 'ozon'; cron: string; light?: boolean }[] = [
+const DEFAULT_SCHEDULES: { type: AgentTaskType; marketplace: 'wb' | 'ozon'; cron: string; light?: boolean; positions?: boolean }[] = [
   { type: 'competitor_watch', marketplace: 'wb', cron: '40 5 * * *' },
   { type: 'competitor_watch', marketplace: 'ozon', cron: '50 5 * * *' },
   // 15.10: днём — быстрые проходы по витрине (цены, рейтинг, остаток конкурентов), без аналитики кабинета.
@@ -410,6 +410,8 @@ const DEFAULT_SCHEDULES: { type: AgentTaskType; marketplace: 'wb' | 'ozon'; cron
   { type: 'competitor_watch', marketplace: 'wb', cron: '50 14,16 * * *', light: true },
   { type: 'competitor_watch', marketplace: 'ozon', cron: '15 11 * * *', light: true },
   { type: 'competitor_watch', marketplace: 'ozon', cron: '45 14,16 * * *', light: true },
+  // 07.11.2026: места в живом поиске Ozon (≈15 мин на 35 товаров) — в 04:30, когда другие агенты не работают.
+  { type: 'competitor_watch', marketplace: 'ozon', cron: '30 4 * * *', positions: true },
 ];
 /** Старые расписания по умолчанию, которые заменены новыми: переписать cron, а не плодить дубли. */
 const RESCHEDULED: Record<string, string> = { '40 11,16 * * *': '20 11 * * *', '50 11,16 * * *': '15 11 * * *' };
@@ -421,10 +423,11 @@ function ensureDefaultSchedules(d: any): void {
   }
   for (const s of DEFAULT_SCHEDULES) {
     const exists = d.prepare(`SELECT 1 FROM agent_schedules WHERE type = ? AND json_extract(params, '$.marketplace') = ?
-      AND COALESCE(json_extract(params, '$.light'), 0) = ? AND (? = 0 OR cron = ?)`).get(s.type, s.marketplace, s.light ? 1 : 0, s.light ? 1 : 0, s.cron);
+      AND COALESCE(json_extract(params, '$.light'), 0) = ? AND COALESCE(json_extract(params, '$.positions'), 0) = ?
+      AND (? = 0 OR cron = ?)`).get(s.type, s.marketplace, s.light ? 1 : 0, s.positions ? 1 : 0, s.light ? 1 : 0, s.cron);
     if (exists) continue;
     d.prepare('INSERT INTO agent_schedules(type, params, cron, enabled, next_run_at, created_at) VALUES (?, ?, ?, 1, ?, ?)')
-      .run(s.type, J(s.light ? { marketplace: s.marketplace, light: true } : { marketplace: s.marketplace }), s.cron, nextCronRun(s.cron, now()), now());
+      .run(s.type, J(s.light ? { marketplace: s.marketplace, light: true } : s.positions ? { marketplace: s.marketplace, positions: true } : { marketplace: s.marketplace }), s.cron, nextCronRun(s.cron, now()), now());
   }
   // WB Global (04.11.2026): Агент 1 снимает витрину китайского кабинета — из неё
   // курс WB и СПП для листа «WB Global». Через 25 минут после основного прохода WB.

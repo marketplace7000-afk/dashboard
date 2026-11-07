@@ -635,7 +635,8 @@ export function LiveWbPricing() {
                             ];
                             const rows: { l: string; v: number }[] = c ? [
                               { l: 'Себестоимость', v: -c.breakdown.cost },
-                              { l: `Комиссия WB (${inp.commission}%) · ${wbScheme}${k.commission !== undefined ? ' · вручную' : econRow?.commissionPct.origin === 'fact-report' ? ' · факт за 30 дн' : econRow?.commissionPct.origin === 'tariffs' ? ' · тариф WB сейчас + поправка по факту' : catComm != null ? ' · тариф WB' : ''}`, v: -c.breakdown.commission },
+                              // Подпись без «поправок» (просьба владельца 07.11): просто комиссия WB по данным API.
+                              { l: `Комиссия WB (${inp.commission}%) · ${wbScheme}${k.commission !== undefined ? ' · вручную' : ''}`, v: -c.breakdown.commission },
                               { l: `Логистика${econRow?.logisticFact?.value != null ? ' · факт за 30 дн' : logFromApi != null ? ` · тариф (${volL.toFixed(2)} л)` : ''}`, v: -c.breakdown.logistic },
                               { l: `Хранение${econRow?.storageRub.origin === 'fact-report' ? ' · факт WB за 30 дн' : storFromApi != null ? ' · тариф (30 дн)' : ''}`, v: -c.breakdown.storage },
                               { l: `Обратная логистика${k.buyout === undefined && econRow?.returnFact?.value != null ? ` · факт за 30 дн (выкуп ${Math.max(1, inp.buyout)}%)` : ` (выкуп ${Math.max(1, inp.buyout)}% · невыкуп ${100 - Math.max(1, inp.buyout)}%)`}`, v: -c.breakdown.returnCost },

@@ -150,6 +150,11 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
           const { visibilityPlan } = await import('./cardVisibility');
           task.params = { ...task.params, visibility: await visibilityPlan() };
         } catch (e) { console.warn('[cards] план видимости не собран:', (e as Error)?.message); }
+        // 07.11.2026: места в поиске нашего товара и его конкурентов по главному запросу — столбец «Позиция» в «Конкурентах».
+        try {
+          const { searchPosPlan } = await import('./ozSearchPos');
+          task.params = { ...task.params, searchPos: await searchPosPlan() };
+        } catch (e) { console.warn('[competitors] план позиций Ozon не собран:', (e as Error)?.message); }
       }
     }
     res.status(200).json({ task, settings: getSettings() });

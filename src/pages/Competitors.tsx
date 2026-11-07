@@ -109,9 +109,9 @@ type OzPer = 7 | 28;
  *  Ozon — место по главному запросу из «Видимости в поиске» (снимок есть только у закреплённых карточек). */
 function PosCell({ l, mp, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; posQuery?: Ads2WatchProduct['posQuery'] }) {
   if (mp === 'wb') return <td className="ad2-num" title={l.avgPos != null ? 'Средняя позиция в поиске WB' : 'WB не отдал позицию: конкурента нет в открытом «Сравнении карточек»'}>{num(l.avgPos)}</td>;
-  if (!posQuery) return <td className="ad2-num"><span className="muted" title="Позиция снимается «Видимостью в поиске» только для карточек, закреплённых в «Ведении карточек»">–</span></td>;
+  if (!posQuery) return <td className="ad2-num"><span className="muted" title="Позиция Ozon появится после ночного прохода агента">–</span></td>;
   const tip = `по запросу «${posQuery.query}», снято ${whenRel(posQuery.at)}`;
-  return <td className="ad2-num" title={tip}>{l.searchPos != null ? num(l.searchPos) : <span className="muted">дальше 10</span>}</td>;
+  return <td className="ad2-num" title={tip}>{l.searchPos != null ? num(l.searchPos) : <span className="muted">{posQuery.full ? 'нет в выдаче' : 'дальше 10'}</span>}</td>;
 }
 
 function CmpCells({ l, mp, our, passAt, per = 7, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2WatchLink | null; passAt: number | null; per?: OzPer; posQuery?: Ads2WatchProduct['posQuery'] }) {
@@ -336,7 +336,7 @@ function WatchProduct({ p, mp, passAt, dataAt = null, onData, setToast, per = 7,
           <table className="ad2-table cmp-table">
             <thead><tr>
               <th className="cmp-col-prod">Товар</th>
-              <th className="ad2-num">Цена</th><th className="ad2-num" title={mp === 'wb' ? 'Средняя позиция в поиске WB: из «Сравнения карточек» (30 дней), у нашего товара без сравнения — из «Поисковых запросов» (7 дней). Меньше — выше в выдаче' : p.posQuery ? `Место в поиске Ozon по запросу «${p.posQuery.query}», снимок «Видимости в поиске» ${whenRel(p.posQuery.at)}. «Дальше 10» — конкурента нет в первой десятке` : 'Позицию Ozon снимает «Видимость в поиске» — пока только для карточек, закреплённых в «Ведении карточек»'}>Позиция</th>
+              <th className="ad2-num">Цена</th><th className="ad2-num" title={mp === 'wb' ? 'Средняя позиция в поиске WB: из «Сравнения карточек» (30 дней), у нашего товара без сравнения — из «Поисковых запросов» (7 дней). Меньше — выше в выдаче' : p.posQuery ? `Место в поиске Ozon по главному запросу нашего товара «${p.posQuery.query}» — «Видимость в поиске», снято ${whenRel(p.posQuery.at)}. Меньше — выше в выдаче${p.posQuery.full ? '' : '. «Дальше 10» — конкурента нет в первой десятке'}` : 'Позицию Ozon агент снимает ночью по главному запросу товара — появится после ближайшего ночного прохода'}>Позиция</th>
               <th className="ad2-num">Рейтинг</th><th className="ad2-num">Отзывы</th>
               {mp === 'wb'
                 ? <><th className="ad2-num" title="CTR в поиске: переходы в карточку ÷ показы. Из «Сравнения карточек» WB (30 дней); у нашего товара без сравнения — «Поисковые запросы» за 7 дней. Зависит и от фото, и от позиции/рекламы">CTR</th><th className="ad2-num" title="Из «Сравнения карточек» WB за 30 дней; у нашего товара без открытого сравнения — за 7 дней">Заказы, 30 дн</th></>

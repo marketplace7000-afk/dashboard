@@ -267,7 +267,7 @@ async function fetchWb(nm: string): Promise<CardQuery[]> {
   }));
 }
 
-async function fetchOzon(ozonSku: string): Promise<CardQuery[]> {
+export async function fetchOzon(ozonSku: string): Promise<CardQuery[]> {
   const r = await fetchWithRetry('https://api-seller.ozon.ru/v1/analytics/product-queries/details', {
     method: 'POST',
     headers: { 'Client-Id': process.env.OZON_CLIENT_ID ?? '', 'Api-Key': process.env.OZON_API_KEY ?? '', 'Content-Type': 'application/json' },

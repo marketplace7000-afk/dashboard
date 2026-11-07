@@ -49,7 +49,7 @@ function db(): any {
 }
 
 /** Москва, если там есть остаток; иначе кластер с наибольшим остатком; нет данных — Москва с пометкой. */
-function pickRegion(article: string, fbo: Awaited<ReturnType<typeof getFbo>>['data']): { region: VisRegion; why: string } {
+export function pickRegion(article: string, fbo: Awaited<ReturnType<typeof getFbo>>['data']): { region: VisRegion; why: string } {
   if (!fbo) return { region: MOSCOW, why: 'остатки по складам недоступны' };
   const art = article.toUpperCase();
   const qty = new Map<string, number>();

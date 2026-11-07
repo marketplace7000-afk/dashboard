@@ -694,6 +694,11 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
           const { collectCardQueries } = await import('./cards');
           console.warn('[warm-extras] ведение карточек:', await collectCardQueries());
         } catch (e) { console.warn('[warm-extras] запросы карточек не собраны:', (e as Error)?.message); }
+        // Главные поисковые запросы товаров Ozon с конкурентами — для ночного снятия позиций (раз в неделю на товар).
+        try {
+          const { collectMainQueries } = await import('./ozSearchPos');
+          console.warn('[warm-extras] конкуренты Ozon:', await collectMainQueries());
+        } catch (e) { console.warn('[warm-extras] главные запросы Ozon не собраны:', (e as Error)?.message); }
 
         // История финансов по дням для главной (выбор периода в календаре).
         try {

@@ -20,6 +20,7 @@ import { wbImageUrl } from '../wbBasket';
 import { onWbSnapshot, compareState, compareReports } from './wbCompare';
 import { saveCompQueries } from '../cards';
 import { saveVisibility, searchPositions } from '../cardVisibility';
+import { saveSearchPos, latestSearchPos } from '../ozSearchPos';
 
 const KEEP = 30;
 
@@ -261,6 +262,10 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
   if (mp === 'ozon' && Array.isArray(data.visibility)) {
     try { saveVisibility(data.visibility, at, new Date(at + 3 * 3_600_000).toISOString().slice(0, 10)); } catch (e) { console.warn('[cards] видимость не записана:', (e as Error)?.message); }
     delete data.visibility;   // в снимке кабинета не храним — она в своей таблице
+  }
+  if (mp === 'ozon' && Array.isArray(data.searchPos)) {
+    try { saveSearchPos(data.searchPos, at, new Date(at + 3 * 3_600_000).toISOString().slice(0, 10)); } catch (e) { console.warn('[competitors] позиции Ozon не записаны:', (e as Error)?.message); }
+    delete data.searchPos;
   }
   if (mp === 'wb') saveCompLast(data.compDetails, at);
   // Запросы сравнений с цифрами по карточкам — в свою таблицу; снимок кабинета остаётся прежнего размера (5 запросов, без цифр).
@@ -598,6 +603,7 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
   const archived = new Set(listFlags().filter(f => f.mp === mp && f.archived).map(f => f.sku));
   for (const k of [...keys]) { const id = byKey.get(k)?.id || fromSnap.get(k)?.id; if (id && archived.has(String(id))) keys.delete(k); }
   const arch = getArchived(mp);
+  const ozPos = mp === 'ozon' ? latestSearchPos() : new Map();
   const watch: Ads2WatchProduct[] = [...keys].map(key => {
     const cat = byKey.get(key)?.id ? byKey.get(key) : fromSnap.get(key) ?? byKey.get(key);
     const ourId = cat?.id ?? '';
@@ -609,7 +615,13 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     const ls = (links[key] ?? []).map(toLink);
     // Ozon: позиция в поиске по главному запросу из «Видимости в поиске» (только у закреплённых карточек).
     let posQuery: Ads2WatchProduct['posQuery'] = null;
-    if (mp === 'ozon') {
+    const ap = mp === 'ozon' ? ozPos.get(key) : undefined;
+    if (ap) {
+      // Ночной проход агента: точные места нашего и каждого конкурента по главному запросу (null — нет в выдаче).
+      posQuery = { query: ap.query, at: ap.at, full: true };
+      if (our) our.searchPos = ap.pos[ourId] ?? null;
+      for (const l of ls) l.searchPos = ap.pos[l.id] ?? null;
+    } else if (mp === 'ozon') {
       const sp = searchPositions(key);
       if (sp) {
         posQuery = { query: sp.query, at: sp.at };

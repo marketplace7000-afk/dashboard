@@ -571,6 +571,11 @@ export function LiveWbPricing() {
                           {Object.keys(k).length > 0 && (
                             <div style={{ fontSize: 17, color: 'var(--accent)' }} title="Маржа посчитана по ручным значениям из раскрытой строки. Они снимутся сами, как только по этим полям придут новые данные, или кнопкой «Сбросить».">✎ ручной расчёт</div>
                           )}
+                          {econRow?.commissionChange && (
+                            <div style={{ fontSize: 17, color: 'var(--warn)' }} title={`WB сменил ставку комиссии по предмету с ${econRow.commissionChange.since.split('-').reverse().join('.')}: было ${econRow.commissionChange.from}%, стало ${econRow.commissionChange.to}%. Маржа уже посчитана по новой ставке.`}>
+                              ⚠ ком. WB {econRow.commissionChange.from}→{econRow.commissionChange.to}% с {econRow.commissionChange.since.slice(8, 10)}.{econRow.commissionChange.since.slice(5, 7)}
+                            </div>
+                          )}
                           {commIsDefault && (
                             <div style={{ fontSize: 17, color: 'var(--warn)' }} title={`Комиссия WB не пришла из API — взят дефолт ${WB_DEFAULTS.commission}%. Реальная (обычно ~35.5% для автотоваров) может быть выше → маржа завышена. Раскрой строку и задай комиссию.`}>⚠ ком. {WB_DEFAULTS.commission}%</div>
                           )}
@@ -630,7 +635,7 @@ export function LiveWbPricing() {
                             ];
                             const rows: { l: string; v: number }[] = c ? [
                               { l: 'Себестоимость', v: -c.breakdown.cost },
-                              { l: `Комиссия WB (${inp.commission}%) · ${wbScheme}${k.commission !== undefined ? ' · вручную' : econRow?.commissionPct.origin === 'fact-report' ? ' · факт за 30 дн' : econRow?.commissionPct.origin === 'tariffs' ? ' · тариф WB с поправкой' : catComm != null ? ' · тариф WB' : ''}`, v: -c.breakdown.commission },
+                              { l: `Комиссия WB (${inp.commission}%) · ${wbScheme}${k.commission !== undefined ? ' · вручную' : econRow?.commissionPct.origin === 'fact-report' ? ' · факт за 30 дн' : econRow?.commissionPct.origin === 'tariffs' ? ' · тариф WB сейчас + поправка по факту' : catComm != null ? ' · тариф WB' : ''}`, v: -c.breakdown.commission },
                               { l: `Логистика${econRow?.logisticFact?.value != null ? ' · факт за 30 дн' : logFromApi != null ? ` · тариф (${volL.toFixed(2)} л)` : ''}`, v: -c.breakdown.logistic },
                               { l: `Хранение${econRow?.storageRub.origin === 'fact-report' ? ' · факт WB за 30 дн' : storFromApi != null ? ' · тариф (30 дн)' : ''}`, v: -c.breakdown.storage },
                               { l: `Обратная логистика${k.buyout === undefined && econRow?.returnFact?.value != null ? ` · факт за 30 дн (выкуп ${Math.max(1, inp.buyout)}%)` : ` (выкуп ${Math.max(1, inp.buyout)}% · невыкуп ${100 - Math.max(1, inp.buyout)}%)`}`, v: -c.breakdown.returnCost },

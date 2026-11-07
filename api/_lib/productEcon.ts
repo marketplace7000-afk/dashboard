@@ -28,11 +28,12 @@
  */
 import { getCosts, normSku, resolveCost } from './costs';
 import { getWbCardEcon } from './wbCardEcon';
-import { commissionFor } from './wbCommissions';
+import { commissionFor, getWbCommissions, getWbCommissionHistory, recentChange, type WbSubjectRates } from './wbCommissions';
 import { getWbBoxTariffs } from './wbBoxTariffs';
 import { collectAdsBySku } from './agents/adsAdvisor';
 import { getTotalRevenue } from './ads/totalRevenue';
 import { getLogisticsFactCached, type FactItem } from './logisticsFact';
+import { updateOzonCommissionHistory } from './ozonCommissionHistory';
 import { getSettings, type Fulfilment } from './settings';
 import { cacheGet, makeUpstreamCacheKey } from './cache';
 import { noteSwallowed } from './log';
@@ -61,6 +62,8 @@ export type ProductEcon = {
   commissionPct: Val;
   /** Эквайринг, % от цены до СПП (07.11.2026: факт WB из финотчёта; у Ozon — null, экран берёт из цен API). */
   acquiringPct: Val;
+  /** Площадка сменила ставку комиссии за последние 2 недели (WB — по истории ставок). */
+  commissionChange?: { since: string; from: number; to: number };
   logisticRub: Val;
   storageRub: Val;
   /** ДРР за оба окна и что из них взято в расчёт (16.09.2026: база — 7 дн, при <5 заказах — 30 дн, иначе среднее по магазину). */
@@ -285,22 +288,24 @@ export async function buildProductEcon(days = 7): Promise<EconReport> {
   const period = `${days} дн.`;
 
   // ── WB ──
-  // 07.11.2026 (решение владельца: «всё брать актуальное с WB»). Комиссия и
-  // эквайринг — то, что WB реально удержал за 30 дней по финотчёту. Тариф
-  // tariffs/commission с фактом не совпадает (при FBS WB брал на ~3,3 п. меньше
-  // ставки FBS), поэтому для товаров без продаж берём тариф с поправкой: средней
-  // разницей «факт − тариф» по проданным товарам магазина.
+  // 07.11.2026 (решения владельца: «всё брать актуальное с WB» и «поменяли
+  // комиссию — сразу видно в ценах»). Комиссия = ТЕКУЩИЙ тариф WB (обновляется
+  // раз в час) + поправка: насколько реально удержанное за 30 дн отличалось от
+  // тарифа, действовавшего в день продажи. Тариф сам по себе с фактом не совпадает
+  // (07.11 при FBS WB брал на ~3,3 п. меньше ставки FBS), а чистый факт за 30 дн
+  // отстаёт от смены ставок на недели. Нет продаж у товара — поправка магазина.
   const MIN_UNITS = 3;
   const wbModel = settings.wbFulfilment;
-  let dSum = 0, dW = 0;
-  for (const [, nmId] of skuNm) {
-    const w = fact?.wb?.[String(nmId)]?.d30;
-    const tariff = commissionFor(wbEcon?.items?.[String(nmId)]?.rates, wbModel);
-    if (!w || w.units < MIN_UNITS || w.commissionPct == null || w.rev <= 0 || tariff == null) continue;
-    dSum += (w.commissionPct - tariff) * w.rev; dW += w.rev;
-  }
-  const commDelta = dW > 0 ? Math.round((dSum / dW) * 10) / 10 : 0;
+  const ratesNow = await getWbCommissions().catch(() => null);
+  const hist = await getWbCommissionHistory().catch(() => ({} as Record<string, never>));
+  const rateBySubject = new Map<string, WbSubjectRates>();
+  for (const r of Object.values(ratesNow?.items ?? {})) if (r.subjectName) rateBySubject.set(r.subjectName, r);
   const st = fact?.wbStore;
+  const deltaOf = (w: { deltaFbo: number | null; deltaFbs: number | null } | undefined): number | null =>
+    w ? (wbModel === 'fbs' ? w.deltaFbs : w.deltaFbo) ?? null : null;
+  const storeDelta = deltaOf(st);
+  const fmtD = (d: number) => `${d >= 0 ? '+' : '−'} ${Math.abs(d)} п.`;
+  const changed = new Set<string>();
   const storeAcqPct = st && st.rev > 0 ? Math.round((st.acqRub / st.rev) * 10000) / 100 : null;
   // Хранение WB приходит одной суммой на магазин — делим на проданные штуки.
   // Товар почти весь на FBS (своём складе), поэтому тариф склада WB × 30 дней,
@@ -315,17 +320,26 @@ export async function buildProductEcon(days = 7): Promise<EconReport> {
     const w = fact?.wb?.[String(nmId)]?.d30;
     const enough = !!w && w.units >= MIN_UNITS && w.rev > 0;
 
+    const subj = econ?.subject ?? '';
+    const tariffNow = commissionFor(rateBySubject.get(subj) ?? econ?.rates, wbModel);
+    const itemDelta = enough ? deltaOf(w) : null;
+    const delta = itemDelta ?? storeDelta;
     let commissionPct: Val;
-    if (enough && w!.commissionPct != null) {
-      commissionPct = val(w!.commissionPct, 'fact-report', `факт за 30 дн · продано ${w!.units} шт · удержано ${w!.commRub} ₽`);
-    } else if (econ?.commission != null) {
-      const est = Math.round((econ.commission + commDelta) * 10) / 10;
-      commissionPct = val(est, 'tariffs', `тариф WB ${econ.commission}% (${wbModel.toUpperCase()})` +
-        (commDelta !== 0 ? ` ${commDelta > 0 ? '+' : '−'} ${Math.abs(commDelta)} п. — поправка по факту магазина` : '') +
-        ' · у товара мало продаж за 30 дн');
+    if (tariffNow != null) {
+      const est = Math.round((tariffNow + (delta ?? 0)) * 10) / 10;
+      commissionPct = val(est, 'tariffs', `тариф WB сейчас ${tariffNow}% (${wbModel.toUpperCase()})` +
+        (delta != null && delta !== 0
+          ? ` ${fmtD(delta)} — ${itemDelta != null ? `по факту продаж товара за 30 дн (${w!.units} шт)` : 'поправка по факту магазина, у товара мало продаж'}`
+          : ''));
+    } else if (enough && w!.commissionPct != null) {
+      commissionPct = val(w!.commissionPct, 'fact-report', `тарифа WB нет — факт за 30 дн · продано ${w!.units} шт`);
     } else {
       commissionPct = none(`WB не дал ставку комиссии для схемы ${wbModel.toUpperCase()}`);
     }
+    // Смена ставки WB за 2 недели — показываем на экране, чтобы было видно, откуда сдвиг маржи.
+    const ch = subj ? recentChange(hist, subj, wbModel) : null;
+    const commissionChange = ch && ch.from != null && ch.to != null ? { since: ch.since, from: ch.from, to: ch.to } : undefined;
+    if (commissionChange) changed.add(`${subj}: ${ch!.from} → ${ch!.to}% с ${ch!.since.slice(8, 10)}.${ch!.since.slice(5, 7)}`);
 
     const acquiringPct: Val = enough && w!.acquiringPct != null
       ? val(w!.acquiringPct, 'fact-report', `факт за 30 дн · ${w!.acqRub} ₽`)
@@ -339,6 +353,7 @@ export async function buildProductEcon(days = 7): Promise<EconReport> {
       ...pickDrr(ads.wb, ads30.wb, String(nmId), totals7?.wbOrdersByNm.get(String(nmId)) ?? 0, period),
       ...factVals(fact?.wb?.[String(nmId)]),
       commissionPct,
+      ...(commissionChange ? { commissionChange } : {}),
       acquiringPct,
       // Логистика считается от объёма карточки. Без габаритов её
       // считать не от чего — это тоже «нет данных», а не ноль.
@@ -352,15 +367,20 @@ export async function buildProductEcon(days = 7): Promise<EconReport> {
           : none(volL > 0 ? 'тарифы хранения недоступны' : 'в карточке не заполнены габариты'),
     };
   }
-  if (commDelta !== 0) diagnostics.push(`WB: комиссия по факту отличается от тарифа на ${commDelta > 0 ? '+' : ''}${commDelta} п. — у товаров без продаж тариф поправлен на эту разницу`);
+  if (changed.size) diagnostics.push(`WB изменил комиссию: ${[...changed].join('; ')}`);
 
   // ── Ozon ──
   const ozon: Record<string, ProductEcon> = {};
+  const ozHist = await updateOzonCommissionHistory(ozRows, normSku).catch(() => ({}));
+  const ozChanged: string[] = [];
   for (const row of ozRows) {
     const sku = normSku(row?.offer_id);
     if (!sku) continue;
     const rates = ozonRatesFor(row, settings.ozonFulfilment);
     const model = settings.ozonFulfilment.toUpperCase();
+    const och = recentChange(ozHist, sku, settings.ozonFulfilment);
+    const ozChange = och && och.from != null && och.to != null ? { since: och.since, from: och.from, to: och.to } : undefined;
+    if (ozChange) ozChanged.push(`${sku}: ${ozChange.from} → ${ozChange.to}%`);
     ozon[sku] = {
       sku,
       cost: costOf(sku),
@@ -369,6 +389,7 @@ export async function buildProductEcon(days = 7): Promise<EconReport> {
       commissionPct: rates.commissionPct != null
         ? val(rates.commissionPct, 'tariffs', `схема ${model}`)
         : none(`Ozon не дал ставку комиссии для схемы ${model}`),
+      ...(ozChange ? { commissionChange: ozChange } : {}),
       acquiringPct: none('у Ozon эквайринг берётся из цен API на экране'),
       logisticRub: rates.logisticRub != null
         ? val(Math.round(rates.logisticRub), 'tariffs', `схема ${model}`)
@@ -377,6 +398,8 @@ export async function buildProductEcon(days = 7): Promise<EconReport> {
       storageRub: none('Ozon не отдаёт стоимость хранения по товару'),
     };
   }
+
+  if (ozChanged.length) diagnostics.push(`Ozon изменил комиссию: ${ozChanged.slice(0, 10).join('; ')}${ozChanged.length > 10 ? ` и ещё ${ozChanged.length - 10}` : ''}`);
 
   // Товары, которые есть в справочнике себестоимости, но которых нет ни в одной
   // площадке, специально НЕ добавляем: экономика без цены бессмысленна, а

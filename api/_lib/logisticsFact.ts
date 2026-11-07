@@ -22,10 +22,12 @@
 import { fetchWithRetry } from './fetchRetry';
 import { mskDate } from './mskDate';
 import { listOzonFbsPostings } from './ozonFbsList';
+import { getWbCommissionHistory, getWbCommissions, tariffAt } from './wbCommissions';
 import { cacheGet, cacheSet, isFresh } from './cache';
 
 // v2 (07.11.2026): + факт комиссии, эквайринга, операционных расходов и хранения WB.
-const CACHE_KEY = 'logistics-fact:v2';
+// v3: + поправка к тарифу по истории ставок.
+const CACHE_KEY = 'logistics-fact:v3';
 const TTL_MS = 12 * 60 * 60_000; // отчёты обновляются раз в сутки
 
 export type FactWin = {
@@ -50,10 +52,20 @@ export type FactWin = {
   commissionPct: number | null; // факт комиссии, % от цены до СПП
   acquiringPct: number | null;  // факт эквайринга, % от цены до СПП
   opsPerUnit: number | null;    // операционные расходы на 1 проданную шт, ₽
+  /**
+   * Поправка к тарифу: насколько реально удержанная комиссия отличалась от
+   * тарифа WB, действовавшего в день продажи, п. (взвешено по выручке).
+   * Отдельно к ставке FBO и к ставке FBS — какую брать, решает настройка схемы.
+   * Цена считается как «тариф СЕЙЧАС + поправка», поэтому смена тарифа видна сразу.
+   */
+  deltaFbo: number | null;
+  deltaFbs: number | null;
+  dFboRub: number; dFboRev: number; dFbsRub: number; dFbsRev: number;
 };
 export type FactItem = { d7: FactWin; d30: FactWin };
 /** Итоги WB по магазину за 30 дн — для статей без артикула (хранение) и средних. */
-export type WbStoreFact = { storageRub: number; units: number; rev: number; commRub: number; acqRub: number };
+export type WbStoreFact = { storageRub: number; units: number; rev: number; commRub: number; acqRub: number;
+  deltaFbo: number | null; deltaFbs: number | null; dFboRub: number; dFboRev: number; dFbsRub: number; dFbsRev: number };
 export type LogisticsFact = {
   wb: Record<string, FactItem>;   // nmId → факт
   ozon: Record<string, FactItem>; // offer_id (UPPER) → факт
@@ -64,8 +76,10 @@ export type LogisticsFact = {
 
 function emptyWin(): FactWin {
   return { units: 0, fwdCount: 0, fwdRub: 0, retRub: 0, retUnits: 0, cancels: 0, fwdPerUnit: null, returnPerSale: null, buyoutPct: null,
-    rev: 0, commRub: 0, acqRub: 0, opsRub: 0, commissionPct: null, acquiringPct: null, opsPerUnit: null };
+    rev: 0, commRub: 0, acqRub: 0, opsRub: 0, commissionPct: null, acquiringPct: null, opsPerUnit: null,
+    deltaFbo: null, deltaFbs: null, dFboRub: 0, dFboRev: 0, dFbsRub: 0, dFbsRev: 0 };
 }
+const pp = (rub: number, rev: number): number | null => rev > 0 ? Math.round((rub / rev) * 1000) / 10 : null;
 function finish(w: FactWin, mode: 'wb' | 'ozon' = 'wb'): FactWin {
   w.fwdRub = Math.round(w.fwdRub); w.retRub = Math.round(w.retRub);
   w.fwdPerUnit = w.fwdCount > 0 ? Math.round(w.fwdRub / w.fwdCount) : null;
@@ -74,6 +88,7 @@ function finish(w: FactWin, mode: 'wb' | 'ozon' = 'wb'): FactWin {
   w.commissionPct = w.rev > 0 ? Math.round((w.commRub / w.rev) * 1000) / 10 : null;
   w.acquiringPct = w.rev > 0 ? Math.round((w.acqRub / w.rev) * 100) / 100 : null;
   w.opsPerUnit = w.units > 0 && w.opsRub > 0 ? Math.round(w.opsRub / w.units) : null;
+  w.deltaFbo = pp(w.dFboRub, w.dFboRev); w.deltaFbs = pp(w.dFbsRub, w.dFbsRev);
   // WB: доставка при отмене — отдельная строка, попытки = доставки + отмены.
   // Ozon: «Logistic» начисляется и на невыкуп, поэтому попытки = продано + возвраты.
   const attempts = mode === 'wb' ? w.fwdCount + w.cancels : w.units + w.cancels;
@@ -92,7 +107,10 @@ function isoDay(back: number): string { return mskDate(back); }   // сутки 
 // FBS (там на 3,3 п. выше). Поэтому в цену закладываем факт, а не тариф.
 async function computeWb(diag: string[]): Promise<{ items: Record<string, FactItem>; store: WbStoreFact }> {
   const out: Record<string, FactItem> = {};
-  const store: WbStoreFact = { storageRub: 0, units: 0, rev: 0, commRub: 0, acqRub: 0 };
+  const store: WbStoreFact = { storageRub: 0, units: 0, rev: 0, commRub: 0, acqRub: 0,
+    deltaFbo: null, deltaFbs: null, dFboRub: 0, dFboRev: 0, dFbsRub: 0, dFbsRev: 0 };
+  await getWbCommissions().catch(() => null); // заодно пишет историю ставок, если её ещё нет
+  const hist = await getWbCommissionHistory().catch(() => ({}));
   const token = process.env.WB_TOKEN ?? '';
   if (token === '') { diag.push('WB: нет WB_TOKEN'); return { items: out, store }; }
   const res = await fetchWithRetry('https://finance-api.wildberries.ru/api/finance/v1/sales-reports/detailed', {
@@ -122,12 +140,21 @@ async function computeWb(diag: string[]): Promise<{ items: Record<string, FactIt
     const rowAcq = sign !== 0 ? sign * num(x?.acquiringFee) : (op === 'Корректировка эквайринга' ? num(x?.acquiringFee) : 0);
     const rowComm = sign !== 0 ? rowRev - sign * num(x?.forPay) - rowAcq : 0;
     const rowOps = num(x?.rebillLogisticCost) + num(x?.paidAcceptance);
+    // Разница с тарифом, который действовал в день продажи (история ставок).
+    const day = String(x?.rrDate ?? x?.rrDt ?? x?.saleDt ?? '').slice(0, 10);
+    const subj = String(x?.subjectName ?? '');
+    const tFbo = sign !== 0 && subj ? tariffAt(hist, subj, day, 'fbo') : null;
+    const tFbs = sign !== 0 && subj ? tariffAt(hist, subj, day, 'fbs') : null;
+    const dFbo = tFbo != null ? rowComm - (tFbo / 100) * rowRev : 0, dFboRev = tFbo != null ? rowRev : 0;
+    const dFbs = tFbs != null ? rowComm - (tFbs / 100) * rowRev : 0, dFbsRev = tFbs != null ? rowRev : 0;
     if (sign !== 0 || rowAcq !== 0) {
       store.rev += rowRev; store.commRub += rowComm; store.acqRub += rowAcq;
+      store.dFboRub += dFbo; store.dFboRev += dFboRev; store.dFbsRub += dFbs; store.dFbsRev += dFbsRev;
       if (op === 'Продажа') store.units += qty;
     }
     for (const w of wins) {
       w.rev += rowRev; w.commRub += rowComm; w.acqRub += rowAcq; w.opsRub += rowOps;
+      w.dFboRub += dFbo; w.dFboRev += dFboRev; w.dFbsRub += dFbs; w.dFbsRev += dFbsRev;
       if (op === 'Продажа') w.units += qty;
       else if (op === 'Возврат') w.retUnits += qty;
       else if (op === 'Доставка') {
@@ -140,6 +167,7 @@ async function computeWb(diag: string[]): Promise<{ items: Record<string, FactIt
     }
   }
   for (const it of Object.values(out)) { finish(it.d7); finish(it.d30); }
+  store.deltaFbo = pp(store.dFboRub, store.dFboRev); store.deltaFbs = pp(store.dFbsRub, store.dFbsRev);
   for (const k of ['storageRub', 'rev', 'commRub', 'acqRub'] as const) store[k] = Math.round(store[k]);
   return { items: out, store };
 }

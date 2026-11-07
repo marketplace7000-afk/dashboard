@@ -117,6 +117,8 @@ export type ProductEconRow = {
   commissionPct: EconVal;
   /** 07.11.2026: эквайринг WB из финотчёта (у Ozon — null). */
   acquiringPct?: EconVal;
+  /** Площадка сменила ставку комиссии за 2 недели: с какой даты, было → стало. */
+  commissionChange?: { since: string; from: number; to: number };
   logisticRub: EconVal;
   storageRub: EconVal;
   /** 16.09.2026: ДРР за 7/30 дн и что взято в расчёт; факт логистики/выкупа из финотчётов за 30 дн. */

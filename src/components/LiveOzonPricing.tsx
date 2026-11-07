@@ -524,6 +524,11 @@ export function LiveOzonPricing() {
                           {Object.keys(kk).length > 0 && (
                             <div style={{ fontSize: 17, color: 'var(--accent)' }} title="Маржа посчитана по ручным значениям из раскрытой строки. Они снимутся сами, как только по этим полям придут новые данные, или кнопкой «Сбросить».">✎ ручной расчёт</div>
                           )}
+                          {econRow?.commissionChange && (
+                            <div style={{ fontSize: 17, color: 'var(--warn)' }} title={`Ozon сменил ставку комиссии по товару с ${econRow.commissionChange.since.split('-').reverse().join('.')}: было ${econRow.commissionChange.from}%, стало ${econRow.commissionChange.to}%. Маржа уже посчитана по новой ставке.`}>
+                              ⚠ ком. Ozon {econRow.commissionChange.from}→{econRow.commissionChange.to}% с {econRow.commissionChange.since.slice(8, 10)}.{econRow.commissionChange.since.slice(5, 7)}
+                            </div>
+                          )}
                           {commIsDefault && (
                             <div style={{ fontSize: 17, color: 'var(--warn)' }} title={`Комиссия Ozon не пришла из API — взят дефолт ${OZON_DEFAULTS.commission}%. Раскрой строку и проверь/задай комиссию.`}>⚠ ком. {OZON_DEFAULTS.commission}%</div>
                           )}

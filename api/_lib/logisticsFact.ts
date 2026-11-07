@@ -24,7 +24,8 @@ import { mskDate } from './mskDate';
 import { listOzonFbsPostings } from './ozonFbsList';
 import { cacheGet, cacheSet, isFresh } from './cache';
 
-const CACHE_KEY = 'logistics-fact:v1';
+// v2 (07.11.2026): + факт комиссии, эквайринга, операционных расходов и хранения WB.
+const CACHE_KEY = 'logistics-fact:v2';
 const TTL_MS = 12 * 60 * 60_000; // отчёты обновляются раз в сутки
 
 export type FactWin = {
@@ -37,22 +38,42 @@ export type FactWin = {
   fwdPerUnit: number | null;    // ₽ за одну доставку
   returnPerSale: number | null; // ₽ обратной логистики на 1 проданную шт
   buyoutPct: number | null;     // факт выкупа, %
+  // ── Деньги продаж (07.11.2026, только WB; у Ozon нули/null) ──
+  /** Выручка по цене продавца до СПП (retailPriceWithDisc × шт), продажи минус возвраты, ₽. */
+  rev: number;
+  /** Сколько WB реально удержал комиссией: выручка − «к перечислению» − эквайринг, ₽. */
+  commRub: number;
+  /** Эквайринг (acquiringFee), ₽. */
+  acqRub: number;
+  /** Перемещение и операционная обработка (rebillLogisticCost) + обработка товара (paidAcceptance), ₽. */
+  opsRub: number;
+  commissionPct: number | null; // факт комиссии, % от цены до СПП
+  acquiringPct: number | null;  // факт эквайринга, % от цены до СПП
+  opsPerUnit: number | null;    // операционные расходы на 1 проданную шт, ₽
 };
 export type FactItem = { d7: FactWin; d30: FactWin };
+/** Итоги WB по магазину за 30 дн — для статей без артикула (хранение) и средних. */
+export type WbStoreFact = { storageRub: number; units: number; rev: number; commRub: number; acqRub: number };
 export type LogisticsFact = {
   wb: Record<string, FactItem>;   // nmId → факт
   ozon: Record<string, FactItem>; // offer_id (UPPER) → факт
+  wbStore?: WbStoreFact;
   diagnostics: string[];
   fetchedAt: number;
 };
 
 function emptyWin(): FactWin {
-  return { units: 0, fwdCount: 0, fwdRub: 0, retRub: 0, retUnits: 0, cancels: 0, fwdPerUnit: null, returnPerSale: null, buyoutPct: null };
+  return { units: 0, fwdCount: 0, fwdRub: 0, retRub: 0, retUnits: 0, cancels: 0, fwdPerUnit: null, returnPerSale: null, buyoutPct: null,
+    rev: 0, commRub: 0, acqRub: 0, opsRub: 0, commissionPct: null, acquiringPct: null, opsPerUnit: null };
 }
 function finish(w: FactWin, mode: 'wb' | 'ozon' = 'wb'): FactWin {
   w.fwdRub = Math.round(w.fwdRub); w.retRub = Math.round(w.retRub);
   w.fwdPerUnit = w.fwdCount > 0 ? Math.round(w.fwdRub / w.fwdCount) : null;
   w.returnPerSale = w.units > 0 ? Math.round(w.retRub / w.units) : null;
+  w.rev = Math.round(w.rev); w.commRub = Math.round(w.commRub); w.acqRub = Math.round(w.acqRub); w.opsRub = Math.round(w.opsRub);
+  w.commissionPct = w.rev > 0 ? Math.round((w.commRub / w.rev) * 1000) / 10 : null;
+  w.acquiringPct = w.rev > 0 ? Math.round((w.acqRub / w.rev) * 100) / 100 : null;
+  w.opsPerUnit = w.units > 0 && w.opsRub > 0 ? Math.round(w.opsRub / w.units) : null;
   // WB: доставка при отмене — отдельная строка, попытки = доставки + отмены.
   // Ozon: «Logistic» начисляется и на невыкуп, поэтому попытки = продано + возвраты.
   const attempts = mode === 'wb' ? w.fwdCount + w.cancels : w.units + w.cancels;
@@ -64,19 +85,28 @@ const dayMs = 86_400_000;
 function isoDay(back: number): string { return mskDate(back); }   // сутки по Москве, как у площадок
 
 // ─── WB ─────────────────────────────────────────────────────────────────────
-async function computeWb(diag: string[]): Promise<Record<string, FactItem>> {
+// Комиссия и эквайринг (проверено на живом отчёте 07.11.2026): в строке «Продажа»
+// retailPriceWithDisc − forPay − acquiringFee = ровно commissionPercent × цену.
+// Например, 3300 − 2002,2 − 76,8 = 1221 = 37 % от 3300. Тариф tariffs/commission
+// с этим не совпадает: при FBS WB брал примерно «ставку FBO + 1,2 п.», а не ставку
+// FBS (там на 3,3 п. выше). Поэтому в цену закладываем факт, а не тариф.
+async function computeWb(diag: string[]): Promise<{ items: Record<string, FactItem>; store: WbStoreFact }> {
   const out: Record<string, FactItem> = {};
+  const store: WbStoreFact = { storageRub: 0, units: 0, rev: 0, commRub: 0, acqRub: 0 };
   const token = process.env.WB_TOKEN ?? '';
-  if (token === '') { diag.push('WB: нет WB_TOKEN'); return out; }
+  if (token === '') { diag.push('WB: нет WB_TOKEN'); return { items: out, store }; }
   const res = await fetchWithRetry('https://finance-api.wildberries.ru/api/finance/v1/sales-reports/detailed', {
     method: 'POST', headers: { Authorization: token, 'Content-Type': 'application/json' },
     body: JSON.stringify({ dateFrom: isoDay(30), dateTo: isoDay(0), limit: 100000, rrdId: 0, period: 'daily' }),
   }, { maxRetries: 2, timeoutMs: 60_000 });
-  if (!res.ok) { diag.push(`WB: финотчёт → ${res.status}`); return out; }
+  if (!res.ok) { diag.push(`WB: финотчёт → ${res.status}`); return { items: out, store }; }
   const rows: any[] = await res.json().catch(() => []);
-  if (!Array.isArray(rows) || rows.length === 0) { diag.push('WB: финотчёт пуст'); return out; }
+  if (!Array.isArray(rows) || rows.length === 0) { diag.push('WB: финотчёт пуст'); return { items: out, store }; }
   const since7 = Date.now() - 7 * dayMs;
+  const num = (v: unknown): number => { const n = Number(String(v ?? 0).replace(',', '.')); return Number.isFinite(n) ? n : 0; };
   for (const x of rows) {
+    // Хранение WB приходит одной строкой на магазин, без артикула.
+    store.storageRub += num(x?.paidStorage);
     const nm = String(x?.nmId ?? '');
     if (nm === '' || nm === '0') continue;
     const it = out[nm] ?? (out[nm] = { d7: emptyWin(), d30: emptyWin() });
@@ -86,7 +116,18 @@ async function computeWb(diag: string[]): Promise<Record<string, FactItem>> {
     const bonus = String(x?.bonusTypeName ?? '');
     const qty = Number(x?.quantity) || 0;
     const ds = Number(x?.deliveryService) || 0;
+    // Деньги продажи: возврат — с обратным знаком.
+    const sign = op === 'Продажа' ? 1 : op === 'Возврат' ? -1 : 0;
+    const rowRev = sign * num(x?.retailPriceWithDisc) * qty;
+    const rowAcq = sign !== 0 ? sign * num(x?.acquiringFee) : (op === 'Корректировка эквайринга' ? num(x?.acquiringFee) : 0);
+    const rowComm = sign !== 0 ? rowRev - sign * num(x?.forPay) - rowAcq : 0;
+    const rowOps = num(x?.rebillLogisticCost) + num(x?.paidAcceptance);
+    if (sign !== 0 || rowAcq !== 0) {
+      store.rev += rowRev; store.commRub += rowComm; store.acqRub += rowAcq;
+      if (op === 'Продажа') store.units += qty;
+    }
     for (const w of wins) {
+      w.rev += rowRev; w.commRub += rowComm; w.acqRub += rowAcq; w.opsRub += rowOps;
       if (op === 'Продажа') w.units += qty;
       else if (op === 'Возврат') w.retUnits += qty;
       else if (op === 'Доставка') {
@@ -99,7 +140,8 @@ async function computeWb(diag: string[]): Promise<Record<string, FactItem>> {
     }
   }
   for (const it of Object.values(out)) { finish(it.d7); finish(it.d30); }
-  return out;
+  for (const k of ['storageRub', 'rev', 'commRub', 'acqRub'] as const) store[k] = Math.round(store[k]);
+  return { items: out, store };
 }
 
 // ─── Ozon ───────────────────────────────────────────────────────────────────
@@ -212,11 +254,13 @@ async function computeOzon(diag: string[]): Promise<Record<string, FactItem>> {
 // ─── Сборка ─────────────────────────────────────────────────────────────────
 async function compute(): Promise<LogisticsFact> {
   const diagnostics: string[] = [];
-  const [wb, ozon] = await Promise.all([
-    computeWb(diagnostics).catch(e => { diagnostics.push(`WB: ${String((e as Error)?.message ?? e).slice(0, 120)}`); return {}; }),
+  const [wbRes, ozon] = await Promise.all([
+    computeWb(diagnostics).catch(e => { diagnostics.push(`WB: ${String((e as Error)?.message ?? e).slice(0, 120)}`); return null; }),
     computeOzon(diagnostics).catch(e => { diagnostics.push(`Ozon: ${String((e as Error)?.message ?? e).slice(0, 120)}`); return {}; }),
   ]);
-  return { wb, ozon, diagnostics, fetchedAt: Date.now() };
+  const wb = wbRes?.items ?? {};
+  const wbStore = wbRes && wbRes.store.units > 0 ? wbRes.store : undefined;
+  return { wb, ozon, wbStore, diagnostics, fetchedAt: Date.now() };
 }
 
 export async function getLogisticsFact(noCache = false): Promise<LogisticsFact> {

@@ -11,7 +11,7 @@ import type { AiArea } from '../../shared/aiModels';
 
 export type Origin =
   | 'reference' | 'marketplace' | 'tariffs' | 'client-table'
-  | 'ads-report' | 'no-ads' | 'none';
+  | 'ads-report' | 'no-ads' | 'fact-report' | 'store-avg' | 'none';
 
 export type Val = { value: number | null; origin: Origin; note?: string };
 
@@ -69,6 +69,8 @@ export function originLabel(v: Val | undefined): string {
     case 'marketplace': return 'из API площадки';
     case 'ads-report': return 'факт по рекламе';
     case 'no-ads': return v.note ?? 'рекламы не было';
+    case 'fact-report': return v.note ?? 'факт из финотчёта площадки';
+    case 'store-avg': return v.note ?? 'среднее по магазину';
     case 'none': return v.note ?? 'нет данных';
   }
 }

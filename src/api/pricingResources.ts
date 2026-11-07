@@ -115,6 +115,8 @@ export type ProductEconRow = {
   cost: EconVal;
   drr: EconVal;
   commissionPct: EconVal;
+  /** 07.11.2026: эквайринг WB из финотчёта (у Ozon — null). */
+  acquiringPct?: EconVal;
   logisticRub: EconVal;
   storageRub: EconVal;
   /** 16.09.2026: ДРР за 7/30 дн и что взято в расчёт; факт логистики/выкупа из финотчётов за 30 дн. */

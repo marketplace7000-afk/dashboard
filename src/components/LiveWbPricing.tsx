@@ -268,7 +268,8 @@ export function LiveWbPricing() {
       // Схема задаётся в настройках: у FBO и FBS ставки разные, и показывать
       // чужую значит завышать прибыль по всему каталогу (правка клиента 29.08).
       commission: kn('commission') ?? econRow?.commissionPct.value ?? catComm ?? WB_DEFAULTS.commission,
-      acquiring: gp('acq', WB_DEFAULTS.acquiring),
+      // Эквайринг — факт WB из финотчёта (07.11.2026), ручной параметр панели — запасной.
+      acquiring: econRow?.acquiringPct?.value ?? gp('acq', WB_DEFAULTS.acquiring),
       logistic: econRow?.logisticFact?.value ?? econRow?.logisticRub.value ?? logFromApi ?? WB_DEFAULTS.logistic,
       storage: econRow?.storageRub.value ?? storFromApi ?? WB_DEFAULTS.storage,
       // Возврат при невыкупе масштабируется по объёму (46+14×л) — как в эталоне клиента.
@@ -629,11 +630,11 @@ export function LiveWbPricing() {
                             ];
                             const rows: { l: string; v: number }[] = c ? [
                               { l: 'Себестоимость', v: -c.breakdown.cost },
-                              { l: `Комиссия WB (${inp.commission}%) · ${wbScheme}${catComm != null ? ' · API' : ''}`, v: -c.breakdown.commission },
+                              { l: `Комиссия WB (${inp.commission}%) · ${wbScheme}${k.commission !== undefined ? ' · вручную' : econRow?.commissionPct.origin === 'fact-report' ? ' · факт за 30 дн' : econRow?.commissionPct.origin === 'tariffs' ? ' · тариф WB с поправкой' : catComm != null ? ' · тариф WB' : ''}`, v: -c.breakdown.commission },
                               { l: `Логистика${econRow?.logisticFact?.value != null ? ' · факт за 30 дн' : logFromApi != null ? ` · тариф (${volL.toFixed(2)} л)` : ''}`, v: -c.breakdown.logistic },
-                              { l: `Хранение${storFromApi != null ? ' · API (30 дн)' : ''}`, v: -c.breakdown.storage },
+                              { l: `Хранение${econRow?.storageRub.origin === 'fact-report' ? ' · факт WB за 30 дн' : storFromApi != null ? ' · тариф (30 дн)' : ''}`, v: -c.breakdown.storage },
                               { l: `Обратная логистика${k.buyout === undefined && econRow?.returnFact?.value != null ? ` · факт за 30 дн (выкуп ${Math.max(1, inp.buyout)}%)` : ` (выкуп ${Math.max(1, inp.buyout)}% · невыкуп ${100 - Math.max(1, inp.buyout)}%)`}`, v: -c.breakdown.returnCost },
-                              { l: `Эквайринг (${inp.acquiring ?? WB_DEFAULTS.acquiring}%)`, v: -c.breakdown.acquiring },
+                              { l: `Эквайринг (${inp.acquiring ?? WB_DEFAULTS.acquiring}%)${econRow?.acquiringPct?.origin === 'fact-report' ? ' · факт за 30 дн' : econRow?.acquiringPct?.origin === 'store-avg' ? ' · средний по магазину' : ''}`, v: -c.breakdown.acquiring },
                               { l: `УСН ${inp.usn ?? WB_DEFAULTS.usn}%`, v: -c.breakdown.usn },
                               { l: `НДС ${inp.nds ?? WB_DEFAULTS.nds}%`, v: -c.breakdown.nds },
                               {

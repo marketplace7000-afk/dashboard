@@ -185,7 +185,7 @@ async function wbMargins(now: number): Promise<MarginReport> {
         drr: e?.drr.value ?? gp('drr', WB_DEFAULTS.drr),
         buyout: e?.buyoutFact?.value ?? gp('buyout', 88),
         commission: e?.commissionPct.value ?? catComm ?? WB_DEFAULTS.commission,
-        acquiring: gp('acq', WB_DEFAULTS.acquiring),
+        acquiring: e?.acquiringPct?.value ?? gp('acq', WB_DEFAULTS.acquiring),
         logistic: e?.logisticFact?.value ?? e?.logisticRub.value ?? logFromApi ?? WB_DEFAULTS.logistic,
         storage: e?.storageRub.value ?? storFromApi ?? WB_DEFAULTS.storage,
         returnBase: logFromApi ?? WB_DEFAULTS.returnBase,

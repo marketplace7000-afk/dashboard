@@ -34,25 +34,39 @@ export function bareProducts(mp: Ads2Mp): Ads2WatchProduct[] {
     .sort((a, b) => (b.stockSince ?? 0) - (a.stockSince ?? 0) || a.key.localeCompare(b.key, 'ru'));
 }
 
+/** Название не длиннее n символов, обрезка по целому слову. */
+const cut = (t: string, n: number) => (t.length <= n ? t : t.slice(0, n).replace(/\s+\S*$/, '') + '…');
 const ddmm = (ms: number) => new Date(ms + MSK).toISOString().slice(5, 10).split('-').reverse().join('.');
-const line = (p: Ads2WatchProduct) => `• <b>${esc(p.key)}</b>${p.name && p.name !== p.key ? ` — ${esc(p.name.slice(0, 60))}` : ''}${p.stockSince ? ` (в продаже с ${ddmm(p.stockSince)})` : ''}`;
+/** Товар отдельным блоком: артикул, название, с какого дня в продаже — каждое с новой строки (08.11: владелец — «слишком скомкано»). */
+const block = (p: Ads2WatchProduct, i: number) => [
+  `${i + 1}. <b>${esc(p.key)}</b>`,
+  p.name && p.name !== p.key ? `    ${esc(cut(p.name, 70))}` : '',
+  p.stockSince ? `    в продаже с ${ddmm(p.stockSince)}` : '',
+].filter(Boolean).join('\n');
+const howTo = (mp: Ads2Mp) => `👉 Привяжите конкурентов: <a href="${SITE(mp)}">«Конкуренты» → ${MP_NAME[mp]} → «Без конкурентов»</a>, кнопка «+ Конкурент» у товара.`;
+const plural = (n: number) => (n % 10 === 1 && n % 100 !== 11 ? 'товар' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'товара' : 'товаров');
 
 /** Текст про новинки без конкурентов. Пусто — нечего слать. */
 export function newBareText(mp: Ads2Mp, list: Ads2WatchProduct[]): string {
   if (!list.length) return '';
   const n = list.length;
-  return [`🆕 <b>${MP_NAME[mp]}: ${n === 1 ? 'новый товар в продаже' : `новые товары в продаже (${n})`} без конкурентов</b>`,
-    ...list.slice(0, 20).map(line), n > 20 ? `…и ещё ${n - 20}` : '',
-    `Привяжите конкурентов: <a href="${SITE(mp)}">«Конкуренты» → ${MP_NAME[mp]} → «Без конкурентов»</a>, кнопка «+ Конкурент» у товара.`].filter(Boolean).join('\n');
+  return [
+    `🆕 <b>${MP_NAME[mp]}: ${n === 1 ? 'новый товар в продаже без конкурентов' : `новые товары в продаже без конкурентов — ${n}`}</b>`,
+    list.slice(0, 15).map(block).join('\n\n') + (n > 15 ? `\n\n…и ещё ${n - 15}` : ''),
+    howTo(mp),
+  ].join('\n\n');
 }
 
-/** Недельная сводка по площадке — в её чат. */
+/** Недельная сводка по площадке — в её чат. Каждый товар с новой строки. */
 export function weeklyBareText(mp: Ads2Mp, l: Ads2WatchProduct[]): string {
   if (!l.length) return `✅ <b>${MP_NAME[mp]}: все наши товары в продаже — с конкурентами</b>`;
-  const keys = l.slice(0, 40).map(p => esc(p.key)).join(', ');
-  return [`📋 <b>${MP_NAME[mp]}: товаров в продаже без конкурентов — ${l.length}</b>`,
-    `${keys}${l.length > 40 ? ` …и ещё ${l.length - 40}` : ''}`,
-    `Привяжите конкурентов: <a href="${SITE(mp)}">«Конкуренты» → ${MP_NAME[mp]} → «Без конкурентов»</a>. Карточки под вывод и старые уберите «В архив» — тогда они перестанут попадать в список.`].join('\n\n');
+  const rows = l.slice(0, 30).map(p => `• <b>${esc(p.key)}</b>${p.name && p.name !== p.key ? `\n    ${esc(cut(p.name, 60))}` : ''}`);
+  return [
+    `📋 <b>${MP_NAME[mp]}: в продаже без конкурентов — ${l.length} ${plural(l.length)}</b>`,
+    rows.join('\n\n') + (l.length > 30 ? `\n\n…и ещё ${l.length - 30}` : ''),
+    howTo(mp),
+    '🗄 Карточки под вывод и старые уберите «В архив» — тогда они перестанут попадать в список.',
+  ].join('\n\n');
 }
 
 let busy = false;

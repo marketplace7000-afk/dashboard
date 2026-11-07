@@ -108,6 +108,10 @@ app.listen(PORT, '0.0.0.0', () => {
   import('./api/_lib/ads/wbCompare')
     .then(m => m.scheduleWbCompare())
     .catch(e => console.warn('[wb-compare] таймер не запущен:', (e as Error).message));
+  // «Конкуренты»: товары в продаже без конкурентов — новинки сразу, сводка по понедельникам (07.11.2026).
+  import('./api/_lib/ads/bareNotify')
+    .then(m => m.scheduleBareNotify())
+    .catch(e => console.warn('[bare-notify] таймер не запущен:', (e as Error).message));
 });
 
 // ─── Прогрев кэша (замена vercel.json crons) ──────────────────────────────

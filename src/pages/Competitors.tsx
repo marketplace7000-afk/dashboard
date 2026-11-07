@@ -463,7 +463,8 @@ function ComparePanel({ st, picked, onClear, onData, setToast }: {
 function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2Mp; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void }) {
   const [q, setQ] = useState('');
   // Какие товары: с конкурентами / в продаже без конкурентов (05.11.2026) / все / архив (07.11.2026).
-  const [mode, setMode] = useState<'with' | 'none' | 'all' | 'arch'>('with');
+  // Ссылка из Telegram «…-bare» (товары без конкурентов) открывает сразу этот фильтр.
+  const [mode, setMode] = useState<'with' | 'none' | 'all' | 'arch'>(() => (typeof location !== 'undefined' && location.hash.endsWith('-bare') ? 'none' : 'with'));
   const setAll = (on: boolean) => setMode(on ? 'all' : 'with');
   const [more, setMore] = useState(15);
   const [per, setPer] = useState<OzPer>(() => { try { return localStorage.getItem('cmp:ozPer') === '28' ? 28 : 7; } catch { return 7; } });
@@ -673,7 +674,7 @@ function MarketSheet({ d, mp }: { d: Ads2Competitors; mp: Ads2Mp }) {
 // Лист «Советник по продажам» переехал в РНП → «Советник» (выпуски в течение дня, 15.10.2026).
 
 function Board({ mp, mpSwitch }: { mp: Ads2Mp; mpSwitch: React.ReactNode }) {
-  const [sheet, setSheet] = useState<Sheet>(() => { try { const s = localStorage.getItem('cmp:sheet') as Sheet; return SHEETS.some(([k]) => k === s) ? s : 'watch'; } catch { return 'watch'; } });
+  const [sheet, setSheet] = useState<Sheet>(() => { try { if (location.hash.endsWith('-bare')) return 'watch'; const s = localStorage.getItem('cmp:sheet') as Sheet; return SHEETS.some(([k]) => k === s) ? s : 'watch'; } catch { return 'watch'; } });
   const [d, setD] = useState<Ads2Competitors | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const { setToast, ui } = useToast();
@@ -705,7 +706,7 @@ function Board({ mp, mpSwitch }: { mp: Ads2Mp; mpSwitch: React.ReactNode }) {
 }
 
 export function Competitors() {
-  const [mp, setMp] = useState<Ads2Mp>(() => { try { if (location.hash === '#competitors-wb') return 'wb'; return localStorage.getItem('cmp:mp') === 'ozon' ? 'ozon' : localStorage.getItem('cmp:mp') === 'wb' ? 'wb' : (localStorage.getItem('ads2:mp') === 'ozon' ? 'ozon' : 'wb'); } catch { return 'wb'; } });
+  const [mp, setMp] = useState<Ads2Mp>(() => { try { if (location.hash.startsWith('#competitors-wb')) return 'wb'; if (location.hash.startsWith('#competitors-ozon')) return 'ozon'; return localStorage.getItem('cmp:mp') === 'ozon' ? 'ozon' : localStorage.getItem('cmp:mp') === 'wb' ? 'wb' : (localStorage.getItem('ads2:mp') === 'ozon' ? 'ozon' : 'wb'); } catch { return 'wb'; } });
   const choose = (m: Ads2Mp) => { setMp(m); try { localStorage.setItem('cmp:mp', m); } catch { /* не критично */ } };
   // Стиль А (22.10.2026): класс .sa включает общий слой стиля — см. блок «Стиль А» в styles.css.
   const mpSwitch = (

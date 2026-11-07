@@ -496,12 +496,6 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
             {bare.length > 0 && <button className="chip warn cmp-bare-chip" onClick={() => { setMode('none'); setMore(15); }} title="Наши товары в продаже, к которым не привязан ни один конкурент">без конкурентов: {bare.length}</button>}</h2>
           <RefreshBar d={d} mp={mp} onData={onData} setToast={setToast} />
         </div>
-        <p className="muted cmp-lead">
-          Конкурентов привязывают менеджеры — кнопка «+ Конкурент» у товара; система сама никого не предлагает. Товары в продаже без конкурентов — в «Без конкурентов».
-          Карточки под вывод и старые — кнопкой «В архив»: пропадут из списков, агент перестанет их снимать.
-          Цены, рейтинг и отзывы агент снимает по расписанию выше и по кнопке «Обновить сейчас»; после привязки нового конкурента — сам через пару минут.
-          Если цену карточки в последний раз снять не удалось, под ней написано, от когда она.
-        </p>
         <div className="ad2-filters">
           <label className="ad2-search">
             <MagnifyingGlassIcon size={16} />

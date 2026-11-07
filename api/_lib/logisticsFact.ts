@@ -26,8 +26,8 @@ import { getWbCommissionHistory, getWbCommissions, tariffAt } from './wbCommissi
 import { cacheGet, cacheSet, isFresh } from './cache';
 
 // v2 (07.11.2026): + факт комиссии, эквайринга, операционных расходов и хранения WB.
-// v3: + поправка к тарифу по истории ставок.
-const CACHE_KEY = 'logistics-fact:v3';
+// v4: + поправка к тарифу по истории ставок; исправлен эквайринг (был в 100 раз меньше).
+const CACHE_KEY = 'logistics-fact:v4';
 const TTL_MS = 12 * 60 * 60_000; // отчёты обновляются раз в сутки
 
 export type FactWin = {
@@ -86,7 +86,7 @@ function finish(w: FactWin, mode: 'wb' | 'ozon' = 'wb'): FactWin {
   w.returnPerSale = w.units > 0 ? Math.round(w.retRub / w.units) : null;
   w.rev = Math.round(w.rev); w.commRub = Math.round(w.commRub); w.acqRub = Math.round(w.acqRub); w.opsRub = Math.round(w.opsRub);
   w.commissionPct = w.rev > 0 ? Math.round((w.commRub / w.rev) * 1000) / 10 : null;
-  w.acquiringPct = w.rev > 0 ? Math.round((w.acqRub / w.rev) * 100) / 100 : null;
+  w.acquiringPct = w.rev > 0 ? Math.round((w.acqRub / w.rev) * 10000) / 100 : null; // %, два знака
   w.opsPerUnit = w.units > 0 && w.opsRub > 0 ? Math.round(w.opsRub / w.units) : null;
   w.deltaFbo = pp(w.dFboRub, w.dFboRev); w.deltaFbs = pp(w.dFbsRub, w.dFbsRev);
   // WB: доставка при отмене — отдельная строка, попытки = доставки + отмены.

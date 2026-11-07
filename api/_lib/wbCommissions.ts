@@ -26,7 +26,8 @@ import type { Fulfilment } from './settings';
 
 const URL = 'https://common-api.wildberries.ru/api/v1/tariffs/commission?locale=ru';
 // v2: раньше хранили одно число на предмет, теперь все ставки — старый кэш не подходит.
-const CACHE_KEY = 'wb-commissions:v2';
+// v3 (07.11.2026): старая запись несла срок жизни 24 ч и не давала начать историю ставок.
+const CACHE_KEY = 'wb-commissions:v3';
 const TTL_MS = 60 * 60_000; // час: смена ставки WB попадает в «Цены» в течение часа
 
 const HISTORY_KEY = 'wb-commission-history:v1';
@@ -178,7 +179,11 @@ export function recentChange(hist: WbCommissionHistory, subjectName: string, mod
 
 export async function getWbCommissions(noCache = false): Promise<WbCommissions> {
   const cached = await cacheGet<WbCommissions>(CACHE_KEY);
-  if (!noCache && isFresh(cached)) return cached.data;
+  if (!noCache && isFresh(cached)) {
+    // История пустая (первый запуск) — заводим её из того, что уже скачано.
+    if (Object.keys(await getWbCommissionHistory()).length === 0) await recordHistory(cached.data).catch(() => null);
+    return cached.data;
+  }
   try {
     const fresh = await compute();
     await cacheSet(CACHE_KEY, fresh, TTL_MS);

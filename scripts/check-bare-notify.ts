@@ -16,8 +16,8 @@ check('ссылка сразу на фильтр', one.includes('#competitors-oz
 check('пусто — ничего не шлём', newBareText('wb', []) === '');
 const many = newBareText('wb', Array.from({ length: 23 }, (_, i) => p(`K${i}`, '', null)));
 check('много новинок — первые 20 и «ещё 3»', many.includes('(23)') && many.includes('…и ещё 3') && !many.includes('K20'), many);
-const w = weeklyBareText({ wb: [p('A', '', null), p('B', '', null)], ozon: [] });
-check('сводка: счётчики и список', w.includes('WB 2, Ozon 0') && w.includes('A, B') && w.includes('<b>Ozon</b>: все с конкурентами'), w);
-check('сводка: всё привязано', weeklyBareText({ wb: [], ozon: [] }).startsWith('✅'));
+const w = weeklyBareText('wb', [p('A', '', null), p('B', '', null)]);
+check('сводка: счётчик, список и ссылка своей площадки', w.includes('WB: товаров в продаже без конкурентов — 2') && w.includes('A, B') && w.includes('#competitors-wb-bare'), w);
+check('сводка: всё привязано', weeklyBareText('ozon', []).startsWith('✅ <b>Ozon'));
 console.log(failed ? `\nПРОВАЛЕНО: ${failed}` : '\nВсе проверки прошли');
 process.exit(failed ? 1 : 0);

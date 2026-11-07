@@ -59,10 +59,16 @@ export function tgConfigured(): boolean { return !!token(); }
 const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 export { esc as tgEscape };
 
-/** Отправить сообщение в рабочий чат (HTML). false — не настроен или не дошло (в журнал). */
-export async function tgSend(html: string): Promise<boolean> {
+/**
+ * Чат Ozon-команды «AV | OZON» (07.11.2026: уведомления «Конкурентов» по Ozon). Бот в нём состоит — проверено getChat.
+ * Номер чата — не секрет; можно переопределить TELEGRAM_OZON_CHAT_ID в .env.
+ */
+export const OZON_CHAT_ID = Number(process.env.TELEGRAM_OZON_CHAT_ID) || -1002015652521;
+
+/** Отправить сообщение в рабочий чат (HTML) или в указанный. false — не настроен или не дошло (в журнал). */
+export async function tgSend(html: string, to?: number): Promise<boolean> {
   if (!tgConfigured()) { console.warn('[telegram] токен не задан — сообщение не отправлено'); return false; }
-  const chat = await chatId();
+  const chat = to ?? await chatId();
   if (!chat) { console.warn('[telegram] чат не известен — добавьте бота в чат и напишите ему'); return false; }
   try {
     await call('sendMessage', { chat_id: chat, text: html.slice(0, 4000), parse_mode: 'HTML', disable_web_page_preview: true });

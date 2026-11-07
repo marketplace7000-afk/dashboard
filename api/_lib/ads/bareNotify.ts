@@ -5,17 +5,20 @@
  *     ~15 минут, днём 09:00–20:00 МСК (ночью копим до утра), по каждому товару один раз;
  *  2) по понедельникам в 10:00 МСК — сводка по WB и Ozon со списком артикулов.
  * «Без конкурентов» — как фильтр в разделе: в продаже, не в архиве, ни одного привязанного конкурента.
- * Тот же бот и чат, что напоминания о сравнениях WB (../telegram.ts), отметки — в ad_tg_sent.
+ * Тот же бот, что напоминания о сравнениях WB (../telegram.ts): WB — в чат «AV | Wildberris», Ozon — в «AV | OZON».
+ * Отметки — в ad_tg_sent.
  */
 import { adsDb } from './store';
 import { getCompetitors } from './cabinet';
-import { tgSend, tgEscape as esc, tgConfigured } from '../telegram';
+import { tgSend, tgEscape as esc, tgConfigured, OZON_CHAT_ID } from '../telegram';
 import type { Ads2Mp, Ads2WatchProduct } from '../../../shared/ads2';
 
 const MSK = 3 * 3_600_000;
 const NEW_DAYS = 14;
 const SITE = (mp: Ads2Mp) => `https://e-avtovibe.ru/#competitors-${mp}-bare`;
 const MP_NAME: Record<Ads2Mp, string> = { wb: 'WB', ozon: 'Ozon' };
+/** Чат площадки: WB — рабочий чат бота по умолчанию, Ozon — «AV | OZON». */
+const chatOf = (mp: Ads2Mp): number | undefined => (mp === 'ozon' ? OZON_CHAT_ID : undefined);
 
 function db(): any {
   const d = adsDb();
@@ -43,18 +46,13 @@ export function newBareText(mp: Ads2Mp, list: Ads2WatchProduct[]): string {
     `Привяжите конкурентов: <a href="${SITE(mp)}">«Конкуренты» → ${MP_NAME[mp]} → «Без конкурентов»</a>, кнопка «+ Конкурент» у товара.`].filter(Boolean).join('\n');
 }
 
-/** Недельная сводка по обеим площадкам. */
-export function weeklyBareText(by: Record<Ads2Mp, Ads2WatchProduct[]>): string {
-  const total = by.wb.length + by.ozon.length;
-  if (!total) return '✅ <b>Все наши товары в продаже — с конкурентами</b> (WB и Ozon).';
-  const part = (mp: Ads2Mp) => {
-    const l = by[mp];
-    if (!l.length) return `<b>${MP_NAME[mp]}</b>: все с конкурентами`;
-    const keys = l.slice(0, 40).map(p => esc(p.key)).join(', ');
-    return `<b>${MP_NAME[mp]}: ${l.length}</b> — <a href="${SITE(mp)}">открыть список</a>\n${keys}${l.length > 40 ? ` …и ещё ${l.length - 40}` : ''}`;
-  };
-  return [`📋 <b>Товары в продаже без конкурентов: WB ${by.wb.length}, Ozon ${by.ozon.length}</b>`, part('wb'), part('ozon'),
-    'Карточки под вывод и старые уберите «В архив» — тогда они перестанут попадать в список.'].join('\n\n');
+/** Недельная сводка по площадке — в её чат. */
+export function weeklyBareText(mp: Ads2Mp, l: Ads2WatchProduct[]): string {
+  if (!l.length) return `✅ <b>${MP_NAME[mp]}: все наши товары в продаже — с конкурентами</b>`;
+  const keys = l.slice(0, 40).map(p => esc(p.key)).join(', ');
+  return [`📋 <b>${MP_NAME[mp]}: товаров в продаже без конкурентов — ${l.length}</b>`,
+    `${keys}${l.length > 40 ? ` …и ещё ${l.length - 40}` : ''}`,
+    `Привяжите конкурентов: <a href="${SITE(mp)}">«Конкуренты» → ${MP_NAME[mp]} → «Без конкурентов»</a>. Карточки под вывод и старые уберите «В архив» — тогда они перестанут попадать в список.`].join('\n\n');
 }
 
 let busy = false;
@@ -71,14 +69,16 @@ async function tick(): Promise<void> {
     const by = { wb: bareProducts('wb'), ozon: bareProducts('ozon') } as Record<Ads2Mp, Ads2WatchProduct[]>;
     // Понедельник 10:00–13:00: сводка раз в неделю.
     const day = m.toISOString().slice(0, 10);
-    if (m.getUTCDay() === 1 && hm >= 10 * 60 && hm < 13 * 60 && !sent(`bare-week:${day}`)) {
-      if (await tgSend(weeklyBareText(by))) mark(`bare-week:${day}`);
+    if (m.getUTCDay() === 1 && hm >= 10 * 60 && hm < 13 * 60) {
+      for (const mp of ['wb', 'ozon'] as Ads2Mp[]) {
+        if (!sent(`bare-week:${mp}:${day}`) && await tgSend(weeklyBareText(mp, by[mp]), chatOf(mp))) mark(`bare-week:${mp}:${day}`);
+      }
     }
     // Новинки: по каждому товару один раз. Отметку ставим, только если сообщение ушло.
     for (const mp of ['wb', 'ozon'] as Ads2Mp[]) {
       const fresh = by[mp].filter(p => p.stockSince && Date.now() - p.stockSince < NEW_DAYS * 86_400_000 && !sent(`bare-new:${mp}:${p.key}`));
       if (!fresh.length) continue;
-      if (await tgSend(newBareText(mp, fresh))) for (const p of fresh) mark(`bare-new:${mp}:${p.key}`);
+      if (await tgSend(newBareText(mp, fresh), chatOf(mp))) for (const p of fresh) mark(`bare-new:${mp}:${p.key}`);
     }
   } catch (e) { console.warn('[bare-notify]', (e as Error).message); }
   finally { busy = false; }

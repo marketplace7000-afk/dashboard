@@ -137,11 +137,9 @@ export function OzCompareReport({ p, perDefault, dataAt, setToast }: {
   const [open, setOpen] = useState(false);
   const [per, setPer] = useState<Per>(perDefault);
   const pool = useMemo(() => {
-    const act = p.links.filter(l => l.status === 'active' && !l.hidden);
-    const sug = p.links.filter(l => l.status === 'suggested' && !l.hidden);
-    return [...act, ...sug];
+    return p.links.filter(l => l.status === 'active' && !l.hidden);
   }, [p.links]);
-  // По ТЗ на экране максимум 3 конкурента: по умолчанию первые 3 подтверждённых (не хватает — предложенные).
+  // По ТЗ на экране максимум 3 конкурента: по умолчанию первые 3 привязанных.
   const [chosen, setChosen] = useState<string[] | null>(null);
   const sel = (chosen ?? pool.slice(0, 3).map(l => l.id)).filter(id => pool.some(l => l.id === id));
   const toggle = (id: string) => setChosen(() => {
@@ -186,7 +184,7 @@ export function OzCompareReport({ p, perDefault, dataAt, setToast }: {
             {pool.map(l => (
               <label key={l.id} className={`cmp-check ${sel.includes(l.id) ? 'on' : ''}`} title={l.title}>
                 <input type="checkbox" checked={sel.includes(l.id)} disabled={!sel.includes(l.id) && sel.length >= 3} onChange={() => toggle(l.id)} />
-                {who(l) || 'SKU'} · {l.id}{l.status === 'suggested' ? <span className="muted"> (предложен)</span> : null}
+                {who(l) || 'SKU'} · {l.id}
               </label>
             ))}
           </div>

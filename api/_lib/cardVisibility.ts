@@ -143,3 +143,27 @@ export function cardVisibility(sku: unknown): VisQuery[] {
     return { ...v, diag: diagnose(v), exact: isExact(v.region) };
   });
 }
+
+/**
+ * Позиция в поиске Ozon для «Конкурентов» (07.11.2026, вместо столбца «К нашей»): последний снимок
+ * «Видимости в поиске» по самому частому запросу карточки — наше место и места конкурентов из первой десятки
+ * той же выдачи. Снимок есть только у закреплённых в «Ведении карточек» товаров; у остальных — null.
+ */
+export function searchPositions(sku: unknown): { query: string; at: number; ours: number | null; bySku: Record<string, number> } | null {
+  let list: VisQuery[] = [];
+  try { list = cardVisibility(sku).filter(v => v.exact && v.top.length); } catch { return null; }
+  if (!list.length) return null;
+  const freq = new Map<string, number>();
+  try {
+    const d = db(), id = String(sku ?? '');
+    const last = d.prepare("SELECT MAX(date) date FROM card_query WHERE mp = 'ozon' AND sku = ?").get(id) as { date: string | null } | undefined;
+    if (last?.date) for (const r of d.prepare("SELECT json FROM card_query WHERE mp = 'ozon' AND sku = ? AND date = ?").all(id, last.date) as { json: string }[]) {
+      const q = JSON.parse(r.json) as { text?: string; freq?: number | null };
+      if (q.text) freq.set(q.text.toLowerCase().replace(/ё/g, 'е').trim(), Number(q.freq) || 0);
+    }
+  } catch { /* частот нет — берём первый запрос */ }
+  const v = [...list].sort((a, b) => (freq.get(b.query) ?? 0) - (freq.get(a.query) ?? 0))[0];
+  const bySku: Record<string, number> = {};
+  for (const t of v.top) if (t.pos != null && !t.ours) bySku[String(t.sku)] = t.pos;
+  return { query: v.query, at: v.at, ours: v.ours?.pos ?? null, bySku };
+}

@@ -8,8 +8,13 @@
  *  2) менеджер руками цепляет по ссылке тех, кто реально важен, и агент следит
  *     именно за ними.
  * Поэтому у каждой привязки есть источник (`manual` / `auto`) и статус: авто-
- * находки лежат как «предложены» и в расчёт рынка не идут, пока их не одобрят.
- * Так система не начинает молча считать рынок по случайным товарам из выдачи.
+ * находки лежали как «предложены» и в расчёт рынка не шли, пока их не одобрят.
+ *
+ * 07.11.2026 (решение владельца): система конкурентов больше НЕ предлагает — человек
+ * лучше понимает, кто реальный конкурент. Привязывают только менеджеры; все
+ * «предложенные» и «не наши» один раз удалены (см. manualOnlySince), остались
+ * только подтверждённые. Плюс архив наших карточек (под вывод, старые) —
+ * в разделе их не видно, агент их не снимает.
  *
  * Хранилище — файл, как у справочника себестоимости (costs.ts). База данных ради
  * пары сотен строк не нужна, а файл переживает рестарт и его видно глазами.
@@ -49,6 +54,10 @@ export type WatchStore = {
    * репрайсер WB и сбор цен card.wb.ru (они читают `items`) не видели чужие номера.
    */
   ozon?: Record<string, { links: CompetitorLink[] }>;
+  /** Архив наших карточек в «Конкурентах» (07.11.2026): наш артикул → когда убрали в архив (мс). */
+  archive?: { wb?: Record<string, number>; ozon?: Record<string, number> };
+  /** Когда удалили все «предложенные» и «не наши» — с этого момента конкурентов привязывают только менеджеры. */
+  manualOnlySince?: number;
   updatedAt: number;
 };
 
@@ -62,6 +71,8 @@ function read(): WatchStore {
   try {
     cache = JSON.parse(readFileSync(FILE, 'utf8')) as WatchStore;
     if (!cache.items) cache = { ...EMPTY };
+    // только когда файл прочитан: при ошибке чтения не перезаписать привязки пустыми
+    else if (!cache.manualOnlySince) purgeUnconfirmed(cache);
   } catch {
     cache = { ...EMPTY, items: {} };
   }
@@ -79,6 +90,22 @@ function write(s: WatchStore): void {
   } catch (e) {
     console.warn('[competitors] не удалось сохранить привязки:', (e as Error).message);
   }
+}
+
+/**
+ * Один раз (07.11.2026): убрать всё, что не подтверждено менеджером, — «предложенные» системой
+ * и отмеченные «не наш». Подтверждённые (в т.ч. когда-то предложенные и одобренные) остаются.
+ */
+function purgeUnconfirmed(s: WatchStore): void {
+  let n = 0;
+  for (const b of [s.items, s.ozon ?? {}]) for (const [k, e] of Object.entries(b)) {
+    const keep = (e.links ?? []).filter(l => l.status === 'active');
+    n += (e.links?.length ?? 0) - keep.length;
+    if (keep.length) e.links = keep; else delete b[k];
+  }
+  s.manualOnlySince = Date.now();
+  if (n) console.log(`[competitors] удалены неподтверждённые привязки: ${n}`);
+  write(s);
 }
 
 const norm = (sku: string) => String(sku ?? '').trim().toUpperCase();
@@ -99,10 +126,11 @@ export function getLinks(sku: string, mp: WatchMp = 'wb'): CompetitorLink[] {
   return bucket(read(), mp)[norm(sku)]?.links ?? [];
 }
 
-/** Все привязки площадки: наш артикул → конкуренты. */
-export function getAllLinks(mp: WatchMp): Record<string, CompetitorLink[]> {
+/** Все привязки площадки: наш артикул → конкуренты. Архивные карточки — только с withArchived (советникам они не нужны). */
+export function getAllLinks(mp: WatchMp, withArchived = false): Record<string, CompetitorLink[]> {
   const out: Record<string, CompetitorLink[]> = {};
-  for (const [k, v] of Object.entries(bucket(read(), mp))) if (v.links?.length) out[k] = v.links;
+  const arch = withArchived ? {} : read().archive?.[mp] ?? {};
+  for (const [k, v] of Object.entries(bucket(read(), mp))) if (v.links?.length && !arch[k]) out[k] = v.links;
   return out;
 }
 
@@ -135,9 +163,8 @@ export function addLink(
     entry.links.push({
       nmId,
       source,
-      // Авто-находки ждут одобрения: иначе рынок посчитается по случайным
-      // товарам из выдачи, а клиент просил только реальных конкурентов.
-      status: source === 'manual' ? 'active' : 'suggested',
+      // С 07.11.2026 привязывает только менеджер — сразу в расчёт.
+      status: 'active',
       title: opts.title,
       brand: opts.brand,
       note: opts.note,
@@ -148,36 +175,6 @@ export function addLink(
   s.updatedAt = Date.now();
   write(s);
   return entry.links;
-}
-
-/**
- * Предложить найденных системой (из сравнений WB, из топа рынка Ozon). Только
- * новые номера: уже привязанных, одобренных или отклонённых («Не мой конкурент»)
- * не трогаем, а у товара не больше `cap` живых конкурентов — 5 сильнейших, как
- * просил клиент. Возвращает, сколько добавлено.
- */
-export function suggestLinks(mp: WatchMp, sku: string, cands: { id: number; title?: string; brand?: string; note?: string }[], cap = 5, replace = false): number {
-  const s = read();
-  const key = norm(sku);
-  if (!key) return 0;
-  const b = bucket(s, mp);
-  const entry = b[key] ?? { links: [] };
-  // replace: нетронутые менеджером авто-предложения, которых нет в свежем списке, уходят
-  // (рынок Ozon меняется каждую неделю); подтверждённые, ручные и «не наш» остаются.
-  const fresh = new Set(cands.map(c => c.id));
-  const before = entry.links.length;
-  if (replace) entry.links = entry.links.filter(l => !(l.source === 'auto' && l.status === 'suggested' && !fresh.has(l.nmId)));
-  let live = entry.links.filter(l => l.status !== 'ignored').length;
-  let n = 0;
-  if (entry.links.length !== before) { b[key] = entry; s.updatedAt = Date.now(); write(s); }
-  for (const c of cands) {
-    if (live >= cap) break;
-    if (!Number.isFinite(c.id) || c.id <= 0 || entry.links.some(l => l.nmId === c.id)) continue;
-    entry.links.push({ nmId: c.id, source: 'auto', status: 'suggested', title: c.title, brand: c.brand, note: c.note, addedAt: Date.now() });
-    live++; n++;
-  }
-  if (n) { b[key] = entry; s.updatedAt = Date.now(); write(s); }
-  return n;
 }
 
 /** Сменить статус: одобрить авто-находку или убрать конкурента из расчёта. */
@@ -202,6 +199,23 @@ export function removeLink(sku: string, nmId: number, mp: WatchMp = 'wb'): Compe
 }
 
 /** Артикул WB из ссылки или из строки с числом. Клиент шлёт и то, и другое. */
+/** Архив наших карточек площадки: наш артикул → когда убрали. */
+export function getArchived(mp: WatchMp): Record<string, number> {
+  return { ...(read().archive?.[mp] ?? {}) };
+}
+
+/** Убрать нашу карточку в архив «Конкурентов» или вернуть. Привязки конкурентов не трогаем — вернётся как была. */
+export function setArchived(sku: string, on: boolean, mp: WatchMp = 'wb'): void {
+  const s = read();
+  const key = norm(sku);
+  if (!key) return;
+  const a = (s.archive ??= {});
+  const m = (a[mp] ??= {});
+  if (on) m[key] = Date.now(); else delete m[key];
+  s.updatedAt = Date.now();
+  write(s);
+}
+
 export function parseNmId(input: string): number | null {
   const s = String(input ?? '').trim();
   // https://www.wildberries.ru/catalog/1271418370/detail.aspx
@@ -230,7 +244,9 @@ export function parseOzonSku(input: string): number | null {
 export function watchedIds(mp: WatchMp, limit = 80, withSuggested = true): number[] {
   const out = new Set<number>();
   for (const st of (withSuggested ? ['active', 'suggested'] : ['active']) as Array<'active' | 'suggested'>) {
-    for (const entry of Object.values(bucket(read(), mp))) {
+    const arch = read().archive?.[mp] ?? {};
+    for (const [key, entry] of Object.entries(bucket(read(), mp))) {
+      if (arch[key]) continue;   // архивные карточки агент не снимает
       for (const l of entry.links) if (l.status === st) out.add(l.nmId);
     }
   }

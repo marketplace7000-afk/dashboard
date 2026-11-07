@@ -1,13 +1,13 @@
 /**
  * «Реклама 2.0» → «Конкуренты»: привязка конкурентов к товарам (14.10.2026) —
- * разбор ссылок, правка менеджером, предложения системы, сборка цифр для вкладки.
+ * разбор ссылок, правка менеджером (с 07.11.2026 — только вручную, без предложений системы), архив, сборка цифр для вкладки.
  *
  * Запуск: node node_modules/tsx/dist/cli.mjs scripts/check-ads-watch.ts
  */
 import './_ads-check-env';
 import { readFileSync } from 'node:fs';
 import { parseNmId, parseOzonSku } from '../api/_lib/competitorWatch';
-import { editWatch, autoSuggest, buildWatch, watchParams, saveCabinetSnapshot, getCompetitors, requestRefresh, refreshState, posSeries, hiddenCards } from '../api/_lib/ads/cabinet';
+import { editWatch, buildWatch, watchParams, saveCabinetSnapshot, getCompetitors, requestRefresh, refreshState, posSeries, hiddenCards } from '../api/_lib/ads/cabinet';
 import { adsDb } from '../api/_lib/ads/store';
 import { listTasks, maintainQueue } from '../api/_lib/agentQueue';
 
@@ -42,7 +42,7 @@ check('ручной сразу подтверждён', getLinks('SOTA-RGB').map
 check('Ozon: привязать по SKU', editWatch({ mp: 'ozon', sku: 'CARLINKIT-ULTRA2-KRUG-8-128', link: '4392959400' }), { ok: true });
 check('Ozon не попал в ветку WB (репрайсер/card.wb.ru)', Object.keys(getWatchList().items), ['SOTA-RGB']);
 
-console.log('Предложения системы');
+console.log('Конкурентов привязывают только менеджеры (07.11.2026)');
 const wbData = {
   report: { groups: [{ items: [{ nmId: 1417220162, vendorCode: 'SOTA-RGB', name: 'Светильник соты', price: { minPrice: 3600 }, orders: { current: 34, dynamics: 10 }, avgPosition: { current: 16, dynamics: -2 } }] }] },
   comparisons: { history: [
@@ -55,16 +55,12 @@ const wbData = {
   ] }],
   cards: [{ id: 390744732, name: 'Светильник соты RGB', supplier: 'Odds & Ends', rating: 4.6, feedbacks: 73, price: 3832, qty: 42 }],
 };
-// 1 уже привязан вручную, 4 новых из двух наборов, лимит 5 живых на товар.
-check('WB: из сравнений предложено до 5 на товар', autoSuggest('wb', wbData), 4);
-const st = () => getLinks('SOTA-RGB').map(l => `${l.nmId}:${l.status}`);
-check('порядок и статусы', st(), ['390744732:active', '257585393:suggested', '321878641:suggested', '832682672:suggested', '111111111:suggested']);
-check('«Не наш конкурент»', editWatch({ mp: 'wb', sku: 'SOTA-RGB', action: 'ignore', id: 257585393 }), { ok: true });
-check('повторный проход не возвращает отклонённого', autoSuggest('wb', wbData), 1);
-check('вместо него следующий из сравнений', st(), ['390744732:active', '257585393:ignored', '321878641:suggested', '832682672:suggested', '111111111:suggested', '222222222:suggested']);
-check('подтвердить предложенного', editWatch({ mp: 'wb', sku: 'SOTA-RGB', action: 'approve', id: 321878641 }), { ok: true });
-check('удалить', editWatch({ mp: 'wb', sku: 'SOTA-RGB', action: 'remove', id: 222222222 }), { ok: true });
-check('агенту — подтверждённые и предложенные, без отклонённых', watchParams('wb').watch.sort(), [111111111, 321878641, 390744732, 832682672]);
+check('снимок кабинета никого не предлагает', (saveCabinetSnapshot('wb', wbData), getLinks('SOTA-RGB').map(l => l.nmId)), [390744732]);
+check('второй — вручную', editWatch({ mp: 'wb', sku: 'SOTA-RGB', link: '321878641' }), { ok: true });
+check('старые действия «Подтвердить»/«Не наш» больше не принимаются', editWatch({ mp: 'wb', sku: 'SOTA-RGB', action: 'approve', id: 321878641 }).ok, false);
+editWatch({ mp: 'wb', sku: 'SOTA-RGB', link: '222222222' });
+check('отвязать', editWatch({ mp: 'wb', sku: 'SOTA-RGB', action: 'remove', id: 222222222 }), { ok: true });
+check('агенту — привязанные', watchParams('wb').watch.sort(), [321878641, 390744732]);
 
 const ozData = { markets: [{ category3Id: '91915', items: [
   { sku: '3330519032', name: 'Беспроводной адаптер CarPlay и Android Auto 2-в-1', avgPrice: 1528, sellerId: '1', category3: 'Устройство головное', gmvSum: 1e6 },
@@ -73,12 +69,9 @@ const ozData = { markets: [{ category3Id: '91915', items: [
   { sku: '5555555555', name: 'Carlinkit Tbox Ultra 2в1 Сarplay Android auto бокс', avgPrice: 17000, sellerId: '3', category3: 'Устройство головное', gmvSum: 8e5, drr: 6.5, soldCount: 40 },
   { sku: '3154491355', name: 'Carlinkit Ultra 2 AI Box 8/128 ГБ, Android 15, CarPlay и Android Auto', article: 'CARLINKIT-ULTRA2-KRUG-8-128', avgPrice: 19741, sellerId: '466884', category3: 'Устройство головное' },
 ] }] };
-check('Ozon: лидеры только в коридоре цены (½–2× нашей)', autoSuggest('ozon', ozData), 1);
-check('Ozon: дешёвый адаптер и магнитола не предложены', getLinks('CARLINKIT-ULTRA2-KRUG-8-128', 'ozon').map(l => `${l.nmId}:${l.status}`), ['4392959400:active', '5555555555:suggested']);
-const ozNext = { markets: [{ ...ozData.markets[0], items: ozData.markets[0].items.filter(x => x.sku !== '5555555555') }] };
-autoSuggest('ozon', ozNext);
-check('Ozon: выпавший из рынка нетронутый лидер убран, подтверждённый остался', getLinks('CARLINKIT-ULTRA2-KRUG-8-128', 'ozon').map(l => `${l.nmId}:${l.status}`), ['4392959400:active']);
-autoSuggest('ozon', ozData);
+saveCabinetSnapshot('ozon', ozData);
+check('Ozon: лидеры рынка не предлагаются', getLinks('CARLINKIT-ULTRA2-KRUG-8-128', 'ozon').map(l => `${l.nmId}:${l.status}`), ['4392959400:active']);
+editWatch({ mp: 'ozon', sku: 'CARLINKIT-ULTRA2-KRUG-8-128', link: '5555555555' });
 
 console.log('Сборка для вкладки');
 const w = buildWatch('wb', wbData);
@@ -88,7 +81,15 @@ const b = p.links.find(l => l.id === '390744732')!;
 check('цифры: витрина + сравнение', [b.title, b.seller, b.price, b.rating, b.feedbacks, b.stock, b.orders, b.avgPos, b.inPromo], ['Светильник соты RGB', 'Odds & Ends', 3832, 4.6, 73, 42, 39, 22, true]);
 const c = p.links.find(l => l.id === '321878641')!;
 check('без карточки — цена из сравнения', [c.price, c.status], [3528, 'active']);
-check('порядок — как привязаны: «Подтвердить» и «Не наш» строку не двигают', p.links.map(l => l.id), ['390744732', '257585393', '321878641', '832682672', '111111111']);
+check('порядок — как привязаны', p.links.map(l => l.id), ['390744732', '321878641']);
+
+console.log('Архив наших карточек');
+check('в архив', editWatch({ mp: 'wb', sku: 'SOTA-RGB', action: 'archive' }), { ok: true });
+const wa = buildWatch('wb', wbData).watch.find(x => x.key === 'SOTA-RGB')!;
+check('в архиве: помечен, конкуренты на месте', [wa.archived, wa.links.length], [true, 2]);
+check('архивного агент не снимает', [watchParams('wb').watch.length, watchParams('wb').ours.includes(1417220162)], [0, false]);
+check('архив записан в файл привязок', !!store().archive?.wb?.['SOTA-RGB'], true);
+check('вернуть из архива', [editWatch({ mp: 'wb', sku: 'SOTA-RGB', action: 'unarchive' }).ok, buildWatch('wb', wbData).watch.find(x => x.key === 'SOTA-RGB')!.archived], [true, false]);
 const oz = buildWatch('ozon', ozData).watch.find(x => x.key === 'CARLINKIT-ULTRA2-KRUG-8-128')!;
 check('Ozon: ДРР и продажи лидера', oz.links.filter(l => l.id === '5555555555').map(l => [l.drr, l.orders, l.seller === '' ? 'нет' : l.seller]), [[6.5, 40, 'нет']]);
 

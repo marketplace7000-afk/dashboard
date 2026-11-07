@@ -346,7 +346,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       // Конкуренты и позиции из аналитики кабинетов (Агент 3 на ПК, 14.10.2026).
-      //   POST competitors {mp, sku, action: add|approve|ignore|restore|remove, link?, id?} — правка привязок менеджером
+      //   POST competitors {mp, sku, action: add|remove|archive|unarchive, link?, id?} — правка привязок менеджером и архив карточек (07.11.2026)
       // Советник по продажам дня (15.10.2026): GET advisor?mp=wb|ozon&date=YYYY-MM-DD (по умолчанию вчера).
       if (what === 'advisor') {
         const { getAdvisor } = await import('./_lib/ads/advisor');

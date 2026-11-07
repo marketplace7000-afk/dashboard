@@ -12,14 +12,14 @@ import { ozRow } from '../../../shared/ozCompare';
 import { peekStockSince } from '../stockSince';
 import { createTask, listSchedules, listTasks, nextCronRun } from '../agentQueue';
 import {
-  getAllLinks, suggestLinks, watchedIds, addLink, setLinkStatus, removeLink, parseNmId, parseOzonSku, getLatestPrices,
-  type CompetitorLink, type WatchStatus,
+  getAllLinks, watchedIds, addLink, removeLink, getArchived, setArchived, parseNmId, parseOzonSku, getLatestPrices,
+  type CompetitorLink,
 } from '../competitorWatch';
 import { rnpInStockSkus, rnpItems, saveWbCardViews } from '../rnp';
 import { wbImageUrl } from '../wbBasket';
 import { onWbSnapshot, compareState, compareReports } from './wbCompare';
 import { saveCompQueries } from '../cards';
-import { saveVisibility } from '../cardVisibility';
+import { saveVisibility, searchPositions } from '../cardVisibility';
 
 const KEEP = 30;
 
@@ -274,42 +274,26 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
   if (mp === 'wb') { try { onWbSnapshot(data, at); } catch (e) { console.warn('[wb-compare] итог не записан:', (e as Error).message); } }
   d.prepare('INSERT INTO ad_cabinet_snapshot (mp, at, json) VALUES (?, ?, ?)').run(mp, at, JSON.stringify(data));
   d.prepare(`DELETE FROM ad_cabinet_snapshot WHERE mp = ? AND id NOT IN (SELECT id FROM ad_cabinet_snapshot WHERE mp = ? ORDER BY at DESC LIMIT ?)`).run(mp, mp, KEEP);
-  let suggested = 0;
-  try { suggested = autoSuggest(mp, data); } catch (e) { console.warn('[competitors] предложения не собраны:', (e as Error).message); }
-  const sug = suggested ? `, предложено конкурентов ${suggested}` : '';
+  // 07.11.2026: конкурентов система больше не предлагает (решение владельца) — привязывают только менеджеры.
   const cards = Array.isArray(data.cards) ? `, карточек конкурентов ${data.cards.length}` : '';
   if (mp === 'wb') {
     const items = (data.report?.groups ?? []).reduce((s: number, g: any) => s + (g.items?.length ?? 0), 0);
     const pos = data.report?.positionInfo?.average?.current;
     const opened = Array.isArray(data.compDetails) ? `, отчётов сравнения ${data.compDetails.length}` : '';
-    return `WB: карточек с позициями ${items}${pos != null ? `, средняя позиция ${pos}` : ''}${posN ? `, позиций по дням ${posN}` : ''}${viewsN ? `, показов карточек ${viewsN}` : ''}, наборов сравнения ${data.comparisons?.history?.length ?? 0}${opened}${cards}${sug}`;
+    return `WB: карточек с позициями ${items}${pos != null ? `, средняя позиция ${pos}` : ''}${posN ? `, позиций по дням ${posN}` : ''}${viewsN ? `, показов карточек ${viewsN}` : ''}, наборов сравнения ${data.comparisons?.history?.length ?? 0}${opened}${cards}`;
   }
   const items = (data.markets ?? []).reduce((s: number, m: any) => s + (m.items?.length ?? 0), 0);
   const p = data.positions?.[0]?.days?.at?.(-1);
-  return `Ozon: категорий ${data.markets?.length ?? 0}, товаров рынка ${items}${p ? `, наше место ${p.my_position} из ${p.all_sellers}` : ''}${cards}${sug}`;
+  return `Ozon: категорий ${data.markets?.length ?? 0}, товаров рынка ${items}${p ? `, наше место ${p.my_position} из ${p.all_sellers}` : ''}${cards}`;
 }
 
 // ─── Привязка конкурентов к нашим товарам ───────────────────────────────────
 // Хранилище — общее с карточкой товара (../competitorWatch.ts, файл av-data/competitors.json):
 // ключ — наш артикул продавца, у каждой привязки источник (manual/auto) и статус
-// (active — подтверждён, suggested — предложен системой, ignored — «не мой конкурент»).
+// (active — подтверждён; suggested/ignored остались от автоподбора, с 07.11.2026 их нет).
+// Архив наших карточек (под вывод, старые) — там же, в ветке archive.
 
 const up = (s: unknown) => String(s ?? '').trim().toUpperCase();
-
-const WORD_STOP = new Set(['подар', 'набор', 'компл', 'новый', 'новин', 'качес', 'лучши', 'товар', 'black', 'white', 'черны', 'белый']);
-/** Кандидат в лидеры выдачи Ozon: сам товар, место в выдаче и число общих слов с нашим названием. */
-type Leader = { x: any; i: number; common: number };
-
-/** Значимые слова названия: от 4 букв, без цифр, по первым 5 буквам (грубая основа: «адаптер/адаптера»). */
-export function titleWords(s: string): Set<string> {
-  const out = new Set<string>();
-  for (const w of s.toLowerCase().replace(/ё/g, 'е').split(/[^a-zа-я0-9]+/)) {
-    if (w.length < 4 || /\d/.test(w)) continue;
-    const st = w.slice(0, 5);
-    if (!WORD_STOP.has(st)) out.add(st);
-  }
-  return out;
-}
 
 /** Наш справочник: артикул продавца ↔ номер на площадке (WB nmID, Ozon SKU). */
 function ourCatalog(mp: AdMp): { byKey: Map<string, { id: string; name: string; photo: string; active?: boolean }>; byId: Map<string, string> } {
@@ -327,50 +311,6 @@ function ourCatalog(mp: AdMp): { byKey: Map<string, { id: string; name: string; 
   return { byKey, byId };
 }
 
-/**
- * Предложить конкурентов из того, что агент снял в кабинете:
- *  WB  — товары из наборов «Сравнение карточек» (их собирают менеджеры) к нашему товару того же набора;
- *  Ozon — 5 лидеров по выручке в категории нашего товара («Товары на Ozon»).
- * Только «предложены»: в расчёты не идут, пока менеджер не подтвердит.
- */
-export function autoSuggest(mp: AdMp, data: any): number {
-  const { byId } = ourCatalog(mp);
-  let n = 0;
-  if (mp === 'wb') {
-    for (const it of data?.report?.groups?.flatMap((g: any) => g.items ?? []) ?? []) if (it.nmId && it.vendorCode) byId.set(String(it.nmId), up(it.vendorCode));
-    for (const h of data?.comparisons?.history ?? []) {
-      const nms = (h.nms ?? []).filter((x: any) => x?.nmID && !x.isDeleted);
-      const ours = nms.filter((x: any) => byId.has(String(x.nmID)));
-      const others = nms.filter((x: any) => !byId.has(String(x.nmID)));
-      for (const o of ours) n += suggestLinks('wb', byId.get(String(o.nmID))!, others.map((x: any) => ({ id: Number(x.nmID), title: String(x.nmName ?? ''), note: `из сравнения WB ${String(h.date ?? '')}`.trim() })));
-    }
-    return n;
-  }
-  const ourSeller = String(process.env.OZON_CLIENT_ID || '').trim();
-  for (const m of data?.markets ?? []) {
-    const items = m.items ?? [];
-    const isOurs = (x: any) => (!!ourSeller && String(x.sellerId) === ourSeller) || !!x.blockedAsYourGood || byId.has(String(x.sku));
-    const others = items.filter((x: any) => !isOurs(x));
-    for (const o of items.filter(isOurs)) {
-      const key = byId.get(String(o.sku)) ?? up(o.article);
-      if (!key) continue;
-      // Категория широкая (в «Устройство головное» и адаптер за 1,5 тыс., и бокс за 20 тыс.),
-      // поэтому конкурент — лидер по выручке в коридоре цены нашего товара: от половины до двух цен.
-      // Плюс хотя бы одно общее значимое слово в названии: иначе к адаптеру CarPlay попадают магнитолы.
-      const our = num(o.avgPrice);
-      const ourWords = titleWords(String(o.name ?? o.skuName ?? ''));
-      const leaders = others
-        .filter((x: any) => { const p = num(x.avgPrice); return !our || (p != null && p >= our / 2 && p <= our * 2); })
-        .map((x: any, i: number) => ({ x, i, common: Math.min(3, [...titleWords(String(x.name ?? x.skuName ?? ''))].filter(w => ourWords.has(w)).length) }))
-        .filter((c: Leader) => !ourWords.size || c.common > 0)
-        .sort((a: Leader, b: Leader) => b.common - a.common || a.i - b.i)
-        .slice(0, 5).map((c: Leader) => c.x);
-      n += suggestLinks('ozon', key, leaders.map((x: any) => ({ id: Number(x.sku), title: String(x.name ?? x.skuName ?? ''), brand: String(x.brand ?? ''), note: `лидер Ozon «${String(x.category3 ?? '')}», цена и название близки к нашим` })), 5, true);
-    }
-  }
-  return n;
-}
-
 /** Параметры задания competitor_watch: кого снимать на витрине (конкуренты + наши товары с привязками). */
 /** Пределы списка для агента — с запасом на рост ассортимента (50 товаров × 5 конкурентов = 250 + наши). */
 export const WATCH_LIMITS = { watch: 400, ours: 300 };
@@ -382,21 +322,22 @@ export function watchParams(mp: AdMp, light = false): { watch: number[]; ours: n
   let snap: any = null;
   try { snap = row ? JSON.parse(row.json) : null; } catch { snap = null; }
   // Все наши товары в наличии (не только с конкурентами): проход заодно проверяет, что карточку видят покупатели.
-  const ours = buildWatch(mp, snap).watch.map(p => Number(p.ourId)).filter(id => Number.isFinite(id) && id > 0);
+  const ours = buildWatch(mp, snap).watch.filter(p => !p.archived).map(p => Number(p.ourId)).filter(id => Number.isFinite(id) && id > 0);
   // 20.10: было 80 — у Ozon подтверждённых уже 92 разных карточки, и часть из них агент не снимал вовсе.
   // Быстрый дневной проход — только подтверждённые (витрина Ozon ≈5 с на карточку), ночной — и предложенные.
   return { watch: watchedIds(mp, WATCH_LIMITS.watch, !light), ours: [...new Set(ours)].slice(0, WATCH_LIMITS.ours) };
 }
 
 /**
- * Правка привязок менеджером: add (ссылка или артикул конкурента), approve (взять в расчёт),
- * ignore («не мой конкурент» — система больше не предложит), restore, remove.
+ * Правка менеджером: add (ссылка или артикул конкурента), remove (отвязать),
+ * archive / unarchive (наша карточка в архив «Конкурентов» и обратно, 07.11.2026).
  */
 export function editWatch(b: any): { ok: true } | { ok: false; error: string } {
   const mp: AdMp = b?.mp === 'ozon' ? 'ozon' : 'wb';
   const sku = up(b?.sku);
   if (!sku) return { ok: false, error: 'Выберите наш товар' };
   const action = String(b?.action ?? 'add');
+  if (action === 'archive' || action === 'unarchive') { setArchived(sku, action === 'archive', mp); return { ok: true }; }
   if (action === 'add') {
     const raw = String(b?.link ?? '').trim();
     const id = mp === 'wb' ? parseNmId(raw) : parseOzonSku(raw);
@@ -414,10 +355,7 @@ export function editWatch(b: any): { ok: true } | { ok: false; error: string } {
   const id = Number(b?.id);
   if (!Number.isFinite(id) || id <= 0) return { ok: false, error: 'нет номера конкурента' };
   if (action === 'remove') { removeLink(sku, id, mp); return { ok: true }; }
-  const st: Record<string, WatchStatus> = { approve: 'active', ignore: 'ignored', restore: 'suggested' };
-  if (!st[action]) return { ok: false, error: `неизвестное действие ${action}` };
-  setLinkStatus(sku, id, st[action], mp);
-  return { ok: true };
+  return { ok: false, error: `неизвестное действие ${action}` };
 }
 
 const num = (v: unknown): number | null => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -600,7 +538,7 @@ function metricsIndex(mp: AdMp, data: any): Map<string, Partial<Ads2WatchLink>> 
 /** Товары с конкурентами для вкладки: сначала те, у кого есть привязки, затем наши товары из снимка. */
 export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; catalog: { key: string; name: string }[]; unmapped: number } {
   const { byKey, byId } = ourCatalog(mp);
-  const links = getAllLinks(mp);
+  const links = getAllLinks(mp, true);
   const idx = metricsIndex(mp, data);
   const wbPrices = mp === 'wb' ? getLatestPrices(Object.values(links).flat().map(l => l.nmId)) : {};
   // Свежая витрина (в т.ч. дневные быстрые проходы) главнее ночного снимка: цена, рейтинг, отзывы, остаток.
@@ -653,10 +591,13 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     }
   } catch (e) { console.warn('[competitors] остатки площадки не прочитаны:', (e as Error).message); }
   for (const k of inStock.keys()) keys.add(k);
+  // архив «Конкурентов» видно на своей вкладке, даже если остатка уже нет
+  for (const k of Object.keys(getArchived(mp))) keys.add(k);
   keys.delete('');
   // архив «Рекламы» (самовыкуп, дубли) здесь не показываем — по номеру товара на площадке
   const archived = new Set(listFlags().filter(f => f.mp === mp && f.archived).map(f => f.sku));
   for (const k of [...keys]) { const id = byKey.get(k)?.id || fromSnap.get(k)?.id; if (id && archived.has(String(id))) keys.delete(k); }
+  const arch = getArchived(mp);
   const watch: Ads2WatchProduct[] = [...keys].map(key => {
     const cat = byKey.get(key)?.id ? byKey.get(key) : fromSnap.get(key) ?? byKey.get(key);
     const ourId = cat?.id ?? '';
@@ -666,7 +607,18 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     if (our?.hidden && !byKey.get(key)?.active) { our.hidden = false; our.hiddenSince = null; }
     // Порядок — как привязаны (15.10, просьба владельца): «Подтвердить» и «Не наш» строку не двигают.
     const ls = (links[key] ?? []).map(toLink);
-    return { key, ourId, name: cat?.name || our?.title || key, photo: our?.photo ?? '', our, links: ls, inStock: inStock.has(key), stockSince: inStock.get(key) || null };
+    // Ozon: позиция в поиске по главному запросу из «Видимости в поиске» (только у закреплённых карточек).
+    let posQuery: Ads2WatchProduct['posQuery'] = null;
+    if (mp === 'ozon') {
+      const sp = searchPositions(key);
+      if (sp) {
+        posQuery = { query: sp.query, at: sp.at };
+        if (our) our.searchPos = sp.ours;
+        for (const l of ls) l.searchPos = sp.bySku[l.id] ?? null;
+      }
+    }
+    return { key, ourId, name: cat?.name || our?.title || key, photo: our?.photo ?? '', our, links: ls, inStock: inStock.has(key), stockSince: inStock.get(key) || null,
+      archived: !!arch[key], archivedAt: arch[key] || null, posQuery };
   });
   // Порядок товаров не зависит от решений менеджера: сначала с привязками, внутри — по нашим заказам (самые продаваемые выше).
   // Наши карточки, которых не видно покупателям, — сверху: с ними надо разбираться первыми.

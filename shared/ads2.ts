@@ -175,6 +175,8 @@ export type Ads2WatchLink = {
   oz28?: { orders: number | null; gmv: number | null; convPdp: number | null; drr: number | null; ctr?: number | null; inAds: boolean | null; inPromo: boolean | null } | null;
   /** Ozon: все значения «Товаров на Ozon» за 7 и 28 дней — для «Расширенных показателей» (05.11.2026). */
   ozx?: Ads2OzRow | null; ozx28?: Ads2OzRow | null;
+  /** Ozon: место в поиске по главному запросу нашего товара (снимок «Видимости в поиске», 07.11.2026). null — нет в первой десятке / не снято. */
+  searchPos?: number | null;
 };
 
 /** Обновление данных конкурентов: последний проход агента и следующий по расписанию. */
@@ -198,6 +200,10 @@ export type Ads2WatchProduct = {
   key: string; ourId: string; name: string; photo: string; our: Ads2WatchLink | null; links: Ads2WatchLink[];
   /** Наш товар сейчас в продаже: остаток > 0 по РНП или по 5-минутному снимку остатков площадки (05.11.2026). */
   inStock?: boolean;
+  /** В архиве «Конкурентов» (под вывод, старые карточки — 07.11.2026): в списках не показываем, агент не снимает. */
+  archived?: boolean; archivedAt?: number | null;
+  /** Ozon: по какому запросу и когда сняты позиции в поиске (null — у товара нет снимка «Видимости в поиске»). */
+  posQuery?: { query: string; at: number } | null;
   /** Когда остаток стал > 0 (мс; 0 или null — давно) — для пометки «новинка». */
   stockSince?: number | null;
 };

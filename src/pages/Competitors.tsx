@@ -3,8 +3,9 @@
  * вынесено всё про конкурентов, чтобы не было «каши»).
  *
  * Листы:
- *   Привязка конкурентов — у каждого нашего товара его конкуренты: система предлагает,
- *       менеджер подтверждает, отмечает «Не наш» или добавляет своего (кнопка у товара).
+ *   Привязка конкурентов — у каждого нашего товара его конкуренты. С 07.11.2026 (решение владельца)
+ *       система конкурентов не предлагает: привязывает только менеджер (кнопка у товара), подсвечиваем
+ *       товары в продаже без конкурентов. Карточки под вывод — в «Архив».
  *       Наш товар — первой строкой той же таблицы: цена под ценой, рейтинг под рейтингом.
  *       Строки не прыгают: порядок — как привязаны. Данные свежие: ночью полный проход
  *       Агента 3, днём (11:20, 14:50, 16:50 — перед выпусками советника) и по кнопке «Обновить сейчас» — быстрый по витрине.
@@ -24,9 +25,6 @@ import { OzCompareReport } from './OzCompareReport';
 type Sheet = 'watch' | 'market';
 const SHEETS: Array<[Sheet, string]> = [['watch', 'Привязка конкурентов'], ['market', 'Позиции и рынок']];
 
-const W_STATUS: Record<Ads2WatchLink['status'], { label: string; cls: string }> = {
-  active: { label: 'подтверждён', cls: 'good' }, suggested: { label: 'предложен', cls: 'info' }, ignored: { label: 'не наш', cls: '' },
-};
 
 function useToast() {
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
@@ -107,12 +105,20 @@ function RefreshBar({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
 /** Период показателей «Товаров на Ozon» в таблице конкурентов: 7 или 28 дней. */
 type OzPer = 7 | 28;
 
-function CmpCells({ l, mp, our, passAt, per = 7 }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2WatchLink | null; passAt: number | null; per?: OzPer }) {
+/** Место в поиске (07.11.2026 вместо «К нашей»): WB — средняя позиция из «Сравнения карточек» / «Поисковых запросов»,
+ *  Ozon — место по главному запросу из «Видимости в поиске» (снимок есть только у закреплённых карточек). */
+function PosCell({ l, mp, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; posQuery?: Ads2WatchProduct['posQuery'] }) {
+  if (mp === 'wb') return <td className="ad2-num" title={l.avgPos != null ? 'Средняя позиция в поиске WB' : 'WB не отдал позицию: конкурента нет в открытом «Сравнении карточек»'}>{num(l.avgPos)}</td>;
+  if (!posQuery) return <td className="ad2-num"><span className="muted" title="Позиция снимается «Видимостью в поиске» только для карточек, закреплённых в «Ведении карточек»">–</span></td>;
+  const tip = `по запросу «${posQuery.query}», снято ${whenRel(posQuery.at)}`;
+  return <td className="ad2-num" title={tip}>{l.searchPos != null ? num(l.searchPos) : <span className="muted">дальше 10</span>}</td>;
+}
+
+function CmpCells({ l, mp, our, passAt, per = 7, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2WatchLink | null; passAt: number | null; per?: OzPer; posQuery?: Ads2WatchProduct['posQuery'] }) {
   const oz = per === 28
     ? (l.oz28 ?? { orders: null, gmv: null, convPdp: null, drr: null, ctr: null, inAds: null, inPromo: null })
     : { orders: l.orders, gmv: l.gmv, convPdp: l.convPdp, drr: l.drr, ctr: l.ctr, inAds: l.inAds, inPromo: l.inPromo };
   const ads = mp === 'ozon' ? oz : l;
-  const diff = l !== our && l.price != null && our?.price ? Math.round((l.price / our.price - 1) * 100) : null;
   const day = l.price != null && l.price1d ? Math.round((l.price / l.price1d - 1) * 100) : null;
   // В ячейке заказов WB — только число и динамика (просьба владельца 22.10: без «за 30 дн»
   // и «сравнение от …»). Период и дата сравнения карточек — в подсказке при наведении.
@@ -126,14 +132,12 @@ function CmpCells({ l, mp, our, passAt, per = 7 }: { l: Ads2WatchLink; mp: Ads2M
         {l.price == null && l.stock === 0 ? <span className="muted">нет в наличии</span> : rub(l.price)}
         {stale && <div className="cmp-sub warn">{l.priceAt ? `цена от ${whenRel(l.priceAt)}` : 'цена из аналитики'}</div>}
         {day != null && Math.abs(day) >= 3 && <div className={`cmp-sub ${day < 0 ? 'bad' : 'good'}`} title={`вчера ${rub(l.price1d)}`}>{day > 0 ? '+' : ''}{day}% за сутки</div>}</td>
-      <td className="ad2-num">{diff == null || diff === 0 ? <span className="muted">{l === our ? '' : '–'}</span>
-        : <span className={`ad2-dyn ${diff < 0 ? 'bad' : 'good'}`} title={diff < 0 ? 'конкурент дешевле нас' : 'конкурент дороже нас'}>{diff > 0 ? '+' : ''}{diff}%</span>}</td>
+      <PosCell l={l} mp={mp} posQuery={posQuery} />
       <td className="ad2-num">{l.rating ? nf1.format(l.rating) : <span className="muted">{l.rating === 0 ? 'нет' : '–'}</span>}</td>
       <td className="ad2-num">{num(l.feedbacks)}</td>
       {mp === 'wb' ? <>
         <td className="ad2-num">{pct(l.ctr)}</td>
         <td className="ad2-num" title={ordTitle}>{num(l.orders)} <PctDyn v={l.ordersDyn} /></td>
-        <td className="ad2-num">{num(l.avgPos)}</td>
       </> : <>
         <td className="ad2-num">{pct(oz.ctr ?? null)}</td>
         <td className="ad2-num" title={per === 7 && l.noSales7 ? 'За 7 дней продаж нет — Ozon не включает такие товары в недельный отчёт; за 28 дней данные есть' : undefined}>{num(oz.orders)}</td>
@@ -259,23 +263,20 @@ function CompareReport({ rep }: { rep: Ads2WbReport }) {
   );
 }
 
-function WatchProduct({ p, mp, passAt, dataAt = null, showIgnored, onData, setToast, per = 7, pick, report }: {
-  p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; dataAt?: number | null; showIgnored: boolean; per?: OzPer; report?: Ads2WbReport;
+function WatchProduct({ p, mp, passAt, dataAt = null, onData, setToast, per = 7, pick, report }: {
+  p: Ads2WatchProduct; mp: Ads2Mp; passAt: number | null; dataAt?: number | null; per?: OzPer; report?: Ads2WbReport;
   pick?: { on: boolean; toggle: () => void }; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [link, setLink] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  // «Не наш», нажатое сейчас, оставляет строку на месте (бледной, с «Вернуть»), пока страницу не обновят.
-  const [touched, setTouched] = useState<Set<string>>(new Set());
   const send = async (body: Record<string, unknown>, key: string, ok: string) => {
     setBusy(key); setErr(null);
     try {
       const r = await apiPost<Ads2Competitors>('/api/ads2/competitors', { mp, sku: p.key, ...body });
       onData(r.data);
       setToast({ ok: true, text: ok });
-      if (body.id) setTouched(s => new Set(s).add(String(body.id)));
       if (body.action === 'add') { setLink(''); setAdding(false); }
     } catch (e) {
       const t = errText(e).replace(/^сервер ответил \d+: /, '');
@@ -283,8 +284,12 @@ function WatchProduct({ p, mp, passAt, dataAt = null, showIgnored, onData, setTo
     } finally { setBusy(null); }
   };
   const add = () => { if (link.trim()) void send({ action: 'add', link: link.trim() }, 'add', 'Конкурент привязан — агент снимет его карточку в ближайшие минуты'); };
-  const links = p.links.filter(l => l.status !== 'ignored' || showIgnored || touched.has(l.id));
-  const hidden = p.links.length - links.length;
+  const links = p.links.filter(l => l.status === 'active');
+  const archive = () => {
+    const on = !p.archived;
+    if (on && !window.confirm(`Убрать ${p.key} в архив?\nКарточка пропадёт из списков и из «Без конкурентов», агент перестанет её снимать. Привязанные конкуренты сохранятся — вернуть можно на вкладке «Архив».`)) return;
+    void send({ action: on ? 'archive' : 'unarchive' }, 'arch', on ? `${p.key} — в архиве` : `${p.key} возвращён из архива`);
+  };
   const our = p.our;
   const mpName = mp === 'wb' ? 'WB' : 'Ozon';
   return (
@@ -295,7 +300,8 @@ function WatchProduct({ p, mp, passAt, dataAt = null, showIgnored, onData, setTo
           <div>
             <div className="cmp-art">{p.key}
               {p.stockSince && Date.now() - p.stockSince < 14 * 86_400_000 && <span className="chip good ad2-chipsm cmp-new" title="Остаток на складе появился недавно">в продаже с {new Date(p.stockSince).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}</span>}
-              {p.inStock && !p.links.some(l => l.status !== 'ignored') && <span className="chip warn ad2-chipsm cmp-new">нет конкурентов</span>}
+              {!p.archived && p.inStock && !links.length && <span className="chip warn ad2-chipsm cmp-new">нет конкурентов</span>}
+              {p.archived && <span className="chip ad2-chipsm cmp-new">в архиве{p.archivedAt ? ` с ${new Date(p.archivedAt).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}` : ''}</span>}
             </div>
             <div className="muted cmp-name">{our?.url ? <a href={our.url} target="_blank" rel="noreferrer">{p.name}</a> : p.name}{p.ourId ? ` · ${p.ourId}` : ''}</div>
           </div>
@@ -311,9 +317,10 @@ function WatchProduct({ p, mp, passAt, dataAt = null, showIgnored, onData, setTo
             </label>
           );
         })()}
-        <button className={`btn ${adding ? '' : 'btn-primary'}`} onClick={() => { setAdding(a => !a); setErr(null); }}>
+        <button className="btn" disabled={!!busy} onClick={archive} title={p.archived ? 'Вернуть карточку в списки' : 'Карточка под вывод или старая — конкуренты не нужны'}>{p.archived ? 'Вернуть из архива' : 'В архив'}</button>
+        {!p.archived && <button className={`btn ${adding ? '' : 'btn-primary'}`} onClick={() => { setAdding(a => !a); setErr(null); }}>
           {adding ? 'Отмена' : <><PlusIcon size={14} weight="bold" /> Конкурент</>}
-        </button>
+        </button>}
       </div>
       {our?.hidden && <HiddenNote mp={mp} since={our.hiddenSince} />}
       {adding && (
@@ -329,40 +336,34 @@ function WatchProduct({ p, mp, passAt, dataAt = null, showIgnored, onData, setTo
           <table className="ad2-table cmp-table">
             <thead><tr>
               <th className="cmp-col-prod">Товар</th>
-              <th className="ad2-num">Цена</th><th className="ad2-num" title="Цена конкурента против нашей">К нашей</th>
+              <th className="ad2-num">Цена</th><th className="ad2-num" title={mp === 'wb' ? 'Средняя позиция в поиске WB: из «Сравнения карточек» (30 дней), у нашего товара без сравнения — из «Поисковых запросов» (7 дней). Меньше — выше в выдаче' : p.posQuery ? `Место в поиске Ozon по запросу «${p.posQuery.query}», снимок «Видимости в поиске» ${whenRel(p.posQuery.at)}. «Дальше 10» — конкурента нет в первой десятке` : 'Позицию Ozon снимает «Видимость в поиске» — пока только для карточек, закреплённых в «Ведении карточек»'}>Позиция</th>
               <th className="ad2-num">Рейтинг</th><th className="ad2-num">Отзывы</th>
               {mp === 'wb'
-                ? <><th className="ad2-num" title="CTR в поиске: переходы в карточку ÷ показы. Из «Сравнения карточек» WB (30 дней); у нашего товара без сравнения — «Поисковые запросы» за 7 дней. Зависит и от фото, и от позиции/рекламы">CTR</th><th className="ad2-num" title="Из «Сравнения карточек» WB за 30 дней; у нашего товара без открытого сравнения — за 7 дней">Заказы, 30 дн</th><th className="ad2-num">Позиция</th></>
+                ? <><th className="ad2-num" title="CTR в поиске: переходы в карточку ÷ показы. Из «Сравнения карточек» WB (30 дней); у нашего товара без сравнения — «Поисковые запросы» за 7 дней. Зависит и от фото, и от позиции/рекламы">CTR</th><th className="ad2-num" title="Из «Сравнения карточек» WB за 30 дней; у нашего товара без открытого сравнения — за 7 дней">Заказы, 30 дн</th></>
                 : <><th className="ad2-num" title="Просмотры карточки ÷ показы, из «Товаров на Ozon» за выбранный период — одна формула для нас и конкурентов. Считает все просмотры карточки, поэтому выше CTR в РНП в 1,4–1,8 раза. Зависит и от фото, и от позиции/рекламы">CTR</th><th className="ad2-num">Продано, {per} дн</th><th className="ad2-num">Выручка, {per} дн</th><th className="ad2-num" title="Из карточки в корзину">В корзину</th><th className="ad2-num" title="Доля рекламных расходов в выручке">ДРР</th></>}
-              <th className="cmp-yn" title="Участвует в рекламе / в акции площадки">Реклама / акция</th><th className="cmp-decide">Решение</th>
+              <th className="cmp-yn" title="Участвует в рекламе / в акции площадки">Реклама / акция</th><th className="cmp-decide"></th>
             </tr></thead>
             <tbody>
               {our && (
                 <tr className="cmp-our">
                   <td className="cmp-col-prod"><ProductCell p={{ photo: our.photo || p.photo, name: our.title || p.name, article: `наш товар · ${p.key}`, link: our.url }} /></td>
-                  <CmpCells l={our} mp={mp} our={our} passAt={passAt} per={per} />
+                  <CmpCells l={our} mp={mp} our={our} passAt={passAt} per={per} posQuery={p.posQuery} />
                   <td className="cmp-decide"><span className="chip ad2-chipsm cmp-chip-our">наш товар</span></td>
                 </tr>
               )}
               {links.map(l => {
                 const k = `${p.key}:${l.id}`;
                 return (
-                  <tr key={l.id} className={l.status === 'ignored' ? 'ad2-row-muted' : ''}>
+                  <tr key={l.id}>
                     <td className="cmp-col-prod">
                       <ProductCell p={{ photo: l.photo, name: l.title || `${mp === 'wb' ? 'артикул' : 'SKU'} ${l.id}`, article: [l.id, l.brand || l.seller].filter(Boolean).join(' · '), link: l.url }} />
                       {l.hidden && <div className="cmp-note cmp-gone">нет на витрине {mpName} {l.hiddenSince ? `с ${whenRel(l.hiddenSince)}` : ''}</div>}
                       {(l.note || l.source === 'manual') && <div className="muted cmp-note">{l.source === 'manual' ? 'добавлен вручную' : ''}{l.source === 'manual' && l.note ? ' · ' : ''}{l.note}</div>}
                     </td>
-                    <CmpCells l={l} mp={mp} our={our} passAt={passAt} per={per} />
+                    <CmpCells l={l} mp={mp} our={our} passAt={passAt} per={per} posQuery={p.posQuery} />
                     <td className="cmp-decide">
-                      <span className={`chip ${W_STATUS[l.status].cls} ad2-chipsm`}>{W_STATUS[l.status].label}</span>
                       <div className="cmp-btns">
-                      {l.status === 'suggested' && <button className="btn btn-sm" disabled={!!busy} onClick={() => void send({ action: 'approve', id: l.id }, k, 'Подтверждён — идёт в расчёты и советы')}>Подтвердить</button>}
-                      {l.status !== 'ignored' && <button className="btn btn-sm" disabled={!!busy} onClick={() => void send({ action: 'ignore', id: l.id }, k, 'Отмечен «не наш» — система его больше не предложит')}>Не наш</button>}
-                      {l.status === 'ignored' && <>
-                        <button className="btn btn-sm" disabled={!!busy} onClick={() => void send({ action: 'restore', id: l.id }, k, 'Вернул в предложенные')}>Вернуть</button>
-                        <button className="btn btn-sm" disabled={!!busy} onClick={() => void send({ action: 'remove', id: l.id }, k, 'Удалён из списка')}>Удалить</button>
-                      </>}
+                      <button className="btn btn-sm" disabled={!!busy} onClick={() => { if (window.confirm(`Отвязать конкурента ${l.title || l.id} от ${p.key}?`)) void send({ action: 'remove', id: l.id }, k, 'Конкурент отвязан'); }}>Отвязать</button>
                       </div>
                     </td>
                   </tr>
@@ -371,8 +372,7 @@ function WatchProduct({ p, mp, passAt, dataAt = null, showIgnored, onData, setTo
             </tbody>
           </table>
         </div>
-      ) : <p className="muted cmp-empty">{p.links.length ? 'Все предложенные отмечены «не наш».' : 'Конкурентов пока нет.'} Добавьте своего: «+ Конкурент».</p>}
-      {hidden > 0 && <div className="muted cmp-note">Скрыто «не наших»: {hidden}</div>}
+      ) : <p className="muted cmp-empty">Конкурентов пока нет. Привяжите: «+ Конкурент».</p>}
       {report && <CompareReport rep={report} />}
       {mp === 'ozon' && <OzCompareReport p={p} perDefault={per} dataAt={dataAt} setToast={setToast} />}
     </div>
@@ -462,20 +462,20 @@ function ComparePanel({ st, picked, onClear, onData, setToast }: {
 
 function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2Mp; onData: (x: Ads2Competitors) => void; setToast: (t: { ok: boolean; text: string }) => void }) {
   const [q, setQ] = useState('');
-  // Какие товары: с конкурентами / в продаже без подтверждённых конкурентов (05.11.2026) / все.
-  const [mode, setMode] = useState<'with' | 'none' | 'all'>('with');
+  // Какие товары: с конкурентами / в продаже без конкурентов (05.11.2026) / все / архив (07.11.2026).
+  const [mode, setMode] = useState<'with' | 'none' | 'all' | 'arch'>('with');
   const setAll = (on: boolean) => setMode(on ? 'all' : 'with');
-  const [onlyPending, setOnlyPending] = useState(false);
-  const [showIgnored, setShowIgnored] = useState(false);
   const [more, setMore] = useState(15);
   const [per, setPer] = useState<OzPer>(() => { try { return localStorage.getItem('cmp:ozPer') === '28' ? 28 : 7; } catch { return 7; } });
   const pickPer = (v: OzPer) => { setPer(v); try { localStorage.setItem('cmp:ozPer', String(v)); } catch { /* приватное окно */ } };
-  const withLinks = d.watch.filter(p => p.links.length > 0);
-  // В продаже, а не привязан никто (ни подтверждённых, ни предложенных системой; «не наши» не в счёт) — новинки сверху.
-  // Предложенные — уже привязаны, их видно по «ждут решения» (05.11: владелец, AFERIY с 4 предложенными).
-  const bare = d.watch.filter(p => p.inStock && !p.links.some(l => l.status !== 'ignored'))
+  const live = d.watch.filter(p => !p.archived);
+  const archived = d.watch.filter(p => p.archived).sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0));
+  const hasComp = (p: Ads2WatchProduct) => p.links.some(l => l.status === 'active');
+  const withLinks = live.filter(hasComp);
+  // В продаже, а конкурентов менеджеры не привязали — новинки сверху (с 07.11 система никого не предлагает).
+  const bare = live.filter(p => p.inStock && !hasComp(p))
     .sort((a, b) => (b.stockSince ?? 0) - (a.stockSince ?? 0) || a.key.localeCompare(b.key, 'ru'));
-  const gone = d.watch.filter(p => p.our?.hidden);
+  const gone = live.filter(p => p.our?.hidden);
   // Выбор товаров для недельных сравнений WB — на сервере (29.10.2026): отметки видят все менеджеры и не теряются.
   const picks = useMemo(() => new Set(d.wbCompare?.picks ?? []), [d.wbCompare?.picks]);
   const sendPick = (body: Record<string, unknown>) => {
@@ -484,24 +484,21 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
   };
   const togglePick = (key: string) => sendPick({ key, on: !picks.has(key) });
   const picked = mp === 'wb' ? d.watch.filter(p => picks.has(p.key) && compareNms(p).length) : [];
-  const pendingOf = (p: Ads2WatchProduct) => p.links.filter(l => l.status === 'suggested').length;
-  const pending = d.watch.reduce((s, p) => s + pendingOf(p), 0);
   const needle = q.trim().toLowerCase();
-  const list = (mode === 'all' ? d.watch : mode === 'none' ? bare : withLinks)
-    .filter(p => !onlyPending || pendingOf(p) > 0)
+  const list = (mode === 'all' ? live : mode === 'none' ? bare : mode === 'arch' ? archived : withLinks)
     .filter(p => !needle || p.key.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle) || p.ourId.includes(needle)
       || p.links.some(l => l.id.includes(needle) || l.title.toLowerCase().includes(needle)));
   return (
     <>
       <section className="card cmp-card">
         <div className="cmp-head">
-          <h2>Конкуренты по товарам {pending > 0 && <span className="chip info">ждут решения: {pending}</span>}
+          <h2>Конкуренты по товарам
             {bare.length > 0 && <button className="chip warn cmp-bare-chip" onClick={() => { setMode('none'); setMore(15); }} title="Наши товары в продаже, к которым не привязан ни один конкурент">без конкурентов: {bare.length}</button>}</h2>
           <RefreshBar d={d} mp={mp} onData={onData} setToast={setToast} />
         </div>
         <p className="muted cmp-lead">
-          Система предлагает конкурентов ({mp === 'wb' ? 'из наборов «Сравнение карточек» в кабинете WB' : 'лидеров категории с похожими названием и ценой, «Товары на Ozon»'}).
-          В расчёты и советы идут подтверждённые. Не тот — «Не наш», система его больше не предложит. Своего — кнопка «+ Конкурент» у товара.
+          Конкурентов привязывают менеджеры — кнопка «+ Конкурент» у товара; система сама никого не предлагает. Товары в продаже без конкурентов — в «Без конкурентов».
+          Карточки под вывод и старые — кнопкой «В архив»: пропадут из списков, агент перестанет их снимать.
           Цены, рейтинг и отзывы агент снимает по расписанию выше и по кнопке «Обновить сейчас»; после привязки нового конкурента — сам через пару минут.
           Если цену карточки в последний раз снять не удалось, под ней написано, от когда она.
         </p>
@@ -513,7 +510,8 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
           <div className="period-switch" role="group" aria-label="Какие товары">
             <button className={`period-btn ${mode === 'with' ? 'active' : ''}`} onClick={() => { setMode('with'); setMore(15); }}>С конкурентами <span className="ad2-cnt">{withLinks.length}</span></button>
             <button className={`period-btn ${mode === 'none' ? 'active' : ''}`} onClick={() => { setMode('none'); setMore(15); }} title="Наши товары в продаже, к которым не привязан ни один конкурент">Без конкурентов <span className="ad2-cnt">{bare.length}</span></button>
-            <button className={`period-btn ${mode === 'all' ? 'active' : ''}`} onClick={() => { setMode('all'); setMore(15); }}>Все товары <span className="ad2-cnt">{d.watch.length}</span></button>
+            <button className={`period-btn ${mode === 'all' ? 'active' : ''}`} onClick={() => { setMode('all'); setMore(15); }}>Все товары <span className="ad2-cnt">{live.length}</span></button>
+            <button className={`period-btn ${mode === 'arch' ? 'active' : ''}`} onClick={() => { setMode('arch'); setMore(15); }} title="Карточки под вывод и старые: в списках не видны, агент их не снимает">Архив <span className="ad2-cnt">{archived.length}</span></button>
           </div>
           {mp === 'ozon' && (
             <div className="period-switch" role="group" aria-label="Период продаж Ozon" title="Продажи, выручка, корзина, ДРР и реклама/акции — из «Товаров на Ozon» за выбранный период">
@@ -521,8 +519,6 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
               <button className={`period-btn ${per === 28 ? 'active' : ''}`} onClick={() => pickPer(28)}>28 дней</button>
             </div>
           )}
-          <label className="cmp-check"><input type="checkbox" checked={onlyPending} onChange={e => setOnlyPending(e.target.checked)} /> только ждущие решения</label>
-          <label className="cmp-check"><input type="checkbox" checked={showIgnored} onChange={e => setShowIgnored(e.target.checked)} /> показывать «не наших»</label>
         </div>
       </section>
       {mp === 'wb' && d.wbCompare && <ComparePanel st={d.wbCompare} picked={picked} onClear={() => sendPick({ clear: true })} onData={onData} setToast={setToast} />}
@@ -533,7 +529,7 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
           <p className="cmp-gone-p">Витрина {mp === 'wb' ? 'WB' : 'Ozon'} {gone.length === 1 ? 'её' : 'их'} не показывает: заказов и рекламных показов не будет. Проверьте в кабинете, не скрыта ли карточка,
             не заблокирована ли, нет ли требования от площадки. Проверено с адреса доставки в браузере агента.</p>
           <div className="cmp-gone-list">
-            {gone.map(p => <button key={p.key} className="btn btn-sm" onClick={() => { setAll(true); setQ(p.key); setOnlyPending(false); }}>
+            {gone.map(p => <button key={p.key} className="btn btn-sm" onClick={() => { setAll(true); setQ(p.key); }}>
               {p.key}{p.our?.hiddenSince ? <span className="muted"> · с {whenRel(p.our.hiddenSince)}</span> : null}</button>)}
           </div>
         </section>
@@ -541,12 +537,12 @@ function WatchSheet({ d, mp, onData, setToast }: { d: Ads2Competitors; mp: Ads2M
       {mode === 'none' && (
         <div className="card cmp-bare-note">
           <b>В продаже без конкурентов: {bare.length}.</b> Наши товары с остатком на складе, к которым не привязан ни один конкурент — новинки сверху.
-          Привяжите конкурента кнопкой «+ Конкурент» у товара. Товары, где система уже предложила конкурентов, — в «С конкурентами» (ждут решения). Товар, поступивший в продажу, появляется здесь в течение 5 минут.
+          Привяжите конкурента кнопкой «+ Конкурент» у товара, а карточку под вывод уберите «В архив». Товар, поступивший в продажу, появляется здесь в течение 5 минут.
           {(d.unmapped ?? 0) > 0 && <span className="muted"> Ещё {d.unmapped} {mpNameOf(mp)}-карточ{(d.unmapped ?? 0) === 1 ? 'ка' : 'ек'} с остатком пока нет в справочнике товаров — появятся после его обновления (несколько часов).</span>}
         </div>
       )}
-      {list.length === 0 && <div className="card muted">{mode === 'none' ? 'Все наши товары в продаже уже с конкурентами.' : mode === 'all' || needle || onlyPending ? 'Ничего не найдено.' : 'Привязок пока нет. Предложения появятся после ночного прохода агента; своего конкурента можно привязать в «Все товары».'}</div>}
-      {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} dataAt={d.refresh.fullAt} per={per} showIgnored={showIgnored} onData={onData} setToast={setToast}
+      {list.length === 0 && <div className="card muted">{mode === 'none' ? 'Все наши товары в продаже уже с конкурентами.' : mode === 'arch' ? 'В архиве пусто.' : mode === 'all' || needle ? 'Ничего не найдено.' : 'Привязок пока нет: привязать конкурента можно в «Все товары».'}</div>}
+      {list.slice(0, more).map(p => <WatchProduct key={p.key} p={p} mp={mp} passAt={d.refresh.cardsAt} dataAt={d.refresh.fullAt} per={per} onData={onData} setToast={setToast}
         pick={mp === 'wb' && d.wbCompare ? { on: picks.has(p.key), toggle: () => togglePick(p.key) } : undefined}
         report={mp === 'wb' && p.ourId ? d.wbReports?.[p.ourId] : undefined} />)}
       {list.length > more && <button className="btn" onClick={() => setMore(m => m + 20)}>Показать ещё ({list.length - more})</button>}
@@ -693,7 +689,6 @@ function Board({ mp, mpSwitch }: { mp: Ads2Mp; mpSwitch: React.ReactNode }) {
     apiGet<Ads2Competitors>(`/api/ads2/competitors?mp=${mp}`).then(r => { setD(r.data); setErr(null); }).catch(e => setErr(errText(e)));
   }, [mp]);
   const go = (s: Sheet) => { setSheet(s); try { localStorage.setItem('cmp:sheet', s); } catch { /* не критично */ } };
-  const pending = useMemo(() => d?.watch.reduce((s, p) => s + p.links.filter(l => l.status === 'suggested').length, 0) ?? 0, [d]);
   return (
     <div className="grid ad2 cmp" style={{ gap: 16 }}>
       <div className="sa-head">
@@ -701,7 +696,7 @@ function Board({ mp, mpSwitch }: { mp: Ads2Mp; mpSwitch: React.ReactNode }) {
         <div className="ad2-tabs" role="tablist">
           {SHEETS.map(([k, l]) => (
             <button key={k} role="tab" aria-selected={sheet === k} className={`ad2-tab ${sheet === k ? 'active' : ''}`} onClick={() => go(k)}>
-              {l}{k === 'watch' && pending > 0 && <span className="ad2-badge cmp-badge">{pending}</span>}
+              {l}
             </button>
           ))}
         </div>

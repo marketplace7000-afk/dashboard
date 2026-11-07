@@ -2,8 +2,10 @@
  * «Конкуренты» → Ozon, столбец «Позиция» (07.11.2026): место в поиске Ozon нашего товара и каждого
  * привязанного конкурента по главному запросу нашего товара.
  *
- * Главный запрос — самый частый у нашей карточки за месяц (Seller API «product-queries/details»,
- * собирает сервер не чаще раза в неделю на товар: API отвечает 429 уже на 4-й запрос подряд).
+ * Главный запрос — тот, по которому нашу карточку за месяц увидело больше всего покупателей (Seller API
+ * «product-queries/details»), без запросов с брендом из нашего артикула: «повербанк» ищут в 6 раз чаще,
+ * чем «портативная электростанция», но электростанцию по нему почти не видят, а «allpowers» — поиск
+ * своего бренда, где конкурентов нет. Собирает сервер не чаще раза в неделю на товар (429 уже на 4-й запрос подряд).
  * Места снимает агент в полном ночном проходе Ozon: «Видимость в поиске» (explanation_by_id) принимает
  * сразу несколько SKU и отдаёт точное место каждого — один запрос на наш товар (проверено 07.11 на ALLPOWERS:
  * мы 496, конкуренты 50/73/93). Только чтение.
@@ -51,19 +53,33 @@ function targets(): { key: string; ozonSku: string; comps: string[] }[] {
 
 let collecting = false;
 /** Обновить главные запросы товаров, у которых их нет или они старше недели. */
-export async function collectMainQueries(): Promise<string> {
+/** Слова артикула, похожие на бренд/модель (от 4 латинских букв): ALLPOWERS-STAN2KWH-AP-R2500 → allpowers. */
+function brandWords(key: string): string[] {
+  return key.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && /^[a-z]+$/.test(w));
+}
+
+/** Главный запрос из списка запросов карточки: больше всего увидевших, без бренда из артикула. */
+export function pickMainQuery(key: string, list: { text: string; freq: number | null; reach: number | null }[]): { text: string; freq: number | null } | null {
+  const qs = list.filter(q => q.text.trim());
+  const brands = brandWords(key);
+  const clean = qs.filter(q => !brands.some(b => q.text.toLowerCase().includes(b)));
+  const by = (a: typeof qs[0], b: typeof qs[0]) => (b.reach ?? 0) - (a.reach ?? 0) || (b.freq ?? 0) - (a.freq ?? 0);
+  return (clean.length ? clean : qs).sort(by)[0] ?? null;
+}
+
+export async function collectMainQueries(force = false): Promise<string> {
   if (collecting) return 'уже идёт';
   collecting = true;
   try {
     const d = db();
     const known = new Map((d.prepare('SELECT key, ozon_sku, at FROM oz_main_query').all() as { key: string; ozon_sku: string; at: number }[]).map(r => [r.key, r]));
-    const due = targets().filter(t => { const k = known.get(t.key); return !k || k.ozon_sku !== t.ozonSku || Date.now() - k.at > REFRESH_MS; })
+    const due = targets().filter(t => { const k = known.get(t.key); return force || !k || k.ozon_sku !== t.ozonSku || Date.now() - k.at > REFRESH_MS; })
       .sort((a, b) => (known.get(a.key)?.at ?? 0) - (known.get(b.key)?.at ?? 0)).slice(0, PER_RUN);
     let ok = 0, empty = 0; const errors: string[] = [];
     for (const [i, t] of due.entries()) {
       if (i) await new Promise(r => setTimeout(r, 25_000));
       try {
-        const q = (await fetchOzon(t.ozonSku)).filter(x => x.text.trim()).sort((a, b) => (b.freq ?? 0) - (a.freq ?? 0))[0];
+        const q = pickMainQuery(t.key, await fetchOzon(t.ozonSku));
         if (!q) { empty++; continue; }
         d.prepare(`INSERT INTO oz_main_query (key, ozon_sku, query, freq, at) VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(key) DO UPDATE SET ozon_sku = excluded.ozon_sku, query = excluded.query, freq = excluded.freq, at = excluded.at`)

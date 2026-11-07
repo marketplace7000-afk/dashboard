@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { parseNmId, parseOzonSku } from '../api/_lib/competitorWatch';
 import { editWatch, buildWatch, watchParams, saveCabinetSnapshot, getCompetitors, requestRefresh, refreshState, posSeries, hiddenCards } from '../api/_lib/ads/cabinet';
 import { adsDb } from '../api/_lib/ads/store';
+import { pickMainQuery } from '../api/_lib/ozSearchPos';
 import { listTasks, maintainQueue } from '../api/_lib/agentQueue';
 
 let failed = 0;
@@ -139,5 +140,16 @@ check('завтра в 11:50 — 11:20 ещё ждём (40 минут), но н�
 saveCabinetSnapshot('wb', { ...wbData, daily: [{ date: yest, report: { groups: [{ items: [{ nmId: 1417220162, avgPosition: { current: 14 }, views: { current: 900 } }] }] } }] });
 check('позиция WB за день сохраняется', posSeries('wb', yest, yest).get('1417220162')?.get(yest), 14);
 
+console.log('Главный запрос Ozon для позиций (07.11.2026)');
+{
+  const qs = [
+    { text: 'повербанк', freq: 293233, reach: 285 }, { text: 'портативная электростанция', freq: 44559, reach: 1651 },
+    { text: 'allpowers электростанция', freq: 1900, reach: 1855 }, { text: 'allpowers', freq: 1752, reach: 1800 },
+  ];
+  check('где нас видят, без своего бренда', pickMainQuery('ALLPOWERS-STAN2KWH-AP-R2500-V2', qs)?.text, 'портативная электростанция');
+  check('одни запросы с брендом — лучший из них', pickMainQuery('CARLINKIT-ULTRA-8-128', [{ text: 'carlinkit', freq: 7597, reach: 900 }])?.text, 'carlinkit');
+}
+
 console.log(failed ? `\nПРОВАЛЕНО: ${failed}` : '\nВсе проверки прошли');
 process.exit(failed ? 1 : 0);
+

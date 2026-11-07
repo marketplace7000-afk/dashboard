@@ -618,13 +618,13 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     const ap = mp === 'ozon' ? ozPos.get(key) : undefined;
     if (ap) {
       // Ночной проход агента: точные места нашего и каждого конкурента по главному запросу (null — нет в выдаче).
-      posQuery = { query: ap.query, at: ap.at, full: true };
+      posQuery = { query: ap.query, region: ap.region, at: ap.at, full: true };
       if (our) our.searchPos = ap.pos[ourId] ?? null;
       for (const l of ls) l.searchPos = ap.pos[l.id] ?? null;
     } else if (mp === 'ozon') {
       const sp = searchPositions(key);
       if (sp) {
-        posQuery = { query: sp.query, at: sp.at };
+        posQuery = { query: sp.query, region: sp.region, at: sp.at };
         if (our) our.searchPos = sp.ours;
         for (const l of ls) l.searchPos = sp.bySku[l.id] ?? null;
       }

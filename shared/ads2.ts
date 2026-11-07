@@ -203,7 +203,7 @@ export type Ads2WatchProduct = {
   /** В архиве «Конкурентов» (под вывод, старые карточки — 07.11.2026): в списках не показываем, агент не снимает. */
   archived?: boolean; archivedAt?: number | null;
   /** Ozon: по какому запросу и когда сняты позиции в поиске (null — у товара нет снимка «Видимости в поиске»). */
-  posQuery?: { query: string; at: number; full?: boolean } | null;
+  posQuery?: { query: string; region?: string; at: number; full?: boolean } | null;
   /** Когда остаток стал > 0 (мс; 0 или null — давно) — для пометки «новинка». */
   stockSince?: number | null;
 };

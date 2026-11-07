@@ -102,12 +102,12 @@ export function saveSearchPos(rows: unknown, at: number, date: string): number {
 }
 
 /** Последние снятые места всех товаров: артикул → запрос, когда, места по SKU. */
-export function latestSearchPos(): Map<string, { query: string; at: number; pos: Record<string, number | null> }> {
-  const out = new Map<string, { query: string; at: number; pos: Record<string, number | null> }>();
+export function latestSearchPos(): Map<string, { query: string; region: string; at: number; pos: Record<string, number | null> }> {
+  const out = new Map<string, { query: string; region: string; at: number; pos: Record<string, number | null> }>();
   try {
     const rows = db().prepare(`SELECT p.key, p.at, p.json FROM oz_search_pos p
       JOIN (SELECT key, MAX(date) date FROM oz_search_pos GROUP BY key) m ON m.key = p.key AND m.date = p.date`).all() as { key: string; at: number; json: string }[];
-    for (const r of rows) { const j = JSON.parse(r.json); out.set(r.key, { query: j.query, at: Number(r.at), pos: j.pos ?? {} }); }
+    for (const r of rows) { const j = JSON.parse(r.json); out.set(r.key, { query: j.query, region: String(j.region ?? ''), at: Number(r.at), pos: j.pos ?? {} }); }
   } catch (e) { console.warn('[oz-search-pos] не прочитаны:', (e as Error).message); }
   return out;
 }

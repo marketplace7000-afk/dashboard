@@ -149,7 +149,7 @@ export function cardVisibility(sku: unknown): VisQuery[] {
  * «Видимости в поиске» по самому частому запросу карточки — наше место и места конкурентов из первой десятки
  * той же выдачи. Снимок есть только у закреплённых в «Ведении карточек» товаров; у остальных — null.
  */
-export function searchPositions(sku: unknown): { query: string; at: number; ours: number | null; bySku: Record<string, number> } | null {
+export function searchPositions(sku: unknown): { query: string; region: string; at: number; ours: number | null; bySku: Record<string, number> } | null {
   let list: VisQuery[] = [];
   try { list = cardVisibility(sku).filter(v => v.exact && v.top.length); } catch { return null; }
   if (!list.length) return null;
@@ -165,5 +165,5 @@ export function searchPositions(sku: unknown): { query: string; at: number; ours
   const v = [...list].sort((a, b) => (freq.get(b.query) ?? 0) - (freq.get(a.query) ?? 0))[0];
   const bySku: Record<string, number> = {};
   for (const t of v.top) if (t.pos != null && !t.ours) bySku[String(t.sku)] = t.pos;
-  return { query: v.query, at: v.at, ours: v.ours?.pos ?? null, bySku };
+  return { query: v.query, region: v.region, at: v.at, ours: v.ours?.pos ?? null, bySku };
 }

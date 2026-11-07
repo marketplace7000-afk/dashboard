@@ -128,7 +128,7 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     // Быстрому проходу тоже нужен id компании — он снимает продажи по артикулам (20.10.2026).
     if (task.type === 'competitor_watch' && task.params.marketplace === 'ozon') {
       task.params = { ...task.params, company_id: String(process.env.OZON_CLIENT_ID || '').trim() };
-      if (!task.params.light) {
+      if (!task.params.light && !task.params.positions) {
         const { ozonTopTypeIds } = await import('./rnp');
         const top = await ozonTopTypeIds(8).catch(() => []);
         task.params = { ...task.params, categories: top.map(t => t.typeId) };
@@ -136,7 +136,13 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     }
     // Конкуренты, привязанные к товарам (менеджерами или предложенные системой), и наши
     // товары с привязками — агент снимает их карточки на витрине для сравнения.
-    if (task.type === 'competitor_watch') {
+    if (task.type === 'competitor_watch' && task.params.positions) {
+      // 07.11.2026: отдельное задание — места в живом поиске Ozon по главному запросу каждого товара с конкурентами.
+      try {
+        const { searchPosPlan } = await import('./ozSearchPos');
+        task.params = { ...task.params, searchPos: await searchPosPlan() };
+      } catch (e) { console.warn('[competitors] план позиций Ozon не собран:', (e as Error)?.message); }
+    } else if (task.type === 'competitor_watch') {
       const { watchParams } = await import('./ads/cabinet');
       task.params = { ...task.params, ...watchParams(task.params.marketplace === 'ozon' ? 'ozon' : 'wb', !!task.params.light) };
       // 26.10.2026: проходы WB заодно снимают показы карточек по дням — для CTR в РНП
@@ -150,11 +156,6 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
           const { visibilityPlan } = await import('./cardVisibility');
           task.params = { ...task.params, visibility: await visibilityPlan() };
         } catch (e) { console.warn('[cards] план видимости не собран:', (e as Error)?.message); }
-        // 07.11.2026: места в поиске нашего товара и его конкурентов по главному запросу — столбец «Позиция» в «Конкурентах».
-        try {
-          const { searchPosPlan } = await import('./ozSearchPos');
-          task.params = { ...task.params, searchPos: await searchPosPlan() };
-        } catch (e) { console.warn('[competitors] план позиций Ozon не собран:', (e as Error)?.message); }
       }
     }
     res.status(200).json({ task, settings: getSettings() });

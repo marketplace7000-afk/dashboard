@@ -6,9 +6,9 @@
  * «product-queries/details»), без запросов с брендом из нашего артикула: «повербанк» ищут в 6 раз чаще,
  * чем «портативная электростанция», но электростанцию по нему почти не видят, а «allpowers» — поиск
  * своего бренда, где конкурентов нет. Собирает сервер не чаще раза в неделю на товар (429 уже на 4-й запрос подряд).
- * Места снимает агент в полном ночном проходе Ozon: «Видимость в поиске» (explanation_by_id) принимает
- * сразу несколько SKU и отдаёт точное место каждого — один запрос на наш товар (проверено 07.11 на ALLPOWERS:
- * мы 496, конкуренты 50/73/93). Только чтение.
+ * Места снимает агент отдельным заданием (competitor_watch, positions): открывает поиск ozon.ru как покупатель
+ * и листает первые ~160 мест. «Видимость в поиске» кабинета для этого не годится: считает место по своей модели
+ * (AFERIY 07.11: кабинет 94, живой поиск 6–9). Только чтение.
  */
 import { adsDb } from './ads/store';
 import { rnpItems } from './rnp';
@@ -118,12 +118,12 @@ export function saveSearchPos(rows: unknown, at: number, date: string): number {
 }
 
 /** Последние снятые места всех товаров: артикул → запрос, когда, места по SKU. */
-export function latestSearchPos(): Map<string, { query: string; region: string; at: number; pos: Record<string, number | null> }> {
-  const out = new Map<string, { query: string; region: string; at: number; pos: Record<string, number | null> }>();
+export function latestSearchPos(): Map<string, { query: string; region: string; at: number; depth: number | null; pos: Record<string, number | null> }> {
+  const out = new Map<string, { query: string; region: string; at: number; depth: number | null; pos: Record<string, number | null> }>();
   try {
     const rows = db().prepare(`SELECT p.key, p.at, p.json FROM oz_search_pos p
       JOIN (SELECT key, MAX(date) date FROM oz_search_pos GROUP BY key) m ON m.key = p.key AND m.date = p.date`).all() as { key: string; at: number; json: string }[];
-    for (const r of rows) { const j = JSON.parse(r.json); out.set(r.key, { query: j.query, region: String(j.region ?? ''), at: Number(r.at), pos: j.pos ?? {} }); }
+    for (const r of rows) { const j = JSON.parse(r.json); out.set(r.key, { query: j.query, region: String(j.region ?? ''), at: Number(r.at), depth: j.total ?? null, pos: j.pos ?? {} }); }
   } catch (e) { console.warn('[oz-search-pos] не прочитаны:', (e as Error).message); }
   return out;
 }

@@ -93,9 +93,9 @@ check('архив записан в файл привязок', !!store().archiv
 check('вернуть из архива', [editWatch({ mp: 'wb', sku: 'SOTA-RGB', action: 'unarchive' }).ok, buildWatch('wb', wbData).watch.find(x => x.key === 'SOTA-RGB')!.archived], [true, false]);
 const oz = buildWatch('ozon', ozData).watch.find(x => x.key === 'CARLINKIT-ULTRA2-KRUG-8-128')!;
 check('Ozon: ДРР и продажи лидера', oz.links.filter(l => l.id === '5555555555').map(l => [l.drr, l.orders, l.seller === '' ? 'нет' : l.seller]), [[6.5, 40, 'нет']]);
-saveCabinetSnapshot('ozon', { ...ozData, searchPos: [{ key: 'carlinkit-ultra2-krug-8-128', query: 'carplay адаптер', region: 'Москва', total: 120, pos: { '3154491355': 40, '4392959400': 5, '5555555555': null } }] });
+saveCabinetSnapshot('ozon', { positions: true, searchPos: [{ key: 'carlinkit-ultra2-krug-8-128', query: 'carplay адаптер', region: 'Москва', total: 120, pos: { '3154491355': 40, '4392959400': 5, '5555555555': null } }] });
 const ozp = buildWatch('ozon', ozData).watch.find(x => x.key === 'CARLINKIT-ULTRA2-KRUG-8-128')!;
-check('Ozon: позиции в поиске из ночного прохода', [ozp.posQuery?.query, ozp.posQuery?.full, ozp.our?.searchPos, ozp.links.map(l => l.searchPos)], ['carplay адаптер', true, 40, [5, null]]);
+check('Ozon: позиции из живого поиска (отдельное задание, снимок кабинета не трогает)', [ozp.posQuery?.query, ozp.posQuery?.depth, ozp.our?.searchPos, ozp.links.map(l => l.searchPos)], ['carplay адаптер', 120, 40, [5, null]]);
 
 console.log('Снимок и ответ API');
 const sum = saveCabinetSnapshot('wb', wbData);

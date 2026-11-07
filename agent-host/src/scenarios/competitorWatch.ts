@@ -467,55 +467,59 @@ async function ozonVisibility(task: AgentTask, page: Page, cid: string, data: an
   if (failed) data.errors = [...(data.errors ?? []), `видимость: не сняты ${failed} запросов`];
 }
 
+/** Сколько мест выдачи просматриваем: дальше — «дальше N». */
+const LIVE_DEPTH = 160;
+
 /**
- * Места в поиске Ozon для «Конкурентов» (07.11.2026): по главному запросу нашего товара — точное место
- * нашей карточки и каждого привязанного конкурента. «Видимость в поиске» принимает сразу несколько SKU
- * и отдаёт по каждому строку с isExactSku — один запрос на товар. Только чтение.
+ * Места в живом поиске Ozon для «Конкурентов» (07.11.2026, отдельное задание competitor_watch с positions).
+ * «Видимость в поиске» кабинета считает место по своей модели и с выдачей не совпадает (AFERIY: кабинет 94,
+ * в поиске у владельца 9), поэтому открываем ozon.ru/search как покупатель (адрес доставки — из браузера агента)
+ * и плавно листаем: выдача — виртуальный список, верхние плитки при прокрутке удаляются, собираем по ходу.
+ * Порядок плиток в сетке = место. Только чтение.
  */
-async function ozonSearchPos(task: AgentTask, page: Page, cid: string, data: any): Promise<void> {
+const LIVE_COLLECT = (depth: number) => `(async (DEPTH) => {
+  const seen = [];
+  const grab = () => { for (const g of document.querySelectorAll('[data-widget^="tileGrid"]')) for (const a of g.querySelectorAll('a[href*="/product/"]')) {
+    const m = (a.getAttribute('href') || '').match(/(\\d{6,})\\/?(\\?|$)/); if (m && !seen.includes(m[1])) seen.push(m[1]); } };
+  window.scrollTo(0, 0);
+  await new Promise(r => setTimeout(r, 1200));
+  let last = 0, stall = 0;
+  for (let i = 0; i < 160 && seen.length < DEPTH; i++) {
+    grab();
+    window.scrollBy(0, Math.round(innerHeight * 0.8));
+    await new Promise(r => setTimeout(r, 700));
+    if (seen.length === last) { if (++stall > 8) break; } else { stall = 0; last = seen.length; }
+  }
+  grab();
+  const addr = ((document.querySelector('[data-widget="addressBookBarWeb"]') || {}).innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
+  return { skus: seen.slice(0, DEPTH), addr };
+})(${depth})`;
+
+async function ozonLivePositions(task: AgentTask, page: Page, data: any): Promise<void> {
   const plan = Array.isArray(task.params.searchPos) ? task.params.searchPos as any[] : [];
+  data.searchPos = [];
   if (!plan.length) return;
-  await api.progress(task.id, stage(1, `Позиции в поиске: ${plan.length} товаров`), true);
-  await page.evaluate('globalThis.__name = globalThis.__name || (f => f)');
-  const rows: any[] = [];
+  const rows: any[] = data.searchPos;
   let done = 0, failed = 0;
   for (const p of plan) {
-    const skus = [String(p.ozonSku), ...(p.comps as string[]).map(String)];
-    let r: any = null;
-    // Ozon иногда отдаёт пустой ответ, где минуту назад были данные: ещё две попытки.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt) await page.waitForTimeout(8000);
-      try {
-        r = await page.evaluate(async (a: any) => {
-          const res = await fetch('/api/search-query-analytics/v2/external/explanation_by_id', {
-            method: 'POST', credentials: 'include',
-            headers: { 'Content-Type': 'application/json', 'x-o3-company-id': a.cid, 'x-o3-app-name': 'seller-ui' },
-            body: JSON.stringify({ sellerId: a.cid, query: a.query, skus: a.skus, sortOption: { headerKey: 'position', direction: 'SortDirectionAscending' }, coordinates: a.region, itemsPerPage: '36', pageNumber: '1', onlyCurSellerItems: false, applicationScope: 'SCOPE_BIG_OZON' }),
-          });
-          if (!res.ok) return { status: res.status };
-          const j = await res.json();
-          const keys = (j.headers ?? []).map((h: any) => h.key);
-          const numOf = (v: any) => { const m = String(v ?? '').replace(/\s/g, '').match(/\d+/); return m ? Number(m[0]) : null; };
-          const pos: Record<string, number | null> = {};
-          for (const it of (j.items ?? []).filter((i: any) => i.isExactSku)) {
-            pos[String(it.sku)] = it.foundWithQuery === false ? null : numOf(it.values?.[keys.indexOf('position')]?.values?.[0]?.label?.value);
-          }
-          return { status: 200, total: j.totalNumberOfItems ?? null, pos };
-        }, { cid, query: p.query, skus, region: p.region });
-      } catch (e) { await api.log(task.id, 'warn', `позиции: ${(e as Error).message.slice(0, 120)}`); r = null; break; }
-      if (r?.status !== 200 || Object.keys(r.pos).length) break;
-    }
-    if (r?.status === 403 || r?.status === 429) { await api.log(task.id, 'warn', `позиции: кабинет ответил ${r.status}, стоп`); break; }
-    if (r?.status === 200 && Object.keys(r.pos).length) {
-      // SKU, которых Ozon не вернул вовсе, — тоже «нет в выдаче».
-      for (const k of skus) if (!(k in r.pos)) r.pos[k] = null;
-      rows.push({ key: p.key, query: p.query, region: p.region?.title ?? '', total: r.total, pos: r.pos });
-    } else failed++;
+    const url = `https://www.ozon.ru/search/?text=${encodeURIComponent(p.query)}&from_global=true`;
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      await sleep(3500);
+      const body = await page.evaluate('document.body ? document.body.innerText.slice(0, 3000) : ""').catch(() => '') as string;
+      if (looksLikeChallenge(page.url(), body)) { await api.log(task.id, 'warn', 'витрина Ozon показала проверку — стоп'); failed += plan.length - done; break; }
+      const r = await page.evaluate(LIVE_COLLECT(LIVE_DEPTH)) as { skus: string[]; addr: string };
+      if (!r?.skus?.length) { failed++; await api.log(task.id, 'warn', `позиции: пустая выдача «${p.query}»`); }
+      else {
+        const pos: Record<string, number | null> = {};
+        for (const k of [String(p.ozonSku), ...(p.comps as string[]).map(String)]) { const i = r.skus.indexOf(k); pos[k] = i >= 0 ? i + 1 : null; }
+        rows.push({ key: p.key, query: p.query, region: r.addr, total: r.skus.length, pos });
+      }
+    } catch (e) { failed++; await api.log(task.id, 'warn', `позиции «${p.query}»: ${(e as Error).message.slice(0, 120)}`); }
     done++;
-    await api.progress(task.id, stage(1, `Позиции в поиске: ${done} из ${plan.length}`, { items_done: done, items_total: plan.length }), true);
-    await page.waitForTimeout(2500 + Math.random() * 2000);
+    await api.progress(task.id, stage(1, `Позиции в поиске Ozon: ${done} из ${plan.length}`, { items_done: done, items_total: plan.length }), true);
+    await sleep(2000 + Math.random() * 2000);
   }
-  data.searchPos = rows;
   if (failed) data.errors = [...(data.errors ?? []), `позиции в поиске: не сняты ${failed} товаров`];
 }
 
@@ -572,6 +576,18 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
   const mp = task.params.marketplace === 'ozon' ? 'ozon' : 'wb';
   const page = await newPage();
   try {
+    // 07.11.2026: отдельное задание — места наших товаров и конкурентов в живом поиске Ozon.
+    if (mp === 'ozon' && task.params.positions) {
+      const t0 = Date.now();
+      await api.progress(task.id, stage(0, 'Позиции в поиске Ozon'), true);
+      const data: any = { positions: true, errors: [] };
+      await ozonLivePositions(task, page, data);
+      await api.progress(task.id, stage(2, 'Отправляю в дашборд'), true);
+      const r = await api.competitorsIngest(mp, data);
+      if (!r) { await api.fail(task.id, { error: 'дашборд не принял позиции', retryable: true }); return; }
+      await api.complete(task.id, `${r} · за ${Math.round((Date.now() - t0) / 60_000)} мин${data.errors.length ? ` · ${data.errors.join('; ')}` : ''}`);
+      return;
+    }
     const light = !!task.params.light;
     let data: any;
     if (light) {
@@ -650,7 +666,6 @@ export async function runCompetitorWatch(task: AgentTask, settings: AgentSetting
       await api.progress(task.id, stage(1, `Категорий ${data?.markets?.length ?? 0}, товаров рынка ${items}`, { items_done: items, items_total: items }), true);
       await ozonSales(task, page, cid, data);
       await ozonVisibility(task, page, cid, data);
-      await ozonSearchPos(task, page, cid, data);
     }
     // Карточки привязанных конкурентов и наших товаров на витрине (цена, рейтинг, отзывы, остаток).
     const ids = [...new Set([...(task.params.ours as number[] ?? []), ...(task.params.watch as number[] ?? [])].map(Number).filter(n => n > 0))]

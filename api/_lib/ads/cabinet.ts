@@ -19,7 +19,7 @@ import { rnpInStockSkus, rnpItems, saveWbCardViews } from '../rnp';
 import { wbImageUrl } from '../wbBasket';
 import { onWbSnapshot, compareState, compareReports } from './wbCompare';
 import { saveCompQueries } from '../cards';
-import { saveVisibility, searchPositions } from '../cardVisibility';
+import { saveVisibility } from '../cardVisibility';
 import { saveSearchPos, latestSearchPos } from '../ozSearchPos';
 
 const KEEP = 30;
@@ -225,6 +225,12 @@ export function posSeries(mp: AdMp, from: string, to: string): Map<string, Map<s
 /** Записать снимок; вернуть короткую сводку для «Сборщиков». */
 export function saveCabinetSnapshot(mp: AdMp, data: any): string {
   if (!data || typeof data !== 'object') throw new Error('пустой снимок');
+  // Отдельное задание «позиции в поиске Ozon»: только места, снимок кабинета не трогаем.
+  if (data.positions) {
+    const at = Date.now();
+    const n = saveSearchPos(data.searchPos, at, new Date(at + 3 * 3_600_000).toISOString().slice(0, 10));
+    return `Ozon: позиции в поиске сняты по ${n} товарам${Array.isArray(data.errors) && data.errors.length ? `, ошибок ${data.errors.length}` : ''}`;
+  }
   const d = db();
   const at = Date.now();
   const saved = Array.isArray(data.cards) ? saveCards(mp, data.cards, at) : { n: 0, priced: 0 };
@@ -262,10 +268,6 @@ export function saveCabinetSnapshot(mp: AdMp, data: any): string {
   if (mp === 'ozon' && Array.isArray(data.visibility)) {
     try { saveVisibility(data.visibility, at, new Date(at + 3 * 3_600_000).toISOString().slice(0, 10)); } catch (e) { console.warn('[cards] видимость не записана:', (e as Error)?.message); }
     delete data.visibility;   // в снимке кабинета не храним — она в своей таблице
-  }
-  if (mp === 'ozon' && Array.isArray(data.searchPos)) {
-    try { saveSearchPos(data.searchPos, at, new Date(at + 3 * 3_600_000).toISOString().slice(0, 10)); } catch (e) { console.warn('[competitors] позиции Ozon не записаны:', (e as Error)?.message); }
-    delete data.searchPos;
   }
   if (mp === 'wb') saveCompLast(data.compDetails, at);
   // Запросы сравнений с цифрами по карточкам — в свою таблицу; снимок кабинета остаётся прежнего размера (5 запросов, без цифр).
@@ -617,17 +619,10 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     let posQuery: Ads2WatchProduct['posQuery'] = null;
     const ap = mp === 'ozon' ? ozPos.get(key) : undefined;
     if (ap) {
-      // Ночной проход агента: точные места нашего и каждого конкурента по главному запросу (null — нет в выдаче).
-      posQuery = { query: ap.query, region: ap.region, at: ap.at, full: true };
+      // Живой поиск ozon.ru: места нашего и каждого конкурента по главному запросу (null — дальше просмотренной глубины).
+      posQuery = { query: ap.query, region: ap.region, at: ap.at, depth: ap.depth };
       if (our) our.searchPos = ap.pos[ourId] ?? null;
       for (const l of ls) l.searchPos = ap.pos[l.id] ?? null;
-    } else if (mp === 'ozon') {
-      const sp = searchPositions(key);
-      if (sp) {
-        posQuery = { query: sp.query, region: sp.region, at: sp.at };
-        if (our) our.searchPos = sp.ours;
-        for (const l of ls) l.searchPos = sp.bySku[l.id] ?? null;
-      }
     }
     return { key, ourId, name: cat?.name || our?.title || key, photo: our?.photo ?? '', our, links: ls, inStock: inStock.has(key), stockSince: inStock.get(key) || null,
       archived: !!arch[key], archivedAt: arch[key] || null, posQuery };
@@ -645,7 +640,8 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
 // Днём (11:20, 14:50, 16:50 — перед выпусками советника) и по кнопке / после привязки нового конкурента — быстрый проход
 // (light): только карточки витрины привязанных конкурентов и наших товаров, 1–3 минуты.
 
-const isMine = (t: { params: Record<string, unknown> }, mp: AdMp) => (t.params?.marketplace === 'ozon' ? 'ozon' : 'wb') === mp;
+// Задание «позиции в поиске» — своё, на «Обновить сейчас» и пропущенные слоты витрины не влияет.
+const isMine = (t: { params: Record<string, unknown> }, mp: AdMp) => (t.params?.marketplace === 'ozon' ? 'ozon' : 'wb') === mp && !t.params?.positions;
 
 /** Слоты расписания «m h1,h2 * * *» (МСК) → «05:40», «11:40»… и последний наступивший слот (мс). */
 function cronSlots(cron: string): string[] {

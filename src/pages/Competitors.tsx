@@ -111,7 +111,7 @@ function PosCell({ l, mp, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; posQuery?:
   if (mp === 'wb') return <td className="ad2-num" title={l.avgPos != null ? 'Средняя позиция в поиске WB' : 'WB не отдал позицию: конкурента нет в открытом «Сравнении карточек»'}>{num(l.avgPos)}</td>;
   if (!posQuery) return <td className="ad2-num"><span className="muted" title="Позиция Ozon появится после ночного прохода агента">–</span></td>;
   const tip = `по запросу «${posQuery.query}»${posQuery.region ? `, ${posQuery.region}` : ''}, снято ${whenRel(posQuery.at)}`;
-  return <td className="ad2-num" title={tip}>{l.searchPos != null ? num(l.searchPos) : <span className="muted">{posQuery.full ? 'нет в выдаче' : 'дальше 10'}</span>}</td>;
+  return <td className="ad2-num" title={tip}>{l.searchPos != null ? (l.searchPos >= 499 ? <span title='Ozon показывает места только до 499: карточка дальше'>499+</span> : num(l.searchPos)) : <span className="muted">{posQuery.full ? 'нет в выдаче' : 'дальше 10'}</span>}</td>;
 }
 
 function CmpCells({ l, mp, our, passAt, per = 7, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2WatchLink | null; passAt: number | null; per?: OzPer; posQuery?: Ads2WatchProduct['posQuery'] }) {

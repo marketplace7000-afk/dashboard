@@ -136,10 +136,16 @@ async function ydList(publicKey: string, path: string): Promise<YdItem[]> {
 }
 
 async function ydDownloadUrl(publicKey: string, path: string): Promise<string> {
-  const r = await fetch(`${YD_API}/download?public_key=${encodeURIComponent(publicKey)}&path=${encodeURIComponent(path)}`, { signal: AbortSignal.timeout(30_000) });
-  if (!r.ok) throw new Error(`Яндекс.Диск download ${r.status}`);
-  const j: any = await r.json();
-  return j.href;
+  // 429 — Диск просит не частить (08.11: 10 файлов подряд не скачались) — ждём и повторяем.
+  for (const wait of [0, 10_000, 30_000, 60_000]) {
+    if (wait) await new Promise(res => setTimeout(res, wait));
+    const r = await fetch(`${YD_API}/download?public_key=${encodeURIComponent(publicKey)}&path=${encodeURIComponent(path)}`, { signal: AbortSignal.timeout(30_000) });
+    if (r.status === 429) continue;
+    if (!r.ok) throw new Error(`Яндекс.Диск download ${r.status}`);
+    const j: any = await r.json();
+    return j.href;
+  }
+  throw new Error('Яндекс.Диск download 429');
 }
 
 /** Текст из .docx без зависимостей: word/document.xml → абзацы. */

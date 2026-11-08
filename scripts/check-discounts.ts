@@ -1,5 +1,6 @@
 // Проверка решений агента «Заявки на скидку» (08.11.2026).
-import { decide, toTask, marginAtDiscount, maxPctForMargin, type DiscountRule } from '../api/_lib/discounts';
+import { decide, toTask, marginAtDiscount, maxPctForMargin, saveRules, listRules, type DiscountRule } from '../api/_lib/discounts';
+import { _useAdsDbForTests } from '../api/_lib/ads/store';
 import type { OzonCalcInput } from '../src/utils/ozonProfit';
 
 let ok = true;
@@ -49,6 +50,14 @@ const own1 = decide({ showcase: 600, requested: 540 }, rule({ minMargin: 20 }), 
 eq('просьба роняет маржу ниже порога → цена под порог', [own1.action, (own1.marginPct ?? 0) >= 20 && (own1.marginPct ?? 0) < 20.2], ['approve', true]);
 const own2 = decide({ showcase: 600, requested: 570 }, rule({ minMargin: 20 }), 'manual', inp); // просят −5 % → 20,6 % ≥ 20
 eq('после скидки маржа выше порога → как просили', [own2.action, own2.price, own2.marginPct], ['approve', 570, 20.6]);
+
+// Либо макс. скидка, либо мин. маржа (решение владельца 08.11).
+_useAdsDbForTests(':memory:');
+saveRules({ article: 'X', mode: 'approve', maxPct: 7 }, 't');
+saveRules({ article: 'X', minMargin: 17 }, 't');
+eq('мин. маржа стирает скидку', [listRules().X.maxPct, listRules().X.minMargin], [null, 17]);
+saveRules({ article: 'X', maxPct: 5 }, 't');
+eq('скидка стирает мин. маржу', [listRules().X.maxPct, listRules().X.minMargin], [5, null]);
 
 console.log(ok ? '\nЗаявки на скидку: в порядке.' : '\nОШИБКА');
 if (!ok) process.exit(1);

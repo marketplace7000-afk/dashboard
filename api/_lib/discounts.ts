@@ -107,8 +107,11 @@ export function saveRules(input: any, who: string): number {
   const cur = listRules();
   const mode = input?.mode;
   if (mode !== undefined && !['approve', 'decline', 'manual'].includes(mode)) throw new Error('неизвестный режим');
-  const maxPct = 'maxPct' in (input ?? {}) ? limitPct(input.maxPct, 'Скидка', 90) : undefined;
-  const minMargin = 'minMargin' in (input ?? {}) ? limitPct(input.minMargin, 'Маржа', 90) : undefined;
+  let maxPct = 'maxPct' in (input ?? {}) ? limitPct(input.maxPct, 'Скидка', 90) : undefined;
+  let minMargin = 'minMargin' in (input ?? {}) ? limitPct(input.minMargin, 'Маржа', 90) : undefined;
+  // Либо макс. скидка, либо мин. маржа (решение владельца 08.11): одно стирает другое.
+  if (maxPct != null) minMargin = null;
+  else if (minMargin != null) maxPct = null;
   const st = db().prepare(`INSERT INTO discount_rule (mp, article, mode, max_pct, min_margin, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(mp, article) DO UPDATE SET mode = excluded.mode, max_pct = excluded.max_pct, min_margin = excluded.min_margin,
       updated_at = excluded.updated_at, updated_by = excluded.updated_by`);
@@ -243,6 +246,24 @@ function saveRaw(items: any[]): void {
 function markApplied(id: string, by: 'agent' | 'user', byName: string, d: Decision, error: string | null): void {
   db().prepare('UPDATE discount_task SET by = ?, by_name = ?, decision = ?, applied_at = ?, error = ? WHERE mp = ? AND id = ?')
     .run(by, byName, JSON.stringify(d), Date.now(), error, MP, id);
+  // Ozon принял ответ — статус меняем сразу, не дожидаясь, пока заявка придёт в истории (08.11:
+  // одобренная с сайта заявка ещё 15 минут висела «Новой»).
+  if (!error && (d.action === 'approve' || d.action === 'decline')) {
+    const row = db().prepare('SELECT raw FROM discount_task WHERE mp = ? AND id = ?').get(MP, id) as any;
+    if (row) {
+      const x = JSON.parse(row.raw);
+      x.status = d.action === 'approve' ? 'APPROVED' : 'DECLINED';
+      if (d.action === 'approve') x.approved_price = d.price;
+      db().prepare('UPDATE discount_task SET status = ?, raw = ? WHERE mp = ? AND id = ?').run(x.status, JSON.stringify(x), MP, id);
+    }
+  }
+}
+
+/** Заявки, которые у нас «ждут», а в ответе Ozon их уже нет: на них ответили в кабинете. */
+function staleIds(pending: any[]): number {
+  const live = new Set(pending.map(x => String(x.id)));
+  const ours = db().prepare("SELECT id FROM discount_task WHERE mp = ? AND status IN ('NEW', 'SEEN')").all(MP) as any[];
+  return ours.filter(r => !live.has(String(r.id))).length;
 }
 
 /** Ответить Ozon пачкой. Возвращает ошибки по номерам заявок. */
@@ -285,9 +306,17 @@ export async function runPass(why = 'по таймеру'): Promise<string> {
   try {
     const pending = [...await fetchStatus('NEW', 20), ...await fetchStatus('SEEN', 20)];
     saveRaw(pending);
-    if (Date.now() - lastHistory > HISTORY_EVERY_MS) {
+    // История — раз в 15 минут или сразу, если заявка пропала из ожидающих (ответили в кабинете).
+    if (Date.now() - lastHistory > HISTORY_EVERY_MS || staleIds(pending) > 0) {
       saveRaw([...await fetchStatus('APPROVED', 2), ...await fetchStatus('DECLINED', 2)]);
       lastHistory = Date.now();
+      // Не нашлась и в истории (истекла и т. п.) — закрываем, иначе история запрашивалась бы каждый проход.
+      const live = new Set(pending.map(x => String(x.id)));
+      for (const r of db().prepare("SELECT id, raw FROM discount_task WHERE mp = ? AND status IN ('NEW', 'SEEN')").all(MP) as any[]) {
+        if (live.has(String(r.id))) continue;
+        const x = JSON.parse(r.raw); x.status = 'CLOSED';
+        db().prepare('UPDATE discount_task SET status = ?, raw = ? WHERE mp = ? AND id = ?').run('CLOSED', JSON.stringify(x), MP, r.id);
+      }
     }
     const s = getDiscountSettings();
     let summary = `заявок в ожидании: ${pending.length}`;

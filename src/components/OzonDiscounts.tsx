@@ -2,7 +2,10 @@
  * «Цены» → «Заявки на скидку» (08.11.2026). Правила по товарам и заявки покупателей Ozon.
  * Логика и расчёт — на сервере (api/_lib/discounts.ts); здесь маржа при выбранной скидке
  * пересчитывается тем же калькулятором (src/utils/ozonProfit.ts), чтобы цифры менялись сразу.
- * Шрифт — как в «Рекламе» и «РНП»: текст 19, подписи 16–17.
+ *
+ * Решения владельца 08.11: режима «Менеджеры» нет — у товара «Одобрять» или «Отклонять», без
+ * режима заявку обрабатывают вручную. Для «Одобрять» ограничение ОДНО: либо макс. скидка, либо
+ * мин. маржа. Значения в ячейках по центру, шрифт на 1 крупнее «Рекламы», маржа с точностью 0,1 %.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowClockwiseIcon, CheckIcon, MagnifyingGlassIcon, XIcon } from '@phosphor-icons/react';
@@ -11,6 +14,7 @@ import { apiGet, apiPost, errText } from '../api/http';
 import { calcOzonProfit, type OzonCalcInput } from '../utils/ozonProfit';
 
 type Mode = 'approve' | 'decline' | 'manual';
+type Limit = 'pct' | 'margin';
 type Rule = { article: string; mode: Mode; maxPct: number | null; minMargin: number | null; updatedAt: number; updatedBy: string };
 type Decision = { action: 'approve' | 'decline' | 'skip'; price: number | null; pct: number | null; marginPct: number | null; reason: string };
 type Product = {
@@ -31,8 +35,12 @@ type Data = {
 };
 
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
-const rub = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? '—' : `${nf.format(Math.round(v))} ₽`);
-const pctS = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? '—' : `${String(Math.round(v * 10) / 10).replace('.', ',')} %`);
+const nf1 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+// Неразрывный пробел перед ₽ — знак рубля не уезжает на отдельную строку.
+const rub = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? '—' : `${nf.format(Math.round(v))} ₽`);
+const pctS = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? '—' : `${String(Math.round(v * 10) / 10).replace('.', ',')} %`);
+/** Маржа — всегда с одной цифрой после запятой (просьба владельца 08.11). */
+const pct1 = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? '—' : `${nf1.format(v)} %`);
 // Пороги цвета — как на листе «Цены» (30 / 15).
 const tone = (m: number | null | undefined) => (m == null ? '' : m >= 30 ? 'good' : m >= 15 ? 'warn' : 'bad');
 const time = (iso: string | number | null) => {
@@ -64,10 +72,13 @@ function maxPctForMargin(input: OzonCalcInput | null, minMargin: number): number
   return Math.floor(lo * 10) / 10;
 }
 
+const limitOf = (r: Rule | null | undefined): Limit => (r?.minMargin != null && r?.maxPct == null ? 'margin' : 'pct');
+const num = (s: string): number | null => { const t = s.trim().replace(',', '.'); if (t === '') return null; const n = Number(t); return Number.isFinite(n) ? n : null; };
+
 type Filter = 'all' | 'requests' | 'norule' | 'approve' | 'decline';
 const FILTERS: [Filter, string][] = [['all', 'Все'], ['requests', 'Есть заявки'], ['norule', 'Режим не выбран'], ['approve', 'Одобряем'], ['decline', 'Отклоняем']];
-// «Менеджеров» нет (решение владельца 08.11): всё в автомат; режим не выбран — заявку обрабатывают вручную.
 const MODES: [Mode, string][] = [['approve', 'Одобрять'], ['decline', 'Отклонять']];
+const LIMITS: [Limit, string][] = [['pct', 'Макс. скидка'], ['margin', 'Мин. маржа']];
 
 export function OzonDiscounts() {
   const [data, setData] = useState<Data | null>(null);
@@ -96,6 +107,7 @@ export function OzonDiscounts() {
   const approved = byAgent.filter(t => t.decision?.action === 'approve').length;
   const declined = byAgent.filter(t => t.decision?.action === 'decline').length;
   const errors = data.tasks.filter(t => t.error).length;
+  const auto = data.settings.auto;
 
   return (
     <div className="dr grid" style={{ gap: 16 }}>
@@ -103,22 +115,27 @@ export function OzonDiscounts() {
         <div className="dr-head-main">
           <h2>Заявки на скидку · Ozon</h2>
           <div className="dr-sub">
-            Агент проверяет новые заявки каждые 2 минуты. Последняя проверка: {data.lastRun ? time(data.lastRun) : 'ещё не было'}
+            Новые заявки забираются с Ozon каждые 2 минуты. Последний раз: {data.lastRun ? time(data.lastRun) : 'ещё не было'}
             {data.lastError && <span className="dr-bad"> · ошибка: {data.lastError}</span>}
           </div>
         </div>
         <div className="dr-head-ctl">
-          <label className={`dr-switch ${data.settings.auto ? 'on' : ''} ${data.canToggle ? '' : 'locked'}`}
-            title={data.canToggle ? '' : 'Включать и выключать агента может только владелец'}>
-            <input type="checkbox" checked={data.settings.auto} disabled={!data.canToggle}
+          <label className={`dr-switch ${auto ? 'on' : ''} ${data.canToggle ? '' : 'locked'}`}
+            title={data.canToggle ? '' : 'Включать и выключать автоответ может только владелец'}>
+            <input type="checkbox" checked={auto} disabled={!data.canToggle}
               onChange={e => {
                 if (e.target.checked && !window.confirm('Включить автоответ? Агент начнёт сам одобрять и отклонять заявки по правилам.')) return;
                 void setSettings({ auto: e.target.checked });
               }} />
             <span className="dr-switch-track"><span className="dr-switch-dot" /></span>
-            <span>{data.settings.auto ? 'Автоответ включён' : 'Автоответ выключен — агент только показывает решения'}</span>
+            <span className="dr-switch-text">
+              <span className="dr-switch-title">Автоответ {auto ? 'включён' : 'выключен'}</span>
+              <span className="dr-switch-hint">{auto ? 'агент сам отвечает на заявки по правилам' : 'агент только показывает, что сделал бы'}</span>
+            </span>
           </label>
-          <button className="btn" onClick={refresh} disabled={busy}><ArrowClockwiseIcon size={18} /> {busy ? 'Проверяю…' : 'Проверить сейчас'}</button>
+          <button className="btn" onClick={refresh} disabled={busy} title="Не ждать 2 минуты: сразу забрать новые заявки с Ozon (и ответить на них, если автоответ включён)">
+            <ArrowClockwiseIcon size={18} /> {busy ? 'Забираю…' : 'Забрать заявки сейчас'}
+          </button>
         </div>
       </div>
 
@@ -136,6 +153,7 @@ export function OzonDiscounts() {
       <div className="dr-note">
         Скидка в процентах — от цены, которую покупатель видит на витрине. Ozon сохраняет свою скидку,
         поэтому ваша цена в кабинете для этой продажи снижается на тот же процент — от неё и считается маржа.
+        Для «Одобрять» задаётся одно ограничение: либо максимальная скидка, либо минимальная маржа.
       </div>
 
       <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
@@ -156,13 +174,14 @@ export function OzonDiscounts() {
 // ─── Товары и правила ───────────────────────────────────────────────────────
 
 type PostFn = (path: string, body: object) => Promise<boolean>;
+type SaveFn = (articles: string[], patch: Partial<Rule>) => Promise<void>;
 
 function Products({ data, post, reload }: { data: Data; post: PostFn; reload: () => Promise<void> }) {
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const [bulkPct, setBulkPct] = useState('10');
-  const [bulkMargin, setBulkMargin] = useState('');
+  const [bulkLimit, setBulkLimit] = useState<Limit>('pct');
+  const [bulkVal, setBulkVal] = useState('');
   // Правки, ещё не дошедшие до сервера, — чтобы поле не прыгало при обновлении списка.
   const [local, setLocal] = useState<Record<string, Partial<Rule>>>({});
 
@@ -175,7 +194,7 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
       .sort((a, b) => b.pending - a.pending || b.req7 - a.req7 || (b.showcase ?? 0) - (a.showcase ?? 0));
   }, [data.products, q, filter, local]);
 
-  const save = async (articles: string[], patch: Partial<Rule>) => {
+  const save: SaveFn = async (articles, patch) => {
     setLocal(l => { const n = { ...l }; for (const a of articles) n[a] = { ...n[a], ...patch }; return n; });
     if (await post('rules', { articles, ...patch })) {
       await reload();
@@ -187,6 +206,10 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
   const toggleAll = () => setSel(allSel ? new Set() : new Set(rows.map(r => r.article)));
   const toggle = (a: string) => setSel(s => { const n = new Set(s); if (n.has(a)) n.delete(a); else n.add(a); return n; });
   const bulk = async (patch: Partial<Rule>) => { await save([...sel], patch); setSel(new Set()); };
+  const bulkApprove = () => {
+    const v = num(bulkVal);
+    void bulk({ mode: 'approve', maxPct: bulkLimit === 'pct' ? v : null, minMargin: bulkLimit === 'margin' ? v : null });
+  };
 
   return (
     <div className="card dr-card">
@@ -203,13 +226,14 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
         <div className="dr-bulk">
           <b>Выбрано: {sel.size}</b>
           <span className="dr-bulk-group">
-            Скидка до <input className="input dr-num" value={bulkPct} onChange={e => setBulkPct(e.target.value)} inputMode="decimal" placeholder="—" /> %,
-            маржа не ниже <input className="input dr-num" value={bulkMargin} onChange={e => setBulkMargin(e.target.value)} inputMode="decimal" placeholder="—" /> %
-            <button className="btn btn-primary" onClick={() => bulk({
-              mode: 'approve',
-              maxPct: bulkPct.trim() === '' ? null : Number(bulkPct.replace(',', '.')),
-              minMargin: bulkMargin.trim() === '' ? null : Number(bulkMargin.replace(',', '.')),
-            })}>Одобрять</button>
+            <span className="sa-seg dr-limit">
+              {LIMITS.map(([k, l]) => <button key={k} className={bulkLimit === k ? 'active' : ''} onClick={() => setBulkLimit(k)}>{l}</button>)}
+            </span>
+            <span className="dr-numwrap">
+              <input className="input dr-num" value={bulkVal} onChange={e => setBulkVal(e.target.value)} inputMode="decimal" placeholder="—" />
+              <span className="dr-unit">%</span>
+            </span>
+            <button className="btn btn-primary" onClick={bulkApprove}>Одобрять</button>
           </span>
           <button className="btn" onClick={() => bulk({ mode: 'decline' })}>Отклонять</button>
           <button className="btn" onClick={() => bulk({ mode: 'manual' })}>Снять режим</button>
@@ -222,20 +246,17 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
           <thead>
             <tr>
               <th className="dr-cb"><input type="checkbox" checked={allSel} onChange={toggleAll} /></th>
-              <th>Товар</th>
-              <th className="r">На витрине</th>
-              <th className="r">Текущая маржа</th>
-              <th>Что делать с заявками</th>
-              <th className="r">Макс. скидка</th>
-              <th className="r">Мин. маржа</th>
-              <th className="r">Цена со скидкой</th>
-              <th className="r">Маржа со скидкой</th>
-              <th className="r">Заявок за 7 дн</th>
+              <th className="l">Товар</th>
+              <th>На витрине</th>
+              <th>Текущая<br />маржа</th>
+              <th>Правило агента</th>
+              <th>После скидки</th>
+              <th>Заявок<br />за 7 дн</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(p => <ProductRow key={p.article} p={p} checked={sel.has(p.article)} onCheck={() => toggle(p.article)} save={save} />)}
-            {!rows.length && <tr><td colSpan={10} className="dr-empty">Ничего не нашлось</td></tr>}
+            {!rows.length && <tr><td colSpan={7} className="dr-empty">Ничего не нашлось</td></tr>}
           </tbody>
         </table>
       </div>
@@ -243,20 +264,20 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
   );
 }
 
-function NumInput({ value, onSave, placeholder, disabled }: { value: number | null; onSave: (v: number | null) => void; placeholder?: string; disabled?: boolean }) {
-  const [v, setV] = useState(value == null ? '' : String(value).replace('.', ','));
+function NumInput({ value, onSave, placeholder }: { value: number | null; onSave: (v: number | null) => void; placeholder?: string }) {
+  const show = (x: number | null) => (x == null ? '' : String(x).replace('.', ','));
+  const [v, setV] = useState(show(value));
   const focused = useRef(false);
-  useEffect(() => { if (!focused.current) setV(value == null ? '' : String(value).replace('.', ',')); }, [value]);
+  useEffect(() => { if (!focused.current) setV(show(value)); }, [value]);
   const commit = () => {
     focused.current = false;
-    const s = v.trim().replace(',', '.');
-    const n = s === '' ? null : Number(s);
-    if (n !== null && (!Number.isFinite(n) || n < 0 || n > 90)) { setV(value == null ? '' : String(value)); return; }
+    const n = num(v);
+    if (v.trim() !== '' && (n === null || n < 0 || n > 90)) { setV(show(value)); return; }
     if (n !== value) onSave(n);
   };
   return (
     <span className="dr-numwrap">
-      <input className="input dr-num" value={v} placeholder={placeholder} disabled={disabled} inputMode="decimal"
+      <input className="input dr-num" value={v} placeholder={placeholder} inputMode="decimal"
         onFocus={() => { focused.current = true; }} onChange={e => setV(e.target.value)} onBlur={commit}
         onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
       <span className="dr-unit">%</span>
@@ -264,23 +285,34 @@ function NumInput({ value, onSave, placeholder, disabled }: { value: number | nu
   );
 }
 
-function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolean; onCheck: () => void; save: (a: string[], patch: Partial<Rule>) => Promise<void> }) {
+function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolean; onCheck: () => void; save: SaveFn }) {
   const r = p.rule;
   const mode: Mode | null = r && r.mode !== 'manual' ? r.mode : null;
+  // Какое ограничение выбрано. Пока поле пустое, выбор держим на экране; число сохраняет его на сервере.
+  const [limit, setLimit] = useState<Limit>(limitOf(r));
+  useEffect(() => { if (r?.maxPct != null || r?.minMargin != null) setLimit(limitOf(r)); }, [r?.maxPct, r?.minMargin]);
+  const value = limit === 'pct' ? r?.maxPct ?? null : r?.minMargin ?? null;
   const show = p.showcase ?? 0;
-  // Сколько реально даст агент: заданный процент, но не больше, чем позволяет порог маржи.
-  const setPct = mode === 'approve' ? r?.maxPct ?? null : null;
-  const byMargin = mode === 'approve' && r?.minMargin != null ? maxPctForMargin(p.input, r.minMargin) : null;
-  const eff = setPct == null && byMargin == null ? null : Math.min(setPct ?? 90, byMargin ?? 90);
-  const limited = byMargin != null && (setPct == null || byMargin < setPct);
+
+  // Сколько реально даст агент: по скидке — заданный процент; по марже — пока маржа не ниже порога.
+  const eff = mode !== 'approve' || value == null ? null : limit === 'pct' ? value : maxPctForMargin(p.input, value);
   const discPrice = eff != null && show > 0 ? Math.ceil(show * (1 - eff / 100)) : null;
   const newLk = eff != null && p.price ? Math.round(p.price * (1 - eff / 100)) : null;
   const m = eff != null ? marginAt(p.input, eff) : null;
+  const cur = marginAt(p.input, 0);
+  const curPct = cur?.pct ?? p.marginPct;
+
+  const pickLimit = (k: Limit) => {
+    if (k === limit) return;
+    setLimit(k);
+    // Либо скидка, либо маржа: смена ограничения стирает прежнее число.
+    if (r?.maxPct != null || r?.minMargin != null) void save([p.article], { maxPct: null, minMargin: null });
+  };
 
   return (
     <tr className={checked ? 'sel' : ''}>
       <td className="dr-cb"><input type="checkbox" checked={checked} onChange={onCheck} /></td>
-      <td>
+      <td className="l">
         <div className="dr-prod">
           {p.photo ? <img src={p.photo} alt="" loading="lazy" /> : <span className="dr-noimg" />}
           <div>
@@ -289,13 +321,13 @@ function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolea
           </div>
         </div>
       </td>
-      <td className="r">
+      <td>
         <b>{rub(p.showcase)}</b>
         <div className="dr-cap">наша {rub(p.price)}</div>
       </td>
-      <td className="r">
-        {p.marginPct != null ? <><b className={tone(p.marginPct)}>{pctS(p.marginPct)}</b><div className="dr-cap">{rub(p.marginRub)}</div></>
-          : <span className="dr-cap">{p.cost ? '—' : 'нет себестоимости'}</span>}
+      <td>
+        {curPct != null ? <><b className={tone(curPct)}>{pct1(curPct)}</b><div className="dr-cap">{rub(cur?.rub ?? p.marginRub)}</div></>
+          : <span className="dr-cap">{p.cost ? '—' : 'нет себе­стоимости'}</span>}
       </td>
       <td>
         <div className="sa-seg dr-mode">
@@ -305,26 +337,29 @@ function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolea
           ))}
         </div>
         {!mode && <div className="dr-cap">не выбран — вручную</div>}
+        {mode === 'approve' && (
+          <div className="dr-limit-cell">
+            <span className="sa-seg dr-limit">
+              {LIMITS.map(([k, l]) => <button key={k} className={limit === k ? 'active' : ''} onClick={() => pickLimit(k)}>{l}</button>)}
+            </span>
+            <NumInput value={value} placeholder="—"
+              onSave={v => save([p.article], limit === 'pct' ? { maxPct: v, minMargin: null } : { minMargin: v, maxPct: null })} />
+          </div>
+        )}
       </td>
-      <td className="r">
-        {mode === 'approve' ? <NumInput value={r?.maxPct ?? null} placeholder="—" onSave={v => save([p.article], { maxPct: v })} /> : <span className="dr-cap">—</span>}
+      <td>
+        {discPrice == null ? <span className="dr-cap">—</span> : <>
+          <div className="nw"><b>{rub(discPrice)}</b> <span className="dr-cap">−{pctS(eff)}</span></div>
+          {m ? <>
+            <div className={`dr-after ${tone(m.pct)}`}>маржа {pct1(m.pct)}</div>
+            <div className="dr-cap">прибыль {rub(m.rub)}</div>
+          </> : <div className="dr-cap">{p.cost ? '—' : 'нет себе­стоимости'}</div>}
+          <div className="dr-cap">в кабинете {rub(newLk)}</div>
+        </>}
       </td>
-      <td className="r">
-        {mode === 'approve' ? <NumInput value={r?.minMargin ?? null} placeholder="—" onSave={v => save([p.article], { minMargin: v })} /> : <span className="dr-cap">—</span>}
-      </td>
-      <td className="r">
-        {discPrice != null
-          ? <><b>{rub(discPrice)}</b><div className={`dr-cap ${limited ? 'warn' : ''}`}>−{pctS(eff)}{limited ? ' — ограничила маржа' : ''} · ЛК {rub(newLk)}</div></>
-          : <span className="dr-cap">—</span>}
-      </td>
-      <td className="r">
-        {mode !== 'approve' || eff == null ? <span className="dr-cap">—</span>
-          : !m ? <span className="dr-cap">{p.cost ? '—' : 'нет себестоимости'}</span>
-          : <><b className={tone(m.pct)}>{pctS(m.pct)}</b><div className="dr-cap">{rub(m.rub)}</div></>}
-      </td>
-      <td className="r">
+      <td>
         {p.req7 ? <b>{p.req7}</b> : <span className="dr-cap">0</span>}
-        {p.pending > 0 && <div className="dr-pend">ждут {p.pending}</div>}
+        {p.pending > 0 && <div><span className="dr-pend">ждут {p.pending}</span></div>}
       </td>
     </tr>
   );
@@ -332,7 +367,7 @@ function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolea
 
 // ─── Заявки ─────────────────────────────────────────────────────────────────
 
-const STATUS: Record<string, string> = { NEW: 'Новая', SEEN: 'Просмотрена', APPROVED: 'Одобрена', DECLINED: 'Отклонена' };
+const STATUS: Record<string, string> = { NEW: 'Новая', SEEN: 'Просмотрена', APPROVED: 'Одобрена', DECLINED: 'Отклонена', CLOSED: 'Закрыта Ozon' };
 
 function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () => Promise<void> }) {
   const [only, setOnly] = useState<'pending' | 'all'>('pending');
@@ -350,7 +385,7 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
   };
 
   return (
-    <div className="card dr-card">
+    <div className="card dr-card dr-tasks">
       <div className="dr-tools">
         <div className="sa-seg">
           <button className={only === 'pending' ? 'active' : ''} onClick={() => setOnly('pending')}>Ждут ответа</button>
@@ -362,9 +397,9 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
           <thead>
             <tr>
               <th>Когда</th>
-              <th>Товар</th>
-              <th className="r">На витрине</th>
-              <th className="r">Просит</th>
+              <th className="l">Товар</th>
+              <th>На витрине</th>
+              <th>Просит</th>
               <th>Решение агента</th>
               <th>Статус</th>
               <th />
@@ -378,8 +413,8 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
               const askM = marginAt(p?.input ?? null, Math.max(0, t.requestedPct));
               return (
                 <tr key={t.id}>
-                  <td className="nw">{time(t.createdAt)}<div className="dr-cap">{t.customer}</div></td>
-                  <td>
+                  <td><div className="nw">{time(t.createdAt)}</div><div className="dr-cap">{t.customer}</div></td>
+                  <td className="l">
                     <div className="dr-prod">
                       {p?.photo ? <img src={p.photo} alt="" loading="lazy" /> : <span className="dr-noimg" />}
                       <div>
@@ -389,36 +424,37 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
                       </div>
                     </div>
                   </td>
-                  <td className="r"><b>{rub(t.showcase)}</b></td>
-                  <td className="r">
-                    <b>{rub(t.requested)}</b>
-                    <div className="dr-cap">−{pctS(t.requestedPct)}{askM ? ` · маржа ${pctS(askM.pct)}` : ''}</div>
-                  </td>
+                  <td><b>{rub(t.showcase)}</b></td>
                   <td>
+                    <b>{rub(t.requested)}</b>
+                    <div className="dr-cap nw">−{pctS(t.requestedPct)}</div>
+                    {askM && <div className={`dr-cap nw ${tone(askM.pct)}`}>маржа {pct1(askM.pct)}</div>}
+                  </td>
+                  <td className="dr-dec">
                     {d ? (
                       <div>
                         <span className={`dr-badge ${d.action}`}>
                           {d.action === 'approve' ? `Одобрить ${rub(d.price)}` : d.action === 'decline' ? 'Отклонить' : 'Вручную'}
                         </span>
-                        {d.action === 'approve' && d.marginPct != null && <span className={`dr-m ${tone(d.marginPct)}`}> маржа {pctS(d.marginPct)}</span>}
+                        {d.action === 'approve' && d.marginPct != null && <div className={`dr-m ${tone(d.marginPct)}`}>маржа {pct1(d.marginPct)}</div>}
                         <div className="dr-cap">{d.reason}</div>
                       </div>
                     ) : <span className="dr-cap">—</span>}
                   </td>
-                  <td>
+                  <td className="dr-st">
                     <span className={`dr-status s-${t.status}`}>{STATUS[t.status] ?? t.status}</span>
-                    {t.approvedPrice && t.status === 'APPROVED' ? <div className="dr-cap">по {rub(t.approvedPrice)}{t.showcase > 0 ? ` (−${pctS(Math.round((1 - t.approvedPrice / t.showcase) * 1000) / 10)})` : ''}</div> : null}
-                    {!pend && <div className="dr-cap">{t.by === 'agent' ? 'ответил агент' : t.by === 'user' ? `ответил ${t.byName}` : 'ответили в кабинете'}</div>}
+                    {t.approvedPrice && t.status === 'APPROVED' ? <div className="dr-cap"><span className="nw">по {rub(t.approvedPrice)}</span>{t.showcase > 0 ? <span className="nw"> (−{pctS(Math.round((1 - t.approvedPrice / t.showcase) * 1000) / 10)})</span> : null}</div> : null}
+                    {!pend && t.status !== 'CLOSED' && <div className="dr-cap">{t.by === 'agent' ? 'ответил агент' : t.by === 'user' ? `с сайта: ${t.byName}` : 'в кабинете Ozon'}</div>}
                     {t.error && <div className="dr-bad dr-cap">Ozon: {t.error}</div>}
                   </td>
                   <td className="nw">
                     {pend && (
                       <div className="dr-acts">
-                        <button className="btn btn-sm btn-primary" disabled={busyId === t.id}
+                        <button className="btn btn-primary" disabled={busyId === t.id}
                           onClick={() => act(t, 'approve', d?.action === 'approve' && d.price ? d.price : Math.round(t.requested))}>
-                          <CheckIcon size={16} /> Одобрить {rub(d?.action === 'approve' && d.price ? d.price : t.requested)}
+                          <CheckIcon size={17} /> Одобрить<span className="dr-btn-price">{rub(d?.action === 'approve' && d.price ? d.price : t.requested)}</span>
                         </button>
-                        <button className="btn btn-sm" disabled={busyId === t.id} onClick={() => act(t, 'decline')}><XIcon size={16} /> Отклонить</button>
+                        <button className="btn" disabled={busyId === t.id} onClick={() => act(t, 'decline')}><XIcon size={17} /> Отклонить</button>
                       </div>
                     )}
                   </td>

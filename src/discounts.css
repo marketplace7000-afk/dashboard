@@ -32,7 +32,7 @@
 .dr-switch-hint { font-size: 16px; color: var(--muted); }
 
 /* Плитки */
-.dr-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.dr-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .dr-tile { display: flex; flex-direction: column; gap: 4px; text-align: left; background: var(--bg); border: 1px solid var(--border); border-radius: var(--sa-r-m, 12px); padding: 14px 18px; font: inherit; color: inherit; }
 button.dr-tile { cursor: pointer; }
 button.dr-tile:hover { border-color: var(--accent); }

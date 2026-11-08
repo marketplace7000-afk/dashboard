@@ -112,6 +112,7 @@ export function OzonDiscounts() {
   const approved = byAgent.filter(t => t.decision?.action === 'approve').length;
   const declined = byAgent.filter(t => t.decision?.action === 'decline').length;
   const errors = data.tasks.filter(t => t.error).length;
+  const w7 = data.stats?.w7;
   const auto = data.settings.auto;
 
   return (
@@ -146,19 +147,18 @@ export function OzonDiscounts() {
 
       {err && <div className="dr-err">{err}</div>}
 
+      {/* Одна строка итогов (08.11, просьба владельца: без дублей с «Эффективностью»). */}
       <div className="dr-tiles">
         <button className={`dr-tile ${pending.length ? 'warn' : ''}`} onClick={() => setView('tasks')}>
           <span className="dr-tile-label">Ждут ответа</span><span className="dr-tile-num">{pending.length}</span>
         </button>
-        <div className="dr-tile"><span className="dr-tile-label">Агент одобрил за 7 дней</span><span className="dr-tile-num">{approved}</span></div>
-        <div className="dr-tile"><span className="dr-tile-label">Агент отклонил за 7 дней</span><span className="dr-tile-num">{declined}</span></div>
-        <div className={`dr-tile ${errors ? 'bad' : ''}`}><span className="dr-tile-label">Ozon не принял ответ</span><span className="dr-tile-num">{errors}</span></div>
-      </div>
-
-      <div className="dr-note">
-        Скидка в процентах — от цены, которую покупатель видит на витрине. Ozon сохраняет свою скидку,
-        поэтому ваша цена в кабинете для этой продажи снижается на тот же процент — от неё и считается маржа.
-        Для «Одобрять» задаётся одно ограничение: либо максимальная скидка, либо минимальная маржа.
+        <div className="dr-tile"><span className="dr-tile-label">Агент · 7 дн</span>
+          <span className="dr-tile-num">{approved} / {declined}</span><span className="dr-cap">одобрил / отклонил</span></div>
+        <div className="dr-tile"><span className="dr-tile-label">Заказы по скидке · 7 дн</span>
+          <span className="dr-tile-num">{w7?.orders ?? '—'}</span><span className="dr-cap">{w7 ? `${pctS(w7.conv)} из ${w7.approved} одобренных` : ''}</span></div>
+        <div className="dr-tile"><span className="dr-tile-label">Прибыль по скидке · 7 дн</span>
+          <span className="dr-tile-num">{w7?.profit == null ? '—' : rub(w7.profit)}</span><span className="dr-cap">{w7?.marginPct == null ? '' : `маржа ${pct1(w7.marginPct)}`}</span></div>
+        {errors > 0 && <div className="dr-tile bad"><span className="dr-tile-label">Ozon не принял ответ</span><span className="dr-tile-num">{errors}</span></div>}
       </div>
 
       <div className="row gap-8" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
@@ -166,7 +166,6 @@ export function OzonDiscounts() {
           <button className={view === 'products' ? 'active' : ''} onClick={() => setView('products')}>Товары и правила</button>
           <button className={view === 'tasks' ? 'active' : ''} onClick={() => setView('tasks')}>Заявки{pending.length ? ` · ждут ${pending.length}` : ''}</button>
         </div>
-        <span className="dr-def">Режим не выбран — заявки по товару обрабатываются вручную в кабинете Ozon</span>
       </div>
 
       {view === 'products'
@@ -506,30 +505,12 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
 /** «Эффективность скидок»: одобренные заявки → настоящие заказы по ним (метка WANNADISCOUNT в заказе). */
 function Effect({ stats }: { stats?: Stats }) {
   if (!stats) return <div className="dr-empty">Нет данных</div>;
-  const Tile = ({ label, e }: { label: string; e: Eff }) => (
-    <div className="dr-eff-tile">
-      <div className="dr-tile-label">{label}</div>
-      <div className="dr-eff-main"><b>{e.orders}</b><span>заказов по скидке</span></div>
-      <div className="dr-cap">одобрено заявок {e.approved} · конверсия {e.conv == null ? '—' : pctS(e.conv)}{e.cancelled ? ` · отменено ${e.cancelled}` : ''}</div>
-      <div className="dr-cap">выручка {rub(e.revenue)} · прибыль {e.profit == null ? '—' : rub(e.profit)}{e.marginPct == null ? '' : ` (${pct1(e.marginPct)})`}</div>
-      <div className="dr-cap">средняя одобренная скидка {e.avgPct == null ? '—' : pctS(e.avgPct)}</div>
-    </div>
-  );
   const ST: Record<string, string> = { awaiting_packaging: 'ждёт сборки', awaiting_deliver: 'ждёт отгрузки', delivering: 'в доставке', delivered: 'доставлен', cancelled: 'отменён', awaiting_registration: 'оформляется' };
   return (
     <div className="dr-eff">
-      <div className="dr-eff-tiles">
-        <Tile label="За 7 дней" e={stats.w7} />
-        <Tile label="За 30 дней" e={stats.w30} />
-        <Tile label="Одобрил агент (30 дн)" e={stats.agent} />
-        <Tile label="Вручную: кабинет и сайт (30 дн)" e={stats.hand} />
-      </div>
       <div className="dr-note">
-        Заказ «по скидке» — в самом заказе Ozon стоит отметка, что цена из заявки на скидку. Сайт проверяет заказы FBS и FBO раз в час
-        {stats.ordersAt ? ` (последний раз ${time(stats.ordersAt)})` : ''}. Отменённые заказы в выручку и прибыль не входят.
-        Выручка — наша цена в ЛК из заказа; прибыль — оценка по нынешней экономике товара (себестоимость, комиссия, логистика) при этой цене.
-        Кто одобрил — по последней одобренной заявке на этот товар за 72 часа до заказа.
-        {stats.since ? ` Данные с ${time(stats.since)}.` : ''}
+        За 30 дней: одобрено {stats.w30.approved}, заказов {stats.w30.orders}{stats.w30.cancelled ? `, отменено ${stats.w30.cancelled}` : ''}, выручка {rub(stats.w30.revenue)}, прибыль {stats.w30.profit == null ? '—' : rub(stats.w30.profit)}.
+        Прибыль — оценка по нынешней экономике товара. Заказы проверяются раз в час{stats.ordersAt ? `, последний раз ${time(stats.ordersAt)}` : ''}.
       </div>
       <div className="dr-table-wrap">
         <table className="dr-table">

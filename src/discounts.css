@@ -138,3 +138,7 @@ button.dr-tile:hover { border-color: var(--accent); }
 .dr-bulk .dr-field-label { color: var(--text); font-weight: 500; font-size: 17px; }
 .dr-bulk .dr-or, .dr-bulk > .btn { height: 46px; }
 .dr-field-box input::placeholder { opacity: .7; }
+
+/* 08.11 (3): панель массового правила едет вместе со списком — прилипает под верхней
+   строкой сайта (64 px, как .rv-bulk в «Отзывах»), пока выбраны товары. */
+.dr-bulk { position: sticky; top: 72px; z-index: 6; }

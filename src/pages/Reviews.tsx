@@ -127,7 +127,7 @@ export function Reviews() {
                     {st && !st.ok && st.error ? 'Ошибка сбора' : `Сбор ${ago(st?.at ?? null)}`}
                   </span>
                   {noApi
-                    ? <span title="Ozon не даёт отвечать на отзывы по API — ответ вставляется в кабинете">Ответ — в кабинете Ozon</span>
+                    ? <span title="Автоответа нет: на текущей подписке Ozon закрывает отзывы в API (проверено 08.11.2026). Черновик готовится, кнопка «Скопировать и открыть Ozon» вставляет его в кабинете.">Ответ — в кабинете Ozon</span>
                     : (
                       <Switch checked={ov.settings.autoPublish[d.key]} onChange={v => toggleAuto(d.key, v)} title="Публиковать ответы без эскалации автоматически">
                         Автоответ
@@ -505,7 +505,6 @@ function DiskBlock({ kb, reload }: { kb: Kb; reload: () => void }) {
     setPreview((await reviewsApi.folderText(p)).text || '(текста нет)');
   };
   const ix = kb.index;
-  const unconfirmed = kb.folders.filter(f => !f.confirmed && !f.shared).length;
   return (
     <section className="rv-panel">
       <div className="rv-panel-row">
@@ -514,65 +513,63 @@ function DiskBlock({ kb, reload }: { kb: Kb; reload: () => void }) {
           {ix.running ? <><SpinnerIcon size={17} className="spin" /> {ix.done} из {ix.total || '…'}</> : <><ArrowsClockwiseIcon size={17} /> Обновить материалы</>}
         </button>
       </div>
-      <p className="rv-sub">
-        Папка проверяется сама каждые 6 часов (03, 09, 15, 21 МСК): новые папки и файлы добавляются, изменённые перечитываются, удалённые убираются.
-        Word и PDF читаются на сервере бесплатно{kb.poppler ? '' : ' (PDF-модуль ещё не установлен — PDF до 3 МБ идут через Claude)'}; сканы и фото комплектации — через Claude один раз.
-        {ix.current && <> Сейчас: {ix.current}</>}
-      </p>
-      {kb.diskSync && (
-        <div className="rv-hint">
-          Последняя проверка {fmtDate(kb.diskSync.at)}: новых папок {kb.diskSync.added.length}, изменённых {kb.diskSync.changed.length}, удалённых {kb.diskSync.removed.length}.
-        </div>
-      )}
-      {unconfirmed > 0 && (
-        <div className="rv-callout rv-callout--warn">
-          <WarningIcon size={18} />
-          <span>Новых папок без подтверждения: {unconfirmed}. ИИ уже использует подобранные артикулы — проверьте их и нажмите «Подтвердить».</span>
-        </div>
-      )}
+      {/* 08.11.2026: подтверждение артикулов убрано — агент подбирает их сам; вместо пояснений — тезисы. */}
+      <ul className="rv-facts">
+        <li>Агент сам проверяет папку каждые 6 часов — в 03:00, 09:00, 15:00 и 21:00 МСК.</li>
+        <li>Новые и изменённые файлы читает, удалённые убирает, артикулы к папкам подбирает сам.</li>
+        <li>Читает: Word, PDF-инструкции (на русском; инструкцию на другом языке — только если русской нет), картинки со словами «комплектация», «характеристики», «размеры», «инструкция» в названии.</li>
+        <li>Не читает: обычные фото товара, видео, архивы, макеты.</li>
+        <li>Последняя проверка: {kb.diskSync
+          ? <>{fmtDate(kb.diskSync.at)} — новых папок {kb.diskSync.added.length}, изменённых {kb.diskSync.changed.length}, удалённых {kb.diskSync.removed.length}</>
+          : 'ещё не было'}{ix.current && <> · сейчас: {ix.current}</>}</li>
+      </ul>
       {ix.error && <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span>{ix.error}</span></div>}
       {kb.folders.length > 0 && (
         <div className="rv-table-wrap">
-          <table className="rv-table">
+          <table className="rv-table rv-folders">
             <thead><tr><th>Папка</th><th>Артикулы</th><th>Файлы</th><th /></tr></thead>
             <tbody>
-              {kb.folders.map(fd => <FolderRow key={fd.path} fd={fd} onPreview={() => show(fd.path)} open={openPath === fd.path} preview={preview} reload={reload} />)}
+              {kb.folders.map(fd => <FolderRow key={fd.path} fd={fd} onPreview={() => show(fd.path)} open={openPath === fd.path} preview={preview} />)}
             </tbody>
           </table>
-        </div>
-      )}
-      {kb.withoutMaterials.length > 0 && (
-        <div className="rv-hint">
-          Без папки на Диске ({kb.withoutMaterials.length}) — отвечаем по карточке товара и нашей истории: {kb.withoutMaterials.slice(0, 40).join(', ')}{kb.withoutMaterials.length > 40 ? '…' : ''}
         </div>
       )}
     </section>
   );
 }
 
-function FolderRow({ fd, onPreview, open, preview, reload }: { fd: KbFolder; onPreview: () => void; open: boolean; preview: string; reload: () => void }) {
-  const [v, setV] = useState(fd.offerIds.join(', '));
+/** Причина пропуска файла → короткая группа для строки «не читали: 25 фото, 1 видео». */
+function skipGroup(note: string | undefined): string {
+  const n = note || '';
+  if (/обычное фото/.test(n)) return 'фото товара';
+  if (/русская инструкция/.test(n)) return 'инструкция на другом языке';
+  if (/картинка .*МБ/.test(n)) return 'большая картинка';
+  if (/слишком большой|МБ/.test(n)) return 'слишком большой файл';
+  if (/\.doc/.test(n)) return 'старый .doc';
+  if (/полезного текста нет/.test(n)) return 'без полезного текста';
+  return 'видео, архив или макет';
+}
+
+function FolderRow({ fd, onPreview, open, preview }: { fd: KbFolder; onPreview: () => void; open: boolean; preview: string }) {
   const done = fd.files.filter(f => f.status === 'done').length;
   const errs = fd.files.filter(f => f.status === 'error');
-  const confirmIt = async () => {
-    await reviewsApi.confirmFolder(fd.path, v.split(/[,\s]+/).filter(Boolean));
-    reload();
-  };
+  const skipped = new Map<string, number>();
+  for (const f of fd.files) if (f.status === 'skipped') { const g = skipGroup(f.note); skipped.set(g, (skipped.get(g) || 0) + 1); }
   return (
     <>
-      <tr className={fd.confirmed || fd.shared ? '' : 'is-new'}>
-        <td>{fd.path}{!fd.confirmed && !fd.shared && <> <Badge tone="warn">новая</Badge></>}</td>
+      <tr>
+        <td className="rv-folder-path">{fd.path}</td>
         <td>
-          {fd.shared && !fd.confirmed ? <span className="rv-muted" title="Артикул не нужен: материалы этой папки ИИ берёт для вложенных папок товаров или для набора, в который она входит">общая папка — без артикула</span> : (
-          <div className="rv-inline">
-            <input className="input" style={{ width: 220 }} value={v} onChange={e => setV(e.target.value)} placeholder="артикулы через запятую" />
-            {fd.confirmed && v === fd.offerIds.join(', ')
-              ? <Badge tone="good">подтверждено</Badge>
-              : <button className="btn" onClick={confirmIt}>Подтвердить</button>}
-          </div>)}
+          {fd.offerIds.length
+            ? <span className="rv-folder-offers">{fd.offerIds.join(', ')}</span>
+            : <span className="rv-muted">{fd.shared ? 'общая папка' : 'артикул не найден'}</span>}
         </td>
-        <td className="rv-muted">
-          прочитано {done} из {fd.files.length}{errs.length ? <span className="rv-text-bad" title={errs.map(e => `${e.name}: ${e.note}`).join('\n')}> · ошибок {errs.length}</span> : null}
+        <td>
+          <div>прочитано {done} из {fd.files.length}</div>
+          {skipped.size > 0 && (
+            <div className="rv-muted rv-folder-skip">не читали: {[...skipped].map(([g, n]) => `${g} — ${n}`).join(', ')}</div>
+          )}
+          {errs.length > 0 && <div className="rv-text-bad" title={errs.map(e => `${e.name}: ${e.note}`).join('\n')}>не прочитались: {errs.length}</div>}
         </td>
         <td><button className="btn btn-ghost" onClick={onPreview}>{open ? 'Скрыть' : 'Текст'}</button></td>
       </tr>

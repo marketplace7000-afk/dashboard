@@ -3,7 +3,7 @@ import { notifyUnauthorized } from './http';
 export type ChatThread = {
   marketplace: 'wb' | 'ozon'; chatId: string; clientName: string | null; sku: string | null; offerId: string | null;
   productName: string | null; lastAt: number | null; lastFromBuyer: boolean; lastText: string | null;
-  status: 'idle' | 'new' | 'drafted' | 'escalated' | 'sent' | 'skipped';
+  status: 'idle' | 'new' | 'drafted' | 'escalated' | 'sent' | 'skipped' | 'closed';
   draftAnswer: string | null; draftModel: string | null; draftCostUsd: number | null; draftFor: string | null;
   confidence: string | null; escalationReason: string | null; sourcesUsed: string[];
   sentAt: number | null; sentBy: string | null; sendError: string | null; canReply: boolean;

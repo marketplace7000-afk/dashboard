@@ -38,6 +38,7 @@ export function chatDb(): any {
   ready = true;
   migrateKvBuffers(d);
   fixOzonImageLinks(d);
+  closeThankYouThreads(d);
   return d;
 }
 
@@ -100,7 +101,10 @@ export function touchThread(mp: string, chatId: string): void {
   let status = cur?.status || 'idle';
   if (last.from_buyer) {
     // Покупатель написал после нашего ответа или черновика — нужен новый ответ.
-    if (!cur || status === 'idle' || status === 'sent' || status === 'skipped' || (cur.draft_for && cur.draft_for !== last.msg_id)) status = 'new';
+    if (!cur || status === 'idle' || status === 'sent' || status === 'skipped' || status === 'closed'
+      || (cur.draft_for && cur.draft_for !== last.msg_id)) status = 'new';
+    // …но «спасибо», «ок, понял» после нашего ответа — разговор закрыт, отвечать не нужно (08.11.2026).
+    if (buyerClosedTalk(d, mp, chatId)) status = 'closed';
   } else {
     status = 'idle'; // последним ответил магазин (в т.ч. вручную в кабинете)
   }
@@ -109,6 +113,59 @@ export function touchThread(mp: string, chatId: string): void {
     ON CONFLICT(marketplace, chat_id) DO UPDATE SET last_at = excluded.last_at, last_from_buyer = excluded.last_from_buyer,
       last_text = excluded.last_text, status = excluded.status, updated_at = excluded.updated_at`)
     .run(mp, chatId, last.at, last.from_buyer, String(last.text).slice(0, 300), status, Date.now());
+}
+
+// ─── «Спасибо» в конце разговора ───────────────────────────────────────────
+// Слова, из которых состоит прощание/благодарность. Есть хоть одно другое слово
+// («спасибо, а как подключить…», «ок, но не работает») — это уже вопрос, ждём ответа.
+const THANKS = new Set(('спасибо спасибочки спасибки спс пасиб пасибо благодарю благодарим благодарна благодарен благодарность '
+  + 'thanks thank thx мерси').split(' '));
+const ACK = new Set(('ок окей окэй ok okay хорошо хорош понял поняла поняли понятно ясно ладно договорились принято отлично '
+  + 'супер класс круто good норм нормально да ага угу получилось разобрался разобралась разобрались работает заработало '
+  + 'всё все').split(' '));
+const FILLER = new Set(('большое огромное вам вас тебе тебя очень и за ответ ответы помощь информацию подсказку быстрый '
+  + 'оперативный you so much всего доброго хорошего дня вечера до свидания тоже еще раз уже теперь вот так '
+  + 'всех благ процветания честность понимание оперативность').split(' '));
+
+/** Сообщение покупателя — только благодарность/«ок»/смайлик, без нового вопроса. */
+export function isClosingText(text: string, weAsked: boolean): boolean {
+  const raw = String(text || '').trim();
+  if (!raw || /\[(фото|файл)/i.test(raw) || raw.length > 120 || raw.includes('?')) return false;
+  const words = raw.toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я\s]/g, ' ').split(/\s+/).filter(Boolean);
+  if (!words.length) return /\p{Extended_Pictographic}/u.test(raw); // 👍 🙏 ❤️
+  if (words.length > 14) return false;
+  if (!words.every(w => THANKS.has(w) || ACK.has(w) || FILLER.has(w))) return false;
+  if (words.some(w => THANKS.has(w))) return true;
+  // «Да», «ок», «хорошо» в ответ на наш вопрос — это ответ, а не прощание.
+  return !weAsked && words.some(w => ACK.has(w));
+}
+
+/** Все сообщения покупателя после нашего последнего ответа — благодарность/«ок». */
+function buyerClosedTalk(d: any, mp: string, chatId: string): boolean {
+  const rows = d.prepare(`SELECT from_buyer, text FROM chat_messages WHERE marketplace = ? AND chat_id = ?
+    ORDER BY at DESC LIMIT 12`).all(mp, chatId) as any[];
+  const tail: string[] = [];
+  let ours: string | null = null;
+  for (const r of rows) {
+    if (!r.from_buyer) { ours = String(r.text || ''); break; }
+    tail.push(String(r.text || ''));
+  }
+  if (ours === null || !tail.length) return false; // магазин ещё не отвечал — это первое обращение
+  // Наш ответ заканчивался вопросом («Подходит?») — тогда «да»/«ок» покупателя — это ответ.
+  const weAsked = ours.slice(-200).includes('?');
+  return tail.every(t => isClosingText(t, weAsked));
+}
+
+/** Один раз: старые «ждут ответа», где покупатель лишь поблагодарил, — закрыть. */
+function closeThankYouThreads(d: any): void {
+  if (kvGet<number>('chat_closed_v1', 0)) return;
+  const rows = d.prepare(`SELECT marketplace, chat_id FROM chat_threads WHERE last_from_buyer = 1
+    AND status IN ('new','drafted','escalated')`).all() as any[];
+  const upd = d.prepare("UPDATE chat_threads SET status = 'closed' WHERE marketplace = ? AND chat_id = ?");
+  let n = 0;
+  for (const r of rows) if (buyerClosedTalk(d, r.marketplace, r.chat_id)) { upd.run(r.marketplace, r.chat_id); n++; }
+  d.prepare(`INSERT INTO kv (key, value, updated_at) VALUES ('chat_closed_v1', ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(JSON.stringify(n || 1), Date.now());
 }
 
 export function setThreadMeta(mp: string, chatId: string, meta: { replySign?: string | null; clientName?: string | null; sku?: string | null; offerId?: string | null; productName?: string | null }): void {
@@ -130,7 +187,7 @@ export function patchThread(mp: string, chatId: string, fields: Record<string, u
 export type ChatThread = {
   marketplace: 'wb' | 'ozon'; chatId: string; clientName: string | null; sku: string | null; offerId: string | null;
   productName: string | null; lastAt: number | null; lastFromBuyer: boolean; lastText: string | null;
-  status: 'idle' | 'new' | 'drafted' | 'escalated' | 'sent' | 'skipped';
+  status: 'idle' | 'new' | 'drafted' | 'escalated' | 'sent' | 'skipped' | 'closed';
   draftAnswer: string | null; draftModel: string | null; draftCostUsd: number | null; draftFor: string | null;
   confidence: string | null; escalationReason: string | null; sourcesUsed: string[];
   sentAt: number | null; sentBy: string | null; sendError: string | null; canReply: boolean;

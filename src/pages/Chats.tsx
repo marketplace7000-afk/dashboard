@@ -1,5 +1,6 @@
 // Раздел «Чаты с покупателями» (WB и Ozon). Диалоги собирает сервер каждые 5 минут,
-// ИИ готовит черновик к новому сообщению покупателя; отправка — кнопкой.
+// агент готовит черновик к новому сообщению покупателя; отправка — кнопкой.
+// «Спасибо»/«ок» после нашего ответа — разговор завершён, ответа не ждёт (08.11.2026).
 // Вид: стили .rv- в styles.css, общие детали — components/InboxUi.tsx (13.10.2026).
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -27,6 +28,7 @@ function statusBadge(t: ChatThread) {
   if (t.status === 'drafted') return <Badge tone="info">Черновик готов</Badge>;
   if (t.status === 'sent') return <Badge tone="good">Отвечено</Badge>;
   if (t.status === 'skipped') return <Badge tone="neutral">Пропущен</Badge>;
+  if (t.status === 'closed') return <Badge tone="neutral">Разговор завершён</Badge>;
   if (t.lastFromBuyer) return <Badge tone="warn">Ждёт ответа</Badge>;
   return null;
 }
@@ -131,8 +133,8 @@ export function Chats() {
         <div className="rv-hero-side">
           {settings && (
             <Switch checked={settings.chatAutoDraft} onChange={() => toggle('chatAutoDraft')}
-              title="ИИ сам готовит черновик к каждому новому сообщению покупателя (за последние 48 ч)">
-              ИИ сам пишет черновики
+              title="Агент сам готовит черновик к каждому новому сообщению покупателя (за последние 48 ч)">
+              Агент сам пишет черновики
             </Switch>
           )}
           <button className="btn btn-primary" onClick={syncNow} disabled={syncing}>
@@ -142,7 +144,8 @@ export function Chats() {
       </section>
       <p className="rv-sub rv-sub--page">
         Новые сообщения приходят каждые 5 минут{data ? ` · в базе ${data.totals.wb} диалогов WB и ${data.totals.ozon} Ozon` : ''}.
-        Ответ ИИ строит по всей переписке, карточке и материалам товара, нашим прошлым ответам и архиву Telegram.
+        Агент строит ответ по всей переписке, карточке и материалам товара, нашим прошлым ответам и архиву Telegram.
+        «Спасибо» и «ок» после нашего ответа не считаются вопросом — такой разговор помечается завершённым.
         Без «Автоответа» сообщение уходит только по кнопке «Отправить».
       </p>
 
@@ -231,7 +234,7 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
   const apply = (t: ChatThread | null | undefined) => { if (t) { setTh(t); setText(t.draftAnswer || ''); onChanged(t); } };
   const send = () => act('send', async () => {
     if (!text.trim()) throw new Error('Пустое сообщение');
-    if (th?.status === 'escalated' && !confirm(`ИИ пометил: ${th.escalationReason}. Всё равно отправить?`)) return;
+    if (th?.status === 'escalated' && !confirm(`Агент пометил: ${th.escalationReason}. Всё равно отправить?`)) return;
     const r = await chatsApi.send(mp, id, text.trim());
     if (!r.ok) throw new Error(r.error || 'Не отправлено');
     await load(); onSent();
@@ -285,7 +288,7 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
             {hint ? ` · ${hint}` : ''}
           </span>
           <div className="rv-actions">
-            {th.status === 'skipped'
+            {th.status === 'skipped' || th.status === 'closed'
               ? <button className="btn" disabled={!!busy} onClick={() => act('unskip', async () => apply((await chatsApi.unskip(mp, id)).thread))}>Вернуть в работу</button>
               : <button className="btn btn-ghost" disabled={!!busy} onClick={() => act('skip', async () => { apply((await chatsApi.skip(mp, id)).thread); onSent(); })}>Пропустить</button>}
             <button className="btn" disabled={!!busy} onClick={() => act('draft', async () => apply((await chatsApi.draft(mp, id)).thread))}>

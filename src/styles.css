@@ -1245,6 +1245,20 @@ code {
 .rv-table td { padding: 10px 14px; vertical-align: middle; }
 .rv-table tbody tr:hover { background: #fafbfc; }
 .rv-table tr.is-new td { background: #fffbeb; }
+/* «База знаний» → Яндекс.Диск: тезисы вместо пояснений и таблица папок (08.11.2026) */
+.rv-facts { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--muted); font-size: 17px; line-height: 1.5; max-width: 90ch; }
+.rv-folders td { vertical-align: top; }
+.rv-folder-path, .rv-folder-offers { overflow-wrap: anywhere; }
+.rv-folder-skip { font-size: 15px; line-height: 1.4; margin-top: 2px; }
+@media (max-width: 760px) {
+  /* На телефоне каждая папка — карточка: путь, артикулы, файлы, кнопка «Текст». */
+  .rv-folders, .rv-folders tbody, .rv-folders tr, .rv-folders td { display: block; width: 100%; }
+  .rv-folders thead { display: none; }
+  .rv-folders tr { padding: 10px 12px; border-bottom: 1px solid var(--rv-line); }
+  .rv-folders td { padding: 2px 0; }
+  .rv-folders .rv-folder-path { font-weight: 600; }
+  .rv-folders td:last-child .btn { padding-left: 0; }
+}
 .rv-log { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 16px; align-items: start; }
 .rv-events { list-style: none; margin: 0; padding: 0; max-height: 560px; overflow: auto; font-size: 17px; }
 .rv-events li { padding: 8px 0; border-bottom: 1px solid var(--rv-line); }
@@ -1253,7 +1267,8 @@ code {
 .rv-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
 
 /* Чаты: список + диалог */
-.rv-chat { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 16px; align-items: start; }
+/* Столбец чатов шире: вкладки «Ждут ответа · Черновики · Все» и бейджи влезают целиком (08.11.2026). */
+.rv-chat { display: grid; grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .rv-chat-list { display: grid; gap: 12px; padding: 14px; border-radius: var(--rv-r); background: #fff; border: 1px solid var(--rv-line); position: sticky; top: 64px; }
 .rv-chat-tools { display: grid; gap: 10px; }
 .rv-chat-tools .rv-search { max-width: none; }
@@ -1320,11 +1335,14 @@ code {
   .rv-hero > .btn, .rv-hero-side .btn { justify-content: center; }
   .rv-hero-side { flex-direction: column; align-items: stretch; gap: 14px; }
   .rv-seg { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; }
-  .rv-item-head, .rv-pane-head { flex-wrap: wrap; }
+  .rv-item-head { flex-wrap: wrap; }
   .rv-item-title { flex-basis: calc(100% - 40px); }
   .rv-item-head > .rv-badge { margin-left: 32px; }
-  .rv-pane-title { flex-basis: calc(100% - 112px); }
-  .rv-pane-head > .rv-badge { margin-left: 104px; }
+  /* Шапка диалога на телефоне: стрелка · имя · статус в одну строку, без аватара. */
+  .rv-pane-head { gap: 10px; }
+  .rv-pane-head > .rv-avatar { display: none; }
+  .rv-pane-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rv-pane-head > .rv-badge { flex-shrink: 0; font-size: 14px; padding: 3px 8px; }
   .rv-stats { gap: 14px 28px; }
   .rv-stat-num { font-size: 40px; }
   .rv-stat--mp, .rv-stat--mp + .rv-stat--mp { padding: 0; border: none; }
@@ -1350,7 +1368,9 @@ code {
   .rv-msg { max-width: 88%; }
   .rv-pane-head { padding: 12px; }
   .rv-product { padding: 10px 12px; gap: 12px; }
-  .rv-product-link { padding: 8px 10px; }
+  .rv-product { flex-wrap: wrap; }
+  .rv-product-body .rv-muted { font-size: 15px; }
+  .rv-product-link { padding: 8px 10px; flex-basis: 100%; justify-content: center; }
   .rv-composer { padding: 14px 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2297,8 +2317,10 @@ code {
 .sa .rv-seg-btn:hover { background: var(--bg-2); }
 .sa .rv-seg-btn.is-active { background: var(--accent-soft); color: var(--accent); font-weight: 500; box-shadow: none; }
 .sa .rv-table-wrap { border-radius: var(--sa-r-s); }
-.sa .rv-seg--full { flex-wrap: nowrap; }
-.sa .rv-seg--full .rv-seg-btn { padding: 8px 8px; gap: 6px; }
+/* Вкладки списка чатов: делят ширину поровну и переносятся, а не обрезаются («Все» уезжало за край). */
+.sa .rv-seg--full { flex-wrap: wrap; }
+.sa .rv-seg--full .rv-seg-btn { flex: 1 1 auto; justify-content: center; padding: 8px 8px; gap: 6px; }
+.rv-seg--full .rv-count { margin-left: 0; }
 
 /* Таблицы «Склада» (их же использует «Доступы») и общие таблицы */
 .sa table th { font-size: var(--sa-small); font-weight: 500; color: var(--muted); }

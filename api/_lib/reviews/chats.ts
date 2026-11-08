@@ -63,7 +63,7 @@ export function listThreads(q: { view?: string; q?: string; mp?: string; limit?:
   const args: any[] = [];
   if (q.mp === 'wb' || q.mp === 'ozon') { where.push('marketplace = ?'); args.push(q.mp); }
   const view = (q.view || 'waiting') as ChatView;
-  if (view === 'waiting') { where.push("last_from_buyer = 1 AND status NOT IN ('skipped','sent') AND last_at >= ?"); args.push(since); }
+  if (view === 'waiting') { where.push("last_from_buyer = 1 AND status NOT IN ('skipped','sent','closed') AND last_at >= ?"); args.push(since); }
   else if (view === 'drafts') where.push("status IN ('drafted','escalated')");
   if (q.q) {
     const like = `%${String(q.q).slice(0, 80)}%`;
@@ -83,7 +83,7 @@ export function chatCounts(): ChatCounts {
   const since = Date.now() - WAIT_DAYS * 86400_000;
   const one = (mp: string) => ({
     waiting: (d.prepare(`SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = ? AND last_from_buyer = 1
-      AND status NOT IN ('skipped','sent') AND last_at >= ?`).get(mp, since) as any).n,
+      AND status NOT IN ('skipped','sent','closed') AND last_at >= ?`).get(mp, since) as any).n,
     drafts: (d.prepare("SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = ? AND status IN ('drafted','escalated')").get(mp) as any).n,
   });
   const wb = one('wb'); const ozon = one('ozon');

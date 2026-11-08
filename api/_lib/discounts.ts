@@ -12,7 +12,11 @@
  * заявки: наша цена минус скидки Ozon). Можно добавить «маржа не ниже X %» — тогда
  * агент не опустит цену ниже точки, где маржа падает под порог.
  *
- * Как считаем маржу. Цены заявки (base_price − discount, approved_price) — это цены
+ * ВАЖНО (08.11, ошибка стоила одной заявки): в ОТВЕТ approve цену шлём В МАСШТАБЕ ЛК, как
+ * requested_price, — Ozon сам переводит её в цену покупателя (× витрина / ЛК). Отправили цену
+ * покупателя 112 984 → Ozon записал 67 816 (−40 %). Пересчёт — apiPrice(), с защитой.
+ *
+ * Как считаем маржу. Цены заявки (base_price − discount, approved_price в списке) — это цены
  * ПОКУПАТЕЛЯ, а requested_price — наша цена ЛК, уменьшенная на ту же долю. Сверено на
  * живой заявке 08.11: ЛК 181 725, витрина 113 024, просят 107 373 (−5 %) → requested_price
  * 172 639 = 181 725 × 0,95 до рубля. Значит, соинвест Ozon сохраняется, и скидка N % от
@@ -51,6 +55,8 @@ export type DiscountTask = {
   qtyMin: number; qtyMax: number;
   approvedPrice: number | null;
   moderatedAt: string | null;
+  /** Ozon: покупатель купил по одобренной цене (is_purchased). */
+  purchased: boolean;
   /** Что решил агент (для NEW/SEEN — что сделает сейчас). */
   decision: Decision | null;
   /** Ответ отправлен нашим агентом/кнопкой. */
@@ -60,6 +66,11 @@ export type DiscountTask = {
 const MP = 'ozon';
 const POLL_MS = 2 * 60_000;
 const HISTORY_EVERY_MS = 15 * 60_000;
+/** Раз в час — глубже по одобренным: у старых заявок меняется is_purchased (покупка). */
+const DEEP_EVERY_MS = 60 * 60_000;
+const DEEP_PAGES = 10;
+/** Защита: больше такой скидки от витрины агент/кнопка не отправят никогда. */
+const MAX_SAFE_PCT = 50;
 
 // ─── Хранилище ──────────────────────────────────────────────────────────────
 
@@ -233,6 +244,7 @@ export function toTask(x: any): Omit<DiscountTask, 'decision' | 'by' | 'byName' 
     base, showcase: show, requested, requestedPct: pctOff(show, requested),
     qtyMin: num(x.requested_quantity_min) || 1, qtyMax: num(x.requested_quantity_max) || num(x.requested_quantity_min) || 1,
     approvedPrice: num(x.approved_price) || null, moderatedAt: x.moderated_at ? String(x.moderated_at) : null,
+    purchased: x.is_purchased === true,
   };
 }
 
@@ -266,13 +278,31 @@ function staleIds(pending: any[]): number {
   return ours.filter(r => !live.has(String(r.id))).length;
 }
 
+/**
+ * Цена для approve: из цены покупателя (наш масштаб) — в масштаб ЛК, как ждёт Ozon.
+ * Округляем вверх, чтобы после обратного пересчёта Ozon покупатель не получил больше скидки.
+ * Бросает ошибку, если цену не проверить или скидка подозрительно большая.
+ */
+export function apiPrice(t: Pick<DiscountTask, 'base' | 'showcase'>, buyerPrice: number): number {
+  if (!(t.base > 0) || !(t.showcase > 0) || !(buyerPrice > 0)) throw new Error('в заявке нет цены ЛК или витрины — ответить вручную в кабинете');
+  const pct = (1 - buyerPrice / t.showcase) * 100;
+  if (pct > MAX_SAFE_PCT) throw new Error(`скидка ${Math.round(pct)} % — слишком большая, агент не отправит`);
+  return Math.min(Math.round(t.base), Math.ceil(buyerPrice * t.base / t.showcase));
+}
+
 /** Ответить Ozon пачкой. Возвращает ошибки по номерам заявок. */
 async function send(kind: 'approve' | 'decline', tasks: { t: ReturnType<typeof toTask>; d: Decision }[]): Promise<Map<string, string>> {
   const errs = new Map<string, string>();
   for (let i = 0; i < tasks.length; i += 50) {
-    const part = tasks.slice(i, i + 50);
+    const part: typeof tasks = [];
+    const prices = new Map<string, number>();
+    for (const x of tasks.slice(i, i + 50)) {
+      if (kind !== 'approve') { part.push(x); continue; }
+      try { prices.set(x.t.id, apiPrice(x.t, x.d.price ?? 0)); part.push(x); } catch (e) { errs.set(x.t.id, (e as Error).message); }
+    }
+    if (!part.length) continue;
     const body = kind === 'approve'
-      ? { tasks: part.map(({ t, d }) => ({ id: t.id, approved_price: d.price, seller_comment: '', approved_quantity_min: t.qtyMin, approved_quantity_max: t.qtyMax })) }
+      ? { tasks: part.map(({ t }) => ({ id: t.id, approved_price: prices.get(t.id), seller_comment: '', approved_quantity_min: t.qtyMin, approved_quantity_max: t.qtyMax })) }
       : { tasks: part.map(({ t }) => ({ id: t.id, seller_comment: '' })) };
     try {
       const r = await ozPost(`v1/actions/discounts-task/${kind}`, body);
@@ -294,6 +324,7 @@ async function send(kind: 'approve' | 'decline', tasks: { t: ReturnType<typeof t
 // модуля, и экран видел «ещё не было», хотя таймер работал. Там же замок: кнопка «Забрать
 // заявки сейчас» не должна идти параллельно с таймером и ответить на заявку дважды.
 let lastHistory = 0;
+let lastDeep = 0;
 type PassState = { lastRun: number; lastError: string | null; lastSummary: string };
 function passState(): PassState {
   try { return { lastRun: 0, lastError: null, lastSummary: '', ...JSON.parse(adsMetaGet('discounts:ozon:pass') || '{}') }; }
@@ -322,6 +353,7 @@ export async function runPass(why = 'по таймеру'): Promise<string> {
     if (Date.now() - lastHistory > HISTORY_EVERY_MS || staleIds(pending) > 0) {
       saveRaw([...await fetchStatus('APPROVED', 2), ...await fetchStatus('DECLINED', 2)]);
       lastHistory = Date.now();
+      if (Date.now() - lastDeep > DEEP_EVERY_MS) { saveRaw(await fetchStatus('APPROVED', DEEP_PAGES)); lastDeep = Date.now(); }
       // Не нашлась и в истории (истекла и т. п.) — закрываем, иначе история запрашивалась бы каждый проход.
       const live = new Set(pending.map(x => String(x.id)));
       for (const r of db().prepare("SELECT id, raw FROM discount_task WHERE mp = ? AND status IN ('NEW', 'SEEN')").all(MP) as any[]) {
@@ -436,7 +468,44 @@ export async function overview(isOwner = false): Promise<any> {
       rule: rules[art] ?? null, req7: cnt.get(art)?.all ?? 0, pending: cnt.get(art)?.pending ?? 0,
     });
   }
-  return { settings: s, canToggle: isOwner, ...passState(), products, tasks };
+  return { settings: s, canToggle: isOwner, ...passState(), products, tasks, stats: purchaseStats(names) };
+}
+
+/**
+ * Эффективность скидок: сколько одобренных заявок закончились покупкой (is_purchased от Ozon).
+ * Окна 7 и 30 дней по дате заявки; по товарам — за 30 дней.
+ */
+function purchaseStats(names: Map<string, any>): any {
+  const since30 = new Date(Date.now() - 30 * 864e5).toISOString();
+  const since7 = new Date(Date.now() - 7 * 864e5).toISOString();
+  const rows = db().prepare("SELECT raw, by FROM discount_task WHERE mp = ? AND status = 'APPROVED' AND created_at >= ?").all(MP, since30) as any[];
+  type Agg = { approved: number; bought: number; revenue: number; pctSum: number; pctN: number };
+  const agg = (): Agg => ({ approved: 0, bought: 0, revenue: 0, pctSum: 0, pctN: 0 });
+  const w7 = agg(), w30 = agg(), byAgent = agg(), byHand = agg();
+  const per = new Map<string, Agg>();
+  let first = '';
+  for (const r of rows) {
+    const x = JSON.parse(r.raw);
+    const t = toTask(x);
+    const price = num(x.approved_price);
+    const pct = t.showcase > 0 && price > 0 ? (1 - price / t.showcase) * 100 : null;
+    const qty = num(x.approved_quantity_min) || 1;
+    const add = (a: Agg) => {
+      a.approved++;
+      if (pct != null) { a.pctSum += pct; a.pctN++; }
+      if (t.purchased) { a.bought++; a.revenue += price * qty; }
+    };
+    add(w30); if (t.createdAt >= since7) add(w7);
+    add(r.by === 'agent' ? byAgent : byHand);
+    if (!per.has(t.article)) per.set(t.article, agg());
+    add(per.get(t.article)!);
+    if (!first || t.createdAt < first) first = t.createdAt;
+  }
+  const out = (a: Agg) => ({ approved: a.approved, bought: a.bought, conv: a.approved ? Math.round(a.bought / a.approved * 1000) / 10 : null,
+    revenue: Math.round(a.revenue), avgPct: a.pctN ? Math.round(a.pctSum / a.pctN * 10) / 10 : null });
+  const products = [...per.entries()].map(([article, a]) => ({ article, name: names.get(article)?.name ?? '', photo: names.get(article)?.photo ?? '', ...out(a) }))
+    .sort((a, b) => b.approved - a.approved);
+  return { since: first || null, w7: out(w7), w30: out(w30), agent: out(byAgent), hand: out(byHand), products };
 }
 
 export function scheduleDiscounts(): void {

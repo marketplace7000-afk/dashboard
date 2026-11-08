@@ -1,5 +1,5 @@
 // Проверка решений агента «Заявки на скидку» (08.11.2026).
-import { decide, toTask, marginAtDiscount, maxPctForMargin, saveRules, listRules, type DiscountRule } from '../api/_lib/discounts';
+import { decide, toTask, apiPrice, marginAtDiscount, maxPctForMargin, saveRules, listRules, type DiscountRule } from '../api/_lib/discounts';
 import { _useAdsDbForTests } from '../api/_lib/ads/store';
 import type { OzonCalcInput } from '../src/utils/ozonProfit';
 
@@ -58,6 +58,17 @@ saveRules({ article: 'X', minMargin: 17 }, 't');
 eq('мин. маржа стирает скидку', [listRules().X.maxPct, listRules().X.minMargin], [null, 17]);
 saveRules({ article: 'X', maxPct: 5 }, 't');
 eq('скидка стирает мин. маржу', [listRules().X.maxPct, listRules().X.minMargin], [5, null]);
+
+// Ошибка 08.11: в approve Ozon ждёт цену в масштабе ЛК. Живая заявка: ЛК 188 800, витрина 113 323;
+// отправили цену покупателя 112 984 — Ozon записал 67 816 (= 112 984 × 113 323 / 188 800).
+const live = { base: 188800, showcase: 113323 };
+const sent = apiPrice(live, 112984);
+eq('цена покупателя 112 984 → в ЛК', sent, 188236);
+eq('после пересчёта Ozon покупатель платит не меньше', Math.round(sent * 113323 / 188800) >= 112984, true);
+eq('«как просили» ≈ requested_price из заявки', Math.abs(apiPrice(live, 107657) - 179360) <= 1, true);
+let threw = ''; try { apiPrice(live, 50000); } catch (e) { threw = (e as Error).message; }
+eq('скидка больше 50 % не уходит', threw.startsWith('скидка 56 %'), true);
+eq('не выше цены ЛК', apiPrice(live, 113323), 188800);
 
 console.log(ok ? '\nЗаявки на скидку: в порядке.' : '\nОШИБКА');
 if (!ok) process.exit(1);

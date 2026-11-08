@@ -27,10 +27,14 @@ type Task = {
   base: number; showcase: number; requested: number; requestedPct: number; qtyMin: number; qtyMax: number;
   approvedPrice: number | null; moderatedAt: string | null; decision: Decision | null;
   by: 'agent' | 'user' | null; byName: string | null; appliedAt: number | null; error: string | null;
+  purchased: boolean;
 };
+/** Эффективность: одобрено → купили (is_purchased от Ozon). */
+type Eff = { approved: number; bought: number; conv: number | null; revenue: number; avgPct: number | null };
+type Stats = { since: string | null; w7: Eff; w30: Eff; agent: Eff; hand: Eff; products: (Eff & { article: string; name: string; photo: string })[] };
 type Data = {
   settings: { auto: boolean; defaultMode: 'manual' | 'decline' }; canToggle: boolean;
-  lastRun: number; lastError: string | null; lastSummary: string; products: Product[]; tasks: Task[];
+  lastRun: number; lastError: string | null; lastSummary: string; products: Product[]; tasks: Task[]; stats?: Stats;
 };
 
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
@@ -378,7 +382,7 @@ function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolea
 const STATUS: Record<string, string> = { NEW: 'Новая', SEEN: 'Просмотрена', APPROVED: 'Одобрена', DECLINED: 'Отклонена', CLOSED: 'Закрыта Ozon' };
 
 function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () => Promise<void> }) {
-  const [only, setOnly] = useState<'pending' | 'all'>('pending');
+  const [only, setOnly] = useState<'pending' | 'all' | 'eff'>('pending');
   const [busyId, setBusyId] = useState<string | null>(null);
   const prod = useMemo(() => new Map(data.products.map(p => [p.article, p])), [data.products]);
   const list = data.tasks.filter(t => only === 'all' || isPending(t));
@@ -398,8 +402,10 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
         <div className="sa-seg">
           <button className={only === 'pending' ? 'active' : ''} onClick={() => setOnly('pending')}>Ждут ответа</button>
           <button className={only === 'all' ? 'active' : ''} onClick={() => setOnly('all')}>Все за 7 дней</button>
+          <button className={only === 'eff' ? 'active' : ''} onClick={() => setOnly('eff')}>Эффективность скидок</button>
         </div>
       </div>
+      {only === 'eff' ? <Effect stats={data.stats} /> : (
       <div className="dr-table-wrap">
         <table className="dr-table">
           <thead>
@@ -460,6 +466,7 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
                   </td>
                   <td className="dr-st">
                     <span className={`dr-status s-${t.status}`}>{STATUS[t.status] ?? t.status}</span>
+                    {t.purchased && <div><span className="dr-bought">Купил</span></div>}
                     {t.approvedPrice && t.status === 'APPROVED' ? <div className="dr-cap"><span className="nw">по {rub(t.approvedPrice)}</span>{t.showcase > 0 ? <span className="nw"> (−{pctS(Math.round((1 - t.approvedPrice / t.showcase) * 1000) / 10)})</span> : null}</div> : null}
                     {!pend && t.status !== 'CLOSED' && <div className="dr-cap">{t.by === 'agent' ? 'ответил агент' : t.by === 'user' ? `с сайта: ${t.byName}` : 'в кабинете Ozon'}</div>}
                     {t.error && <div className="dr-bad dr-cap">Ozon: {t.error}</div>}
@@ -478,7 +485,59 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
                 </tr>
               );
             })}
-            {!list.length && <tr><td colSpan={8}className="dr-empty">{only === 'pending' ? 'Новых заявок нет' : 'За 7 дней заявок нет'}</td></tr>}
+            {!list.length && <tr><td colSpan={8} className="dr-empty">{only === 'pending' ? 'Новых заявок нет' : 'За 7 дней заявок нет'}</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      )}
+    </div>
+  );
+}
+
+/** «Эффективность скидок»: сколько одобренных заявок закончились покупкой. */
+function Effect({ stats }: { stats?: Stats }) {
+  if (!stats) return <div className="dr-empty">Нет данных</div>;
+  const Tile = ({ label, e }: { label: string; e: Eff }) => (
+    <div className="dr-eff-tile">
+      <div className="dr-tile-label">{label}</div>
+      <div className="dr-eff-main"><b>{e.conv == null ? '—' : pctS(e.conv)}</b><span>купили</span></div>
+      <div className="dr-cap">одобрено {e.approved} · купили {e.bought}</div>
+      <div className="dr-cap">средняя скидка {e.avgPct == null ? '—' : pctS(e.avgPct)} · выручка {rub(e.revenue)}</div>
+    </div>
+  );
+  return (
+    <div className="dr-eff">
+      <div className="dr-eff-tiles">
+        <Tile label="За 7 дней" e={stats.w7} />
+        <Tile label="За 30 дней" e={stats.w30} />
+        <Tile label="Ответил агент (30 дн)" e={stats.agent} />
+        <Tile label="Вручную: кабинет и сайт (30 дн)" e={stats.hand} />
+      </div>
+      <div className="dr-note">
+        «Купили» — Ozon отмечает у одобренной заявки, что покупатель оформил заказ по одобренной цене.
+        Отметка может появиться не сразу — сайт перепроверяет одобренные заявки раз в час.
+        {stats.since ? ` Данные собираются с ${time(stats.since)}.` : ''}
+      </div>
+      <div className="dr-table-wrap">
+        <table className="dr-table">
+          <thead><tr>
+            <th className="l">Товар</th><th>Одобрено<br />заявок</th><th>Купили</th><th>Конверсия</th><th>Средняя<br />скидка</th><th>Выручка<br />по скидке</th>
+          </tr></thead>
+          <tbody>
+            {stats.products.map(p => (
+              <tr key={p.article}>
+                <td className="l"><div className="dr-prod">
+                  {p.photo ? <img src={p.photo} alt="" loading="lazy" /> : <span className="dr-noimg" />}
+                  <div><div className="dr-name" title={p.name}>{p.name || p.article}</div><div className="dr-art">{p.article}</div></div>
+                </div></td>
+                <td><b>{p.approved}</b></td>
+                <td><b className={p.bought ? 'good' : ''}>{p.bought}</b></td>
+                <td><b>{p.conv == null ? '—' : pctS(p.conv)}</b></td>
+                <td>{p.avgPct == null ? '—' : pctS(p.avgPct)}</td>
+                <td>{p.bought ? rub(p.revenue) : '—'}</td>
+              </tr>
+            ))}
+            {!stats.products.length && <tr><td colSpan={6} className="dr-empty">За 30 дней одобренных заявок нет</td></tr>}
           </tbody>
         </table>
       </div>

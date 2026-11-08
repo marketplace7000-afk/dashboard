@@ -142,3 +142,14 @@ button.dr-tile:hover { border-color: var(--accent); }
 /* 08.11 (3): панель массового правила едет вместе со списком — прилипает под верхней
    строкой сайта (64 px, как .rv-bulk в «Отзывах»), пока выбраны товары. */
 .dr-bulk { position: sticky; top: 72px; z-index: 6; }
+
+/* Эффективность скидок (08.11) */
+.dr-bought { display: inline-block; margin-top: 4px; background: #e6f4ea; color: var(--good); border-radius: 999px; padding: 2px 12px; font-size: 16px; font-weight: 600; }
+.dr-eff { display: flex; flex-direction: column; gap: 14px; }
+.dr-eff-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 0 18px; }
+@media (max-width: 1000px) { .dr-eff-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.dr-eff-tile { border: 1px solid var(--border); border-radius: var(--sa-r-m, 12px); padding: 14px 18px; display: flex; flex-direction: column; gap: 4px; }
+.dr-eff-main { display: flex; align-items: baseline; gap: 8px; }
+.dr-eff-main b { font-size: 32px; font-weight: 600; line-height: 1.1; }
+.dr-eff-main span { color: var(--muted); font-size: 17px; }
+.dr-eff .dr-note { margin: 0 18px; }

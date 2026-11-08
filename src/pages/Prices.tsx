@@ -13,7 +13,7 @@ import { OzonDiscounts } from '../components/OzonDiscounts';
 type MpScope = 'wb' | 'wbg' | 'ozon' | 'discounts' | 'repricer';
 
 export function Prices() {
-  const [mp, setMp] = useState<MpScope>('wb');
+  const [mp, setMp] = useState<MpScope>(() => (typeof location !== 'undefined' && location.hash === '#prices-discounts' ? 'discounts' : 'wb'));
   // Плашки WB/Ozon липнут ПОД топбаром (он сам sticky top:0). Высоту топбара
   // меряем в рантайме — иначе на мобиле, где он переносится, top не угадать.
   const [topbarH, setTopbarH] = useState(56);

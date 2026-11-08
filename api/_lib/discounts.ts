@@ -516,8 +516,57 @@ function purchaseStats(names: Map<string, any>): any {
   return { since: first || null, w7: out(w7), w30: out(w30), agent: out(byAgent), hand: out(byHand), products };
 }
 
+// ─── Напоминание в чат «AV | OZON»: товары без правила ─────────────────────
+//
+// 08.11 (просьба владельца): у нового товара не выбран режим — каждые 6 часов писать в чат
+// Ozon-команды, пока менеджер не задаст размер скидки (или мин. маржу) либо «Отклонять».
+// «Без правила» — нет правила, режим снят, или «Одобрять» без скидки и без маржи
+// (агент такие заявки не трогает). Первое сообщение — как только товар появился; ночью
+// (22:00–09:00 МСК) не пишем — отправим в 09:00. Отметка последней отправки — в ad_meta.
+
+const UNSET_EVERY_MS = 6 * 3600_000;
+const UNSET_KEY = 'discounts:ozon:unsetNotifyAt';
+const SITE_DISCOUNTS = 'https://e-avtovibe.ru/#prices-discounts';
+
+export function unsetProducts(rules: Record<string, DiscountRule>, articles: string[]): { article: string; why: string }[] {
+  const out: { article: string; why: string }[] = [];
+  for (const a of articles) {
+    const r = rules[a];
+    if (!r || r.mode === 'manual') out.push({ article: a, why: 'режим не выбран' });
+    else if (r.mode === 'approve' && r.maxPct == null && r.minMargin == null) out.push({ article: a, why: '«Одобрять», но не задан размер скидки' });
+  }
+  return out;
+}
+
+async function notifyUnset(): Promise<void> {
+  try {
+    const margins = await inputs();
+    const list = unsetProducts(listRules(), Object.keys(margins)).sort((a, b) => a.article.localeCompare(b.article, 'ru'));
+    if (!list.length) { adsMetaSet(UNSET_KEY, '0'); return; }
+    const last = Number(adsMetaGet(UNSET_KEY) || 0);
+    if (last && Date.now() - last < UNSET_EVERY_MS) return;
+    const h = new Date(Date.now() + 3 * 3600_000).getUTCHours();
+    if (h < 9 || h >= 22) return;
+    const { tgSend, tgEscape: esc, OZON_CHAT_ID } = await import('./telegram');
+    const names = new Map(rnpItems('ozon').map(i => [up(i.article || i.sku), i.name]));
+    const rows = list.slice(0, 60).map((x, i) => `${i + 1}. <b>${esc(x.article)}</b>${names.get(x.article) ? ` — ${esc(String(names.get(x.article)).slice(0, 60))}` : ''} <i>(${esc(x.why)})</i>`);
+    const text = [
+      `⚠️ <b>Ozon, заявки на скидку: ${list.length === 1 ? 'у товара не выбрано правило' : `у ${list.length} товаров не выбрано правило`}</b>`,
+      ...rows, list.length > 60 ? `…и ещё ${list.length - 60}` : '',
+      '',
+      `Заявки покупателей на эти товары агент не обрабатывает. Выберите «Одобрять» с размером скидки (или мин. маржой) либо «Отклонять»: <a href="${SITE_DISCOUNTS}">«Цены» → «Заявки на скидку»</a>.`,
+      'Напоминание повторяется каждые 6 часов, пока правило не выбрано.',
+    ].filter(s => s !== '').join('\n');
+    if (await tgSend(text, OZON_CHAT_ID)) {
+      adsMetaSet(UNSET_KEY, String(Date.now()));
+      console.log(`[discounts] напоминание в чат Ozon: без правила ${list.length}`);
+    }
+  } catch (e) { console.warn('[discounts] напоминание не отправлено:', (e as Error).message); }
+}
+
 export function scheduleDiscounts(): void {
   setTimeout(() => { void runPass('старт'); setInterval(() => { void runPass(); }, POLL_MS).unref(); }, 90_000).unref();
+  setTimeout(() => { void notifyUnset(); setInterval(() => { void notifyUnset(); }, 15 * 60_000).unref(); }, 120_000).unref();
   const s = getDiscountSettings();
   console.log(`[discounts] заявки на скидку Ozon: опрос раз в 2 мин, автоответ ${s.auto ? 'ВКЛЮЧЁН' : 'выключен (только показ)'}`);
 }

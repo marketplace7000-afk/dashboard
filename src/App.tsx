@@ -98,7 +98,9 @@ const TITLES: Record<Page, string> = {
 export function App() {
   const [logged, setLogged] = useState(false);
   // Ссылка из Telegram (напоминание о сравнениях WB) ведёт сразу в «Конкуренты»: e-avtovibe.ru/#competitors-wb
-  const [page, setPage] = useState<Page>(() => (typeof location !== 'undefined' && location.hash.startsWith('#competitors') ? 'competitors' : 'dashboard'));
+  // 08.11: e-avtovibe.ru/#prices-discounts — «Цены» → «Заявки на скидку» (из напоминания в чате Ozon).
+  const [page, setPage] = useState<Page>(() => (typeof location === 'undefined' ? 'dashboard'
+    : location.hash.startsWith('#competitors') ? 'competitors' : location.hash.startsWith('#prices') ? 'prices' : 'dashboard'));
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Кто вошёл и какие разделы ему открыты (роль + галочки владельца, см.

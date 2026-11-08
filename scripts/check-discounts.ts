@@ -1,5 +1,5 @@
 // Проверка решений агента «Заявки на скидку» (08.11.2026).
-import { decide, toTask, apiPrice, marginAtDiscount, maxPctForMargin, saveRules, listRules, type DiscountRule } from '../api/_lib/discounts';
+import { decide, toTask, apiPrice, unsetProducts, marginAtDiscount, maxPctForMargin, saveRules, listRules, type DiscountRule } from '../api/_lib/discounts';
 import { _useAdsDbForTests } from '../api/_lib/ads/store';
 import type { OzonCalcInput } from '../src/utils/ozonProfit';
 
@@ -78,6 +78,10 @@ let t11 = ''; try { apiPrice(live, Math.floor(113323 * 0.89)); } catch (e) { t11
 eq('скидка 11 % не уходит', t11.includes('больше 10 %'), true);
 eq('скидка ровно 10 % уходит', apiPrice(live, Math.ceil(113323 * 0.9)) >= 188800 * 0.9, true);
 eq('не выше цены ЛК', apiPrice(live, 113323), 188800);
+
+// Напоминание в чат Ozon (08.11): товар без правила, режим снят или «Одобрять» без размера.
+const un = unsetProducts({ A: rule({ maxPct: 1 }), B: rule({ mode: 'decline' }), C: rule({ mode: 'manual' }), D: rule({}), E: rule({ minMargin: 15 }) }, ['A', 'B', 'C', 'D', 'E', 'F']);
+eq('без правила: C (снят), D (без размера), F (нет правила)', un.map(x => x.article), ['C', 'D', 'F']);
 
 console.log(ok ? '\nЗаявки на скидку: в порядке.' : '\nОШИБКА');
 if (!ok) process.exit(1);

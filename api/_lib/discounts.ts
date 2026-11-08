@@ -538,10 +538,27 @@ export function unsetProducts(rules: Record<string, DiscountRule>, articles: str
   return out;
 }
 
+/**
+ * Карточки для выкупов (решение владельца 08.11): наша цена в ЛК ниже 200 ₽ за штуку.
+ * Решение по ним не нужно — товару без правила агент сам ставит «Отклонять» и не пишет
+ * о нём в чат. Выбор менеджера не трогаем: только товары, где правила ещё нет.
+ */
+export const BUYOUT_PRICE_MAX = 200;
+export function isBuyoutCard(price: number | null | undefined): boolean {
+  return price != null && price > 0 && price < BUYOUT_PRICE_MAX;
+}
+
 async function notifyUnset(): Promise<void> {
   try {
     const margins = await inputs();
-    const list = unsetProducts(listRules(), Object.keys(margins)).sort((a, b) => a.article.localeCompare(b.article, 'ru'));
+    const unset = unsetProducts(listRules(), Object.keys(margins));
+    const buyouts = unset.filter(x => isBuyoutCard(margins[x.article]?.retail));
+    if (buyouts.length) {
+      saveRules({ articles: buyouts.map(x => x.article), mode: 'decline' }, `агент: цена ниже ${BUYOUT_PRICE_MAX} ₽ — карточка для выкупов`);
+      console.log(`[discounts] «Отклонять» для карточек выкупов (цена < ${BUYOUT_PRICE_MAX} ₽): ${buyouts.map(x => x.article).join(', ')}`);
+    }
+    const skip = new Set(buyouts.map(x => x.article));
+    const list = unset.filter(x => !skip.has(x.article)).sort((a, b) => a.article.localeCompare(b.article, 'ru'));
     if (!list.length) { adsMetaSet(UNSET_KEY, '0'); return; }
     const last = Number(adsMetaGet(UNSET_KEY) || 0);
     if (last && Date.now() - last < UNSET_EVERY_MS) return;

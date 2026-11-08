@@ -1,5 +1,5 @@
 // Проверка решений агента «Заявки на скидку» (08.11.2026).
-import { decide, toTask, apiPrice, unsetProducts, marginAtDiscount, maxPctForMargin, saveRules, listRules, type DiscountRule } from '../api/_lib/discounts';
+import { decide, toTask, apiPrice, unsetProducts, isBuyoutCard, marginAtDiscount, maxPctForMargin, saveRules, listRules, type DiscountRule } from '../api/_lib/discounts';
 import { _useAdsDbForTests } from '../api/_lib/ads/store';
 import type { OzonCalcInput } from '../src/utils/ozonProfit';
 
@@ -82,6 +82,8 @@ eq('не выше цены ЛК', apiPrice(live, 113323), 188800);
 // Напоминание в чат Ozon (08.11): товар без правила, режим снят или «Одобрять» без размера.
 const un = unsetProducts({ A: rule({ maxPct: 1 }), B: rule({ mode: 'decline' }), C: rule({ mode: 'manual' }), D: rule({}), E: rule({ minMargin: 15 }) }, ['A', 'B', 'C', 'D', 'E', 'F']);
 eq('без правила: C (снят), D (без размера), F (нет правила)', un.map(x => x.article), ['C', 'D', 'F']);
+
+eq('карточка выкупов: 199 ₽ — да, 200 ₽ — нет, нет цены — нет', [isBuyoutCard(199), isBuyoutCard(200), isBuyoutCard(null), isBuyoutCard(0)], [true, false, false, false]);
 
 console.log(ok ? '\nЗаявки на скидку: в порядке.' : '\nОШИБКА');
 if (!ok) process.exit(1);

@@ -508,10 +508,6 @@ function Effect({ stats }: { stats?: Stats }) {
   const ST: Record<string, string> = { awaiting_packaging: 'ждёт сборки', awaiting_deliver: 'ждёт отгрузки', delivering: 'в доставке', delivered: 'доставлен', cancelled: 'отменён', awaiting_registration: 'оформляется' };
   return (
     <div className="dr-eff">
-      <div className="dr-note">
-        За 30 дней: одобрено {stats.w30.approved}, заказов {stats.w30.orders}{stats.w30.cancelled ? `, отменено ${stats.w30.cancelled}` : ''}, выручка {rub(stats.w30.revenue)}, прибыль {stats.w30.profit == null ? '—' : rub(stats.w30.profit)}.
-        Прибыль — оценка по нынешней экономике товара. Заказы проверяются раз в час{stats.ordersAt ? `, последний раз ${time(stats.ordersAt)}` : ''}.
-      </div>
       <div className="dr-table-wrap">
         <table className="dr-table">
           <thead><tr>

@@ -290,19 +290,31 @@ async function send(kind: 'approve' | 'decline', tasks: { t: ReturnType<typeof t
 
 // ─── Проход ─────────────────────────────────────────────────────────────────
 
-let busy = false;
-let lastRun = 0, lastHistory = 0;
-let lastError: string | null = null;
-let lastSummary = '';
+// Состояние прохода — в базе, не в памяти (08.11): server.ts и route.ts получают РАЗНЫЕ копии
+// модуля, и экран видел «ещё не было», хотя таймер работал. Там же замок: кнопка «Забрать
+// заявки сейчас» не должна идти параллельно с таймером и ответить на заявку дважды.
+let lastHistory = 0;
+type PassState = { lastRun: number; lastError: string | null; lastSummary: string };
+function passState(): PassState {
+  try { return { lastRun: 0, lastError: null, lastSummary: '', ...JSON.parse(adsMetaGet('discounts:ozon:pass') || '{}') }; }
+  catch { return { lastRun: 0, lastError: null, lastSummary: '' }; }
+}
+const LOCK_MS = 3 * 60_000;
+function lock(): boolean {
+  const at = Number(adsMetaGet('discounts:ozon:lock') || 0);
+  if (at && Date.now() - at < LOCK_MS) return false;
+  adsMetaSet('discounts:ozon:lock', String(Date.now()));
+  return true;
+}
+const unlock = () => adsMetaSet('discounts:ozon:lock', '0');
 
 async function inputs(): Promise<Record<string, MarginRow>> {
   try { return (await getMargins('ozon')).items; } catch { return {}; }
 }
 
 export async function runPass(why = 'по таймеру'): Promise<string> {
-  if (busy) return 'уже идёт';
   if (!process.env.OZON_CLIENT_ID || !process.env.OZON_API_KEY) return 'нет ключа Ozon';
-  busy = true;
+  if (!lock()) return 'проверка уже идёт'; // замок снимается в finally
   try {
     const pending = [...await fetchStatus('NEW', 20), ...await fetchStatus('SEEN', 20)];
     saveRaw(pending);
@@ -339,13 +351,14 @@ export async function runPass(why = 'по таймеру'): Promise<string> {
       // Статусы обработанных — сразу, чтобы на экране они не висели «в ожидании».
       if (approve.length || decline.length) saveRaw([...await fetchStatus('NEW', 20), ...await fetchStatus('SEEN', 20)]);
     }
-    lastRun = Date.now(); lastError = null; lastSummary = summary;
+    adsMetaSet('discounts:ozon:pass', JSON.stringify({ lastRun: Date.now(), lastError: null, lastSummary: summary }));
     return summary;
   } catch (e) {
-    lastError = (e as Error).message.slice(0, 300);
-    console.warn('[discounts]', lastError);
-    return lastError;
-  } finally { busy = false; }
+    const msg = (e as Error).message.slice(0, 300);
+    adsMetaSet('discounts:ozon:pass', JSON.stringify({ ...passState(), lastError: msg }));
+    console.warn('[discounts]', msg);
+    return msg;
+  } finally { unlock(); }
 }
 
 /** Ручной ответ из дашборда — кнопками у заявки. */
@@ -423,7 +436,7 @@ export async function overview(isOwner = false): Promise<any> {
       rule: rules[art] ?? null, req7: cnt.get(art)?.all ?? 0, pending: cnt.get(art)?.pending ?? 0,
     });
   }
-  return { settings: s, canToggle: isOwner, lastRun, lastError, lastSummary, products, tasks };
+  return { settings: s, canToggle: isOwner, ...passState(), products, tasks };
 }
 
 export function scheduleDiscounts(): void {

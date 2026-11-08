@@ -105,3 +105,24 @@ button.dr-tile:hover { border-color: var(--accent); }
 .dr-acts { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
 .dr-acts .btn { justify-content: center; flex-wrap: wrap; padding: 7px 12px; }
 .dr-btn-price { flex-basis: 100%; text-align: center; font-weight: 600; }
+
+/* Ограничение «Одобрять» (08.11, по просьбе владельца): два поля рядом — подпись сверху,
+   окошко с % снизу. Заполнено одно — второе бледнеет. Одинаково в строке и в панели выбора. */
+.dr-limits { display: flex; align-items: flex-end; justify-content: center; gap: 12px; margin-top: 12px; }
+.dr-bulk .dr-limits { display: inline-flex; margin-top: 0; }
+.dr-field { display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: text; transition: opacity .15s; }
+.dr-field-label { font-size: 16px; color: var(--muted); white-space: nowrap; line-height: 1.2; }
+.dr-field-box { display: inline-flex; align-items: center; width: 106px; height: 42px; border: 1px solid var(--border); border-radius: var(--sa-r-s, 7px); background: var(--bg); overflow: hidden; transition: border-color .15s, box-shadow .15s; }
+.dr-field-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.dr-field-box input { flex: 1; min-width: 0; width: 100%; height: 100%; border: 0; outline: 0; background: transparent; text-align: center; font: inherit; font-size: 20px; font-weight: 600; color: var(--text); padding: 0 0 0 10px; }
+.dr-field-box input::placeholder { color: var(--muted); opacity: .5; font-weight: 400; }
+.dr-field-unit { padding: 0 12px 0 2px; color: var(--muted); font-size: 18px; }
+.dr-field.filled .dr-field-label { color: var(--accent); font-weight: 500; }
+.dr-field.filled .dr-field-box { border-color: var(--accent); }
+.dr-field.dim { opacity: .45; }
+.dr-field.dim:focus-within, .dr-field.dim:hover { opacity: 1; }
+.dr-or { height: 42px; display: inline-flex; align-items: center; color: var(--muted); font-size: 16px; }
+.dr-sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 4px; }
+.dr-bulk { align-items: flex-end; gap: 14px; padding: 12px 16px; }
+.dr-bulk > b { align-self: center; margin-right: 6px; }
+.dr-bulk > .btn { height: 42px; }

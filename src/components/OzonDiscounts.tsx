@@ -14,7 +14,6 @@ import { apiGet, apiPost, errText } from '../api/http';
 import { calcOzonProfit, type OzonCalcInput } from '../utils/ozonProfit';
 
 type Mode = 'approve' | 'decline' | 'manual';
-type Limit = 'pct' | 'margin';
 type Rule = { article: string; mode: Mode; maxPct: number | null; minMargin: number | null; updatedAt: number; updatedBy: string };
 type Decision = { action: 'approve' | 'decline' | 'skip'; price: number | null; pct: number | null; marginPct: number | null; reason: string };
 type Product = {
@@ -72,13 +71,11 @@ function maxPctForMargin(input: OzonCalcInput | null, minMargin: number): number
   return Math.floor(lo * 10) / 10;
 }
 
-const limitOf = (r: Rule | null | undefined): Limit => (r?.minMargin != null && r?.maxPct == null ? 'margin' : 'pct');
 const num = (s: string): number | null => { const t = s.trim().replace(',', '.'); if (t === '') return null; const n = Number(t); return Number.isFinite(n) ? n : null; };
 
 type Filter = 'all' | 'requests' | 'norule' | 'approve' | 'decline';
 const FILTERS: [Filter, string][] = [['all', 'Все'], ['requests', 'Есть заявки'], ['norule', 'Режим не выбран'], ['approve', 'Одобряем'], ['decline', 'Отклоняем']];
 const MODES: [Mode, string][] = [['approve', 'Одобрять'], ['decline', 'Отклонять']];
-const LIMITS: [Limit, string][] = [['pct', 'Макс. скидка'], ['margin', 'Мин. маржа']];
 
 export function OzonDiscounts() {
   const [data, setData] = useState<Data | null>(null);
@@ -180,8 +177,9 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const [bulkLimit, setBulkLimit] = useState<Limit>('pct');
-  const [bulkVal, setBulkVal] = useState('');
+  // Массовое правило: заполнено одно из двух полей — либо скидка, либо маржа.
+  const [bulkPct, setBulkPct] = useState('');
+  const [bulkMargin, setBulkMargin] = useState('');
   // Правки, ещё не дошедшие до сервера, — чтобы поле не прыгало при обновлении списка.
   const [local, setLocal] = useState<Record<string, Partial<Rule>>>({});
 
@@ -207,8 +205,9 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
   const toggle = (a: string) => setSel(s => { const n = new Set(s); if (n.has(a)) n.delete(a); else n.add(a); return n; });
   const bulk = async (patch: Partial<Rule>) => { await save([...sel], patch); setSel(new Set()); };
   const bulkApprove = () => {
-    const v = num(bulkVal);
-    void bulk({ mode: 'approve', maxPct: bulkLimit === 'pct' ? v : null, minMargin: bulkLimit === 'margin' ? v : null });
+    const p = num(bulkPct);
+    void bulk({ mode: 'approve', maxPct: p, minMargin: p != null ? null : num(bulkMargin) });
+    setBulkPct(''); setBulkMargin('');
   };
 
   return (
@@ -225,16 +224,15 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
       {sel.size > 0 && (
         <div className="dr-bulk">
           <b>Выбрано: {sel.size}</b>
-          <span className="dr-bulk-group">
-            <span className="sa-seg dr-limit">
-              {LIMITS.map(([k, l]) => <button key={k} className={bulkLimit === k ? 'active' : ''} onClick={() => setBulkLimit(k)}>{l}</button>)}
-            </span>
-            <span className="dr-numwrap">
-              <input className="input dr-num" value={bulkVal} onChange={e => setBulkVal(e.target.value)} inputMode="decimal" placeholder="—" />
-              <span className="dr-unit">%</span>
-            </span>
-            <button className="btn btn-primary" onClick={bulkApprove}>Одобрять</button>
-          </span>
+          <div className="dr-limits">
+            <PctField label="Скидка до" value={bulkPct} dim={bulkMargin.trim() !== ''}
+              onChange={v => { setBulkPct(v); if (v.trim()) setBulkMargin(''); }} />
+            <span className="dr-or">или</span>
+            <PctField label="Маржа не ниже" value={bulkMargin} dim={bulkPct.trim() !== ''}
+              onChange={v => { setBulkMargin(v); if (v.trim()) setBulkPct(''); }} />
+          </div>
+          <button className="btn btn-primary" onClick={bulkApprove}>Одобрять</button>
+          <span className="dr-sep" />
           <button className="btn" onClick={() => bulk({ mode: 'decline' })}>Отклонять</button>
           <button className="btn" onClick={() => bulk({ mode: 'manual' })}>Снять режим</button>
           <button className="btn" onClick={() => setSel(new Set())}><XIcon size={16} /> Снять выбор</button>
@@ -264,50 +262,66 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
   );
 }
 
-function NumInput({ value, onSave, placeholder }: { value: number | null; onSave: (v: number | null) => void; placeholder?: string }) {
+/** Поле процента: подпись сверху, окошко со знаком % снизу. dim — заполнено соседнее поле. */
+function PctField({ label, value, onChange, onCommit, dim }: {
+  label: string; value: string; onChange: (v: string) => void; onCommit?: () => void; dim?: boolean;
+}) {
+  return (
+    <label className={`dr-field${dim ? ' dim' : ''}${value.trim() ? ' filled' : ''}`}>
+      <span className="dr-field-label">{label}</span>
+      <span className="dr-field-box">
+        <input value={value} placeholder="—" inputMode="decimal" onChange={e => onChange(e.target.value)} onBlur={onCommit}
+          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+        <span className="dr-field-unit">%</span>
+      </span>
+    </label>
+  );
+}
+
+/**
+ * Ограничение «Одобрять» в строке товара: «Скидка до» или «Маржа не ниже» — одно из двух.
+ * Заполненное поле очищает соседнее; сохраняется, когда курсор уходит из поля.
+ */
+function RuleLimits({ maxPct, minMargin, onSave }: {
+  maxPct: number | null; minMargin: number | null; onSave: (patch: Partial<Rule>) => void;
+}) {
   const show = (x: number | null) => (x == null ? '' : String(x).replace('.', ','));
-  const [v, setV] = useState(show(value));
-  const focused = useRef(false);
-  useEffect(() => { if (!focused.current) setV(show(value)); }, [value]);
+  const [pct, setPct] = useState(show(maxPct));
+  const [mar, setMar] = useState(show(minMargin));
+  const editing = useRef(false);
+  useEffect(() => { if (!editing.current) { setPct(show(maxPct)); setMar(show(minMargin)); } }, [maxPct, minMargin]);
+  const ok = (s: string) => { const n = num(s); return s.trim() === '' || (n !== null && n >= 0 && n <= 90); };
   const commit = () => {
-    focused.current = false;
-    const n = num(v);
-    if (v.trim() !== '' && (n === null || n < 0 || n > 90)) { setV(show(value)); return; }
-    if (n !== value) onSave(n);
+    editing.current = false;
+    if (!ok(pct) || !ok(mar)) { setPct(show(maxPct)); setMar(show(minMargin)); return; }
+    const np = num(pct);
+    const nm = np != null ? null : num(mar);
+    if (np !== maxPct || nm !== minMargin) onSave({ maxPct: np, minMargin: nm });
   };
   return (
-    <span className="dr-numwrap">
-      <input className="input dr-num" value={v} placeholder={placeholder} inputMode="decimal"
-        onFocus={() => { focused.current = true; }} onChange={e => setV(e.target.value)} onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
-      <span className="dr-unit">%</span>
-    </span>
+    <div className="dr-limits" onFocus={() => { editing.current = true; }}>
+      <PctField label="Скидка до" value={pct} dim={mar.trim() !== ''} onCommit={commit}
+        onChange={v => { setPct(v); if (v.trim()) setMar(''); }} />
+      <PctField label="Маржа не ниже" value={mar} dim={pct.trim() !== ''} onCommit={commit}
+        onChange={v => { setMar(v); if (v.trim()) setPct(''); }} />
+    </div>
   );
 }
 
 function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolean; onCheck: () => void; save: SaveFn }) {
   const r = p.rule;
   const mode: Mode | null = r && r.mode !== 'manual' ? r.mode : null;
-  // Какое ограничение выбрано. Пока поле пустое, выбор держим на экране; число сохраняет его на сервере.
-  const [limit, setLimit] = useState<Limit>(limitOf(r));
-  useEffect(() => { if (r?.maxPct != null || r?.minMargin != null) setLimit(limitOf(r)); }, [r?.maxPct, r?.minMargin]);
-  const value = limit === 'pct' ? r?.maxPct ?? null : r?.minMargin ?? null;
   const show = p.showcase ?? 0;
 
   // Сколько реально даст агент: по скидке — заданный процент; по марже — пока маржа не ниже порога.
-  const eff = mode !== 'approve' || value == null ? null : limit === 'pct' ? value : maxPctForMargin(p.input, value);
+  const eff = mode !== 'approve' ? null
+    : r?.maxPct != null ? r.maxPct
+    : r?.minMargin != null ? maxPctForMargin(p.input, r.minMargin) : null;
   const discPrice = eff != null && show > 0 ? Math.ceil(show * (1 - eff / 100)) : null;
   const newLk = eff != null && p.price ? Math.round(p.price * (1 - eff / 100)) : null;
   const m = eff != null ? marginAt(p.input, eff) : null;
   const cur = marginAt(p.input, 0);
   const curPct = cur?.pct ?? p.marginPct;
-
-  const pickLimit = (k: Limit) => {
-    if (k === limit) return;
-    setLimit(k);
-    // Либо скидка, либо маржа: смена ограничения стирает прежнее число.
-    if (r?.maxPct != null || r?.minMargin != null) void save([p.article], { maxPct: null, minMargin: null });
-  };
 
   return (
     <tr className={checked ? 'sel' : ''}>
@@ -338,13 +352,7 @@ function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolea
         </div>
         {!mode && <div className="dr-cap">не выбран — вручную</div>}
         {mode === 'approve' && (
-          <div className="dr-limit-cell">
-            <span className="sa-seg dr-limit">
-              {LIMITS.map(([k, l]) => <button key={k} className={limit === k ? 'active' : ''} onClick={() => pickLimit(k)}>{l}</button>)}
-            </span>
-            <NumInput value={value} placeholder="—"
-              onSave={v => save([p.article], limit === 'pct' ? { maxPct: v, minMargin: null } : { minMargin: v, maxPct: null })} />
-          </div>
+          <RuleLimits maxPct={r?.maxPct ?? null} minMargin={r?.minMargin ?? null} onSave={patch => save([p.article], patch)} />
         )}
       </td>
       <td>

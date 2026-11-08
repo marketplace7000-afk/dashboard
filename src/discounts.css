@@ -27,9 +27,9 @@
 .dr-switch.on .dr-switch-dot { left: 31px; }
 .dr-switch input:focus-visible + .dr-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dr-switch-text { display: flex; flex-direction: column; line-height: 1.25; }
-.dr-switch-title { font-size: 23px; font-weight: 600; }
+.dr-switch-title { font-size: 19px; font-weight: 600; }
 .dr-switch.on .dr-switch-title { color: var(--good); }
-.dr-switch-hint { font-size: 17px; color: var(--muted); }
+.dr-switch-hint { font-size: 16px; color: var(--muted); }
 
 /* Плитки */
 .dr-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
@@ -126,3 +126,15 @@ button.dr-tile:hover { border-color: var(--accent); }
 .dr-bulk { align-items: flex-end; gap: 14px; padding: 12px 16px; }
 .dr-bulk > b { align-self: center; margin-right: 6px; }
 .dr-bulk > .btn { height: 42px; }
+
+/* 08.11 (2): панель после галочки не сливается с фоном — белая плашка с синей рамкой
+   и тенью, окошки ввода с заметной рамкой и серым фоном внутри, подписи тёмные. */
+.dr-bulk { background: #fff; border: 2px solid var(--accent); box-shadow: 0 6px 18px rgba(30, 60, 110, .12); padding: 14px 18px; }
+.dr-bulk-lead { display: flex; flex-direction: column; align-self: center; margin-right: 8px; line-height: 1.25; }
+.dr-bulk-lead span { font-size: 15px; color: var(--muted); }
+.dr-field-box { border: 1.5px solid #a9b4c2; background: #fff; }
+.dr-bulk .dr-field-box { width: 116px; height: 46px; background: var(--bg-2); border-color: #8d9aab; }
+.dr-bulk .dr-field-box:focus-within { background: #fff; }
+.dr-bulk .dr-field-label { color: var(--text); font-weight: 500; font-size: 17px; }
+.dr-bulk .dr-or, .dr-bulk > .btn { height: 46px; }
+.dr-field-box input::placeholder { opacity: .7; }

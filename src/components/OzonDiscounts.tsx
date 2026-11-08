@@ -126,8 +126,8 @@ export function OzonDiscounts() {
               }} />
             <span className="dr-switch-track"><span className="dr-switch-dot" /></span>
             <span className="dr-switch-text">
-              <span className="dr-switch-title">Автоответ {auto ? 'включён' : 'выключен'}</span>
-              <span className="dr-switch-hint">{auto ? 'агент сам отвечает на заявки по правилам' : 'агент только показывает, что сделал бы'}</span>
+              <span className="dr-switch-title">Автоматический режим</span>
+              <span className="dr-switch-hint">{auto ? 'включён — агент сам отвечает на заявки по правилам' : 'выключен — агент только показывает, что сделал бы'}</span>
             </span>
           </label>
           <button className="btn" onClick={refresh} disabled={busy} title="Не ждать 2 минуты: сразу забрать новые заявки с Ozon (и ответить на них, если автоответ включён)">
@@ -223,7 +223,7 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
 
       {sel.size > 0 && (
         <div className="dr-bulk">
-          <b>Выбрано: {sel.size}</b>
+          <div className="dr-bulk-lead"><b>Выбрано: {sel.size}</b><span>правило для всех выбранных</span></div>
           <div className="dr-limits">
             <PctField label="Скидка до" value={bulkPct} dim={bulkMargin.trim() !== ''}
               onChange={v => { setBulkPct(v); if (v.trim()) setBulkMargin(''); }} />
@@ -407,6 +407,7 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
               <th>Когда</th>
               <th className="l">Товар</th>
               <th>На витрине</th>
+              <th>Текущая<br />маржа</th>
               <th>Просит</th>
               <th>Решение агента</th>
               <th>Статус</th>
@@ -419,6 +420,9 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
               const d = t.decision;
               const pend = isPending(t);
               const askM = marginAt(p?.input ?? null, Math.max(0, t.requestedPct));
+              // Маржа сейчас — при нашей цене в ЛК, без скидки покупателю.
+              const curM = marginAt(p?.input ?? null, 0);
+              const curPct = curM?.pct ?? p?.marginPct ?? null;
               return (
                 <tr key={t.id}>
                   <td><div className="nw">{time(t.createdAt)}</div><div className="dr-cap">{t.customer}</div></td>
@@ -432,7 +436,12 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
                       </div>
                     </div>
                   </td>
-                  <td><b>{rub(t.showcase)}</b></td>
+                  <td><b>{rub(t.showcase)}</b><div className="dr-cap nw">наша {rub(p?.price ?? t.base)}</div></td>
+                  <td>
+                    {curPct != null
+                      ? <><b className={tone(curPct)}>{pct1(curPct)}</b><div className="dr-cap nw">{rub(curM?.rub ?? p?.marginRub)}</div></>
+                      : <span className="dr-cap">—</span>}
+                  </td>
                   <td>
                     <b>{rub(t.requested)}</b>
                     <div className="dr-cap nw">−{pctS(t.requestedPct)}</div>
@@ -469,7 +478,7 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
                 </tr>
               );
             })}
-            {!list.length && <tr><td colSpan={7} className="dr-empty">{only === 'pending' ? 'Новых заявок нет' : 'За 7 дней заявок нет'}</td></tr>}
+            {!list.length && <tr><td colSpan={8}className="dr-empty">{only === 'pending' ? 'Новых заявок нет' : 'За 7 дней заявок нет'}</td></tr>}
           </tbody>
         </table>
       </div>

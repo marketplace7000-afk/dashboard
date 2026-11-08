@@ -543,6 +543,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return handlePlan(req, res, String(parts[1] ?? ''), authUser(req));
   }
 
+  // ─── /api/discounts — «Цены» → «Заявки на скидку» Ozon (api/_lib/discounts.ts).
+  if (section === 'discounts') {
+    const { handleDiscounts } = await import('./_lib/discounts');
+    return handleDiscounts(req, res, String(parts[1] ?? ''), authUser(req));
+  }
+
   // ─── /api/fbo — «Остатки FBO»: склады площадок по кластерам, поставки, спрос (api/_lib/fboStocks.ts).
   //   GET  /api/fbo          → последний снимок (старше 3 ч — фоном собирается новый)
   //   POST /api/fbo/refresh  → собрать заново (фоном)

@@ -33,7 +33,7 @@ function writeSections(section: string, sub: string): Section[] | null | 'owner'
       return ['ads'];
     case 'ads-advisor':
       return ['ads'];
-    case 'repricer':
+    case 'repricer': case 'discounts':
       return ['prices'];
     case 'costs': case 'settings':
       return ['settings'];

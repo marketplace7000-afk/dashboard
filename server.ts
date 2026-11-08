@@ -112,6 +112,10 @@ app.listen(PORT, '0.0.0.0', () => {
   import('./api/_lib/ads/bareNotify')
     .then(m => m.scheduleBareNotify())
     .catch(e => console.warn('[bare-notify] таймер не запущен:', (e as Error).message));
+  // «Цены» → «Заявки на скидку»: опрос заявок Ozon раз в 2 мин; отвечает сам, только если владелец включил автоответ.
+  import('./api/_lib/discounts')
+    .then(m => m.scheduleDiscounts())
+    .catch(e => console.warn('[discounts] таймер не запущен:', (e as Error).message));
 });
 
 // ─── Прогрев кэша (замена vercel.json crons) ──────────────────────────────

@@ -4,11 +4,13 @@ import { LiveWbPricing } from '../components/LiveWbPricing';
 import { LiveWbGlobalPricing } from '../components/LiveWbGlobalPricing';
 import { Repricer } from '../components/Repricer';
 import { PriceAdvice } from '../components/PriceAdvice';
+import { OzonDiscounts } from '../components/OzonDiscounts';
 
 // Третья вкладка — репрайсер. Он про WB и живёт рядом с ценами, а не в
 // «Конкурентах»: там разовый поиск по выдаче, здесь работа с нашим прайсом.
 // «WB Global» (03.11.2026) — второй кабинет WB, китайская компания, цены в юанях.
-type MpScope = 'wb' | 'wbg' | 'ozon' | 'repricer';
+// «Заявки на скидку» (08.11.2026) — правила и автоответ на заявки покупателей Ozon.
+type MpScope = 'wb' | 'wbg' | 'ozon' | 'discounts' | 'repricer';
 
 export function Prices() {
   const [mp, setMp] = useState<MpScope>('wb');
@@ -55,6 +57,11 @@ export function Prices() {
           Ozon
           <span className="muted" style={{ marginLeft: 6 }}>live API</span>
         </button>
+        <button className={`mp-tab ${mp === 'discounts' ? 'active' : ''}`} onClick={() => setMp('discounts')}>
+          <span className="mp-tab-dot" style={{ background: '#005bff' }} />
+          Заявки на скидку
+          <span className="muted" style={{ marginLeft: 6 }}>Ozon</span>
+        </button>
         <button className={`mp-tab ${mp === 'repricer' ? 'active' : ''}`} onClick={() => setMp('repricer')}>
           <span className="mp-tab-dot" style={{ background: 'var(--accent-2)' }} />
           Репрайсер
@@ -69,6 +76,8 @@ export function Prices() {
       {mp === 'wbg' && <LiveWbGlobalPricing />}
 
       {mp === 'ozon' && <LiveOzonPricing />}
+
+      {mp === 'discounts' && <OzonDiscounts />}
 
       {mp === 'repricer' && <Repricer />}
     </div>

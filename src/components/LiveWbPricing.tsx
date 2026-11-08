@@ -26,8 +26,6 @@ import { lastSweep, decideInSale, type SweepRow } from '../utils/inSale';
 import { calcROI, roiStatus, ROI_STATUS_COLOR } from '../utils/roiLogic';
 import { usePricingPrefs, fmt, buyoutPct } from './usePricingPrefs';
 import { calcWbProfit, WB_DEFAULTS, type WbCalcInput } from '../utils/wbProfit';
-import { AiAdvice } from './AiAdvice';
-import { PricingGlobalParams, type GParamField } from './PricingGlobalParams';
 import { PriceToolbar, PriceKpis } from './PriceToolbar';
 import { wbBuyerPricesRes, wbCardEconRes, wbBoxTariffsRes, adsBySkuRes, productEconRes, wbShowcaseRes, wbStockRes, LIVE_POLL_MS } from '../api/pricingResources';
 import { fmtClock, fmtDateClock } from '../api/sideResource';
@@ -43,16 +41,6 @@ let marginsPushedJson = '';
 // До скольких дней сделка считается «свежей» и её finishedPrice можно показывать
 // как текущую цену покупателя. Дальше вернее взять живой клубный ценник из API.
 const FRESH_SALE_DAYS = 7;
-
-// Поля глобальной панели WB. Пусто → факт по товару; вписано → умолчание для всех.
-const WB_GPARAMS: GParamField[] = [
-  { key: 'usn', label: 'УСН', suffix: '%' },
-  { key: 'nds', label: 'НДС', suffix: '%' },
-  { key: 'acq', label: 'Эквайринг', suffix: '%' },
-  { key: 'drr', label: 'ДРР по умолч.', suffix: '%' },
-  { key: 'buyout', label: '% выкупа по умолч.', suffix: '%' },
-  { key: 'spp', label: 'СПП по умолч.', suffix: '%' },
-];
 
 // Живые «крутилки» калькулятора в раскрытой строке. Ключ — nmId. Пусто = дефолт
 // (цена ЛК, себест из таблицы, СПП из продаж, остальное — WB_DEFAULTS).
@@ -116,7 +104,7 @@ export function LiveWbPricing() {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   // Ручные значения, глобальные параметры, архив и режим списка — общий хук с Ozon.
   const { knobs, knobsBase, setKnob, resetKnobs, replaceKnobs, showArchive, inStockOnly, listMode, setListMode,
-    gpDraft, gpChange, gpApply, gpReset, gp, archivedSet, onArchive, onUnarchive } = usePricingPrefs('prices-wb');
+    gp, archivedSet, onArchive, onUnarchive } = usePricingPrefs('prices-wb');
   const [search, setSearch] = useState('');
   const searchQ = search.trim().toLowerCase();
   const [sortBy, setSortBy] = useState<'price' | 'margin' | 'roi' | 'name'>('price');
@@ -426,21 +414,8 @@ export function LiveWbPricing() {
   const totalSizes = rows.reduce((s, r) => s + (r.sizes?.length ?? 0), 0);
   const editableCount = rows.filter((r) => r.editableSizePrice).length;
 
-  const adviceContext = {
-    показано_SKU: rows.length,
-    Ø_скидка_пр: avgDiscount,
-    строки: rows.slice(0, 20).map((r) => {
-      // Те же цифры, что видит клиент в таблице (серая как ЛК, живая маржа), а не ценник-приманка.
-      const m = computeWbRow(r, {});
-      return { sku: r.vendorCode, nm: r.nmId, цена_ЛК_серая: Math.round(m.seraya), цена_покупателя: Math.round(m.buyerPrice),
-        маржа_пр: m.marginPct, прибыль_руб: m.marginRub, ROI_пр: m.roi, СПП_пр: m.sppPct, скидка_пр: r.discount };
-    }),
-  };
-
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <AiAdvice module="prices" context={adviceContext} disabled={rows.length === 0} />
-      <PricingGlobalParams fields={WB_GPARAMS} draft={gpDraft} onChange={gpChange} onApply={gpApply} onReset={gpReset} color="#cb11ab" />
       {/* ─── Фильтры и сводка (как на «РНП», 13.10.2026) ─── */}
       <PriceToolbar
         mode={listMode}

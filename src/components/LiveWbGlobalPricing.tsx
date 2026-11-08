@@ -12,24 +12,11 @@ import { wbGlobalRes, LIVE_POLL_MS, type WbGlobalRow } from '../api/pricingResou
 import { fmtDateClock } from '../api/sideResource';
 import { wbImageUrl } from '../utils/wbBasket';
 import { usePricingPrefs, fmt } from './usePricingPrefs';
-import { PricingGlobalParams, type GParamField } from './PricingGlobalParams';
 import { PriceToolbar, PriceKpis } from './PriceToolbar';
 import { calcWbGlobal, WBG_DEFAULTS, type WbgInput } from '../utils/wbGlobalProfit';
 import { roiStatus, ROI_STATUS_COLOR } from '../utils/roiLogic';
 
 const COLOR = '#8a2be2';
-
-const GPARAMS: GParamField[] = [
-  { key: 'rateWb', label: 'Курс WB для цен на сайте (пусто — замер агента)' },
-  { key: 'rate', label: 'Курс ЦБ для денег (пусто — ЦБ)' },
-  { key: 'spp', label: 'СПП', suffix: '%' },
-  { key: 'buyout', label: '% выкупа', suffix: '%' },
-  { key: 'fulfillment', label: 'Фулфилмент', suffix: '₽' },
-  { key: 'drr', label: 'ДРР', suffix: '%' },
-  { key: 'acquiring', label: 'Эквайринг', suffix: '%' },
-  { key: 'tax', label: 'Налог от цены покупателя', suffix: '%' },
-  { key: 'payful', label: 'Payful', suffix: '%' },
-];
 
 type KnobKey = 'priceCny' | 'cost' | 'spp' | 'drr' | 'buyout' | 'commission' | 'extra';
 
@@ -39,7 +26,7 @@ export function LiveWbGlobalPricing() {
   const res = wbGlobalRes.use(LIVE_POLL_MS);
   const data = res.data;
   const { knobs, setKnob, resetKnobs, showArchive, inStockOnly, listMode, setListMode,
-    gpDraft, gpChange, gpApply, gpReset, gp, archivedSet, onArchive, onUnarchive } = usePricingPrefs('prices-wbg');
+    gp, archivedSet, onArchive, onUnarchive } = usePricingPrefs('prices-wbg');
   const [expanded, setExpanded] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'price' | 'margin' | 'roi' | 'name'>('price');
@@ -135,7 +122,6 @@ export function LiveWbGlobalPricing() {
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <PricingGlobalParams fields={GPARAMS} draft={gpDraft} onChange={gpChange} onApply={gpApply} onReset={gpReset} color={COLOR} />
       <PriceToolbar
         mode={listMode} onMode={setListMode}
         counts={{ sale: saleCount, all: all.length - archivedCount, archive: archivedCount }}

@@ -9,9 +9,7 @@ import { useLiveOzonBundle, productInfoIndex } from '../api/useLiveOzonCache';
 import { useProcurement } from '../api/useProcurement';
 import { calcROI, roiStatus, ROI_STATUS_COLOR } from '../utils/roiLogic';
 import { usePricingPrefs, fmt, buyoutPct } from './usePricingPrefs';
-import { AiAdvice } from './AiAdvice';
 import { calcOzonProfit, OZON_DEFAULTS, type OzonCalcInput } from '../utils/ozonProfit';
-import { PricingGlobalParams, type GParamField } from './PricingGlobalParams';
 import { PriceToolbar, PriceKpis } from './PriceToolbar';
 import { ozonBuyerPricesRes, ozonSkuAdsRes, ozonShowcaseRes } from '../api/pricingResources';
 import { fmtClock, fmtDateClock } from '../api/sideResource';
@@ -24,17 +22,6 @@ import type { RnpPriceView as PriceView } from '../../shared/rnp';
 let marginsPushedAt = 0;
 let marginsSavedAt = 0;
 let marginsPushedJson = '';
-
-// Поля глобальной панели Ozon. «СПП по умолч.» заполняет вторую цену там,
-// где нет факта (Ozon соинвест в API не отдаёт) — buyer = ЛК × (1 − соинвест%).
-const OZON_GPARAMS: GParamField[] = [
-  { key: 'usn', label: 'УСН', suffix: '%' },
-  { key: 'nds', label: 'НДС', suffix: '%' },
-  { key: 'acq', label: 'Эквайринг', suffix: '%' },
-  { key: 'drr', label: 'ДРР по умолч.', suffix: '%' },
-  { key: 'buyout', label: '% выкупа по умолч.', suffix: '%' },
-  { key: 'spp', label: 'СПП по умолч.', suffix: '%' },
-];
 
 // Крутилки калькулятора прибыли Ozon по строке. Ключ — product_id.
 // buyout (% выкупа) — отдельный ключ: в OzonCalcInput вместо него returnRate (% возвратов = 100 − выкуп).
@@ -107,7 +94,7 @@ export function LiveOzonPricing() {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   // Ручные значения, глобальные параметры, архив и режим списка — общий хук с WB.
   const { knobs: ozKnobs, knobsBase: ozBase, setKnob: setOzKnob, resetKnobs: resetOzKnobs, replaceKnobs, showArchive, inStockOnly,
-    listMode, setListMode, gpDraft, gpChange, gpApply, gpReset, gp, archivedSet, onArchive, onUnarchive } = usePricingPrefs('prices-ozon');
+    listMode, setListMode, gp, archivedSet, onArchive, onUnarchive } = usePricingPrefs('prices-ozon');
   const [search, setSearch] = useState('');
   const searchQ = search.trim().toLowerCase();
   const [sortBy, setSortBy] = useState<'price' | 'margin' | 'roi' | 'name'>('price');
@@ -395,23 +382,9 @@ export function LiveOzonPricing() {
     marginsPushedJson = json; marginsSavedAt = marginsPushedAt;
     safeSetItem('prices-ozon:margins', JSON.stringify({ at: marginsPushedAt, items }));
   });
-  const adviceContext = {
-    показано_SKU: visibleRows.length,
-    предложено_изменений_цены: proposedCount,
-    коридор_пр: corridor,
-    строки: sortedRows.slice(0, 20).map((r) => {
-      // Те же цифры, что в таблице (живой расчёт), а не мёртвые marketing_price/табличная маржа.
-      const m = computeOzonRow(r, {});
-      const rec = recommendFor(r);
-      return { sku: r.offer_id, цена_ЛК: Math.round(m.cur), цена_покупателя: Math.round(m.buyerPrice), СПП_пр: m.sppReal,
-        маржа_пр: m.marginPct, прибыль_руб: m.marginRub, ROI_пр: m.roi, рекоменд_цена: rec.price };
-    }),
-  };
 
   return (
     <div className="grid" style={{ gap: 16 }}>
-      <AiAdvice module="prices" context={adviceContext} disabled={visibleRows.length === 0} />
-      <PricingGlobalParams fields={OZON_GPARAMS} draft={gpDraft} onChange={gpChange} onApply={gpApply} onReset={gpReset} color="#005bff" />
       {/* ─── Фильтры и сводка (как на «РНП», 13.10.2026) ─── */}
       <PriceToolbar
         mode={listMode}

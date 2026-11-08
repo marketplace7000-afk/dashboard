@@ -5,11 +5,10 @@
  * Всё хранится в общей памяти UI под ключами `${prefix}:…`:
  *   - knobs / knobs-base — ручные значения калькулятора по строке и их «база»
  *     (src/utils/knobs.ts);
- *   - globalParams — глобальные параметры расчёта (панель сверху);
  *   - inStockOnly — переключатель «В продаже / Все»;
  *   - архив SKU — отдельный scope `${prefix}` (procurementLogic).
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { safeSetItem } from '../utils/safeStorage';
 import { onUiStateChange } from '../utils/uiState';
 import { noteSwallowed } from '../utils/log';
@@ -36,7 +35,6 @@ const writeJson = (key: string, v: unknown, what: string) => {
 export function usePricingPrefs(prefix: PricingPrefix) {
   const KNOBS_LS = `${prefix}:knobs`;
   const KNOBS_BASE_LS = `${prefix}:knobs-base`;
-  const GP_LS = `${prefix}:globalParams`;
   const STOCK_LS = `${prefix}:inStockOnly`;
 
   // Крутилки калькулятора: храним СЫРУЮ строку из инпута (в т.ч. пустую), чтобы
@@ -80,23 +78,10 @@ export function usePricingPrefs(prefix: PricingPrefix) {
   };
   const listMode: ListMode = showArchive ? 'archive' : inStockOnly ? 'sale' : 'all';
 
-  // Глобальные параметры расчёта (панель сверху): draft — что в полях, applied — что
-  // реально применено. Пусто → берётся факт по товару. Крутилка строки главнее.
-  const loadGP = () => readJson<Record<string, string>>(GP_LS);
-  const [gpDraft, setGpDraft] = useState<Record<string, string>>(loadGP);
-  const [gpApplied, setGpApplied] = useState<Record<string, string>>(loadGP);
-  const gpAppliedRef = useRef(gpApplied);
-  gpAppliedRef.current = gpApplied;
-  const gpChange = (k: string, v: string) => setGpDraft(p => ({ ...p, [k]: v }));
-  const gpApply = () => { setGpApplied(gpDraft); writeJson(GP_LS, gpDraft, 'настройка интерфейса не сохранена'); };
-  const gpReset = () => { setGpDraft({}); setGpApplied({}); writeJson(GP_LS, {}, 'настройка интерфейса не сохранена'); };
-  // Значение глоб. параметра (или fallback, если поле пустое/битое).
-  const gp = (k: string, fb: number): number => {
-    const s = gpApplied[k];
-    if (s == null || s.trim() === '') return fb;
-    const n = parseFloat(s.replace(',', '.'));
-    return isNaN(n) ? fb : n;
-  };
+  // Глобальные параметры расчёта: панель убрана по просьбе владельца (08.11.2026).
+  // Ранее сохранённые в браузере значения больше не применяются — иначе они
+  // незаметно меняли бы расчёт, а увидеть и сбросить их было бы негде.
+  const gp = (_k: string, fb: number): number => fb;
 
   // Архив — раздельный scope на каждую площадку.
   const [archiveTick, setArchiveTick] = useState(0);
@@ -113,15 +98,12 @@ export function usePricingPrefs(prefix: PricingPrefix) {
   const onUnarchive = (code: string) => { unarchiveSKU(code.toUpperCase(), prefix); setArchiveTick(t => t + 1); };
 
   // Общая память: пришли изменения с сервера (другой пользователь/вкладка) — перечитать архив, параметры, сценарии.
-  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); const gp = loadGP();
-    // Черновик (введено, но не применено) не трогаем: синхронизация раз в 30 с стирала ввод.
-    setGpDraft(d => JSON.stringify(d) === JSON.stringify(gpAppliedRef.current) ? gp : d);
-    setGpApplied(gp); setKnobs(loadKnobs()); setKnobsBase(loadBase()); }), []);
+  useEffect(() => onUiStateChange(() => { setArchiveTick(t => t + 1); setKnobs(loadKnobs()); setKnobsBase(loadBase()); }), []);
 
   return {
     knobs, knobsBase, setKnob, resetKnobs, replaceKnobs,
     showArchive, inStockOnly, listMode, setListMode,
-    gpDraft, gpChange, gpApply, gpReset, gp,
+    gp,
     archivedSet, onArchive, onUnarchive,
   };
 }

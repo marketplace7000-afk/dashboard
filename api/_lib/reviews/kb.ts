@@ -273,11 +273,33 @@ export function imageMime(buf: Buffer, name: string): string {
   return /\.png$/i.test(name) ? 'image/png' : 'image/jpeg';
 }
 
+/**
+ * Большая картинка → JPEG не больше 2000 px по длинной стороне (ImageMagick на сервере, 08.11.2026).
+ * Нет программы или не вышло — null, файл пропускается с понятной причиной.
+ */
+async function shrinkImage(buf: Buffer): Promise<Buffer | null> {
+  const dir = await mkdtemp(join(tmpdir(), 'rv-img-'));
+  try {
+    const src = join(dir, 'src'); const out = join(dir, 'out.jpg');
+    await writeFile(src, buf);
+    // [0] — первый кадр (у многостраничных/анимированных), «>» — только уменьшать.
+    await run('convert', [`${src}[0]`, '-auto-orient', '-resize', '2000x2000>', '-quality', '82', out], { timeout: 120_000 });
+    const small = await readFile(out);
+    return small.length <= MAX_INLINE_BYTES ? small : null;
+  } catch (e) {
+    rlog('warn', 'Картинка не уменьшилась', { error: String((e as Error)?.message ?? e).slice(0, 200) });
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function imageKnowledge(url: string, name: string, model: string): Promise<string> {
-  const buf = await download(url, 40_000_000);
+  let buf = await download(url, 40_000_000);
   if (buf.length > MAX_INLINE_BYTES) {
-    // Большое фото — уменьшаем через poppler нельзя; пропускаем с понятной причиной.
-    throw new SkipFile(`картинка ${(buf.length / 1e6).toFixed(1)} МБ — больше 3 МБ`);
+    const small = await shrinkImage(buf);
+    if (!small) throw new SkipFile(`картинка ${(buf.length / 1e6).toFixed(1)} МБ — не удалось уменьшить`);
+    buf = small;
   }
   return claudeOnImages([{ data: buf, mime: imageMime(buf, name) }], IMG_PROMPT, model, 'index-image', 500);
 }
@@ -396,7 +418,9 @@ export function indexYandexDisk(): Promise<any> {
         progress.current = `${key}/${f.name}`;
         const prev = prevByMd5.get(f.md5 + '|' + f.name);
         const isPdf = /\.pdf$/i.test(f.name);
-        const reusable = prev && (prev.status === 'done' || prev.status === 'skipped')
+        // Картинки, пропущенные раньше из-за размера, перечитываем: теперь сервер их уменьшает (08.11.2026).
+        const tooBigBefore = prev?.status === 'skipped' && /^картинка .*МБ/.test(prev.note || '') && !/не удалось уменьшить/.test(prev.note || '');
+        const reusable = prev && (prev.status === 'done' || prev.status === 'skipped') && !tooBigBefore
           && (!isPdf || prev.v === PDF_VERSION || (prev.status === 'skipped' && /русская инструкция/.test(prev.note || '')));
         if (reusable) { outFiles.push(prev); progress.done++; continue; }
         changed = true;

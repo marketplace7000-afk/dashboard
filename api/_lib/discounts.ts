@@ -476,44 +476,134 @@ export async function overview(isOwner = false): Promise<any> {
       rule: rules[art] ?? null, req7: cnt.get(art)?.all ?? 0, pending: cnt.get(art)?.pending ?? 0,
     });
   }
-  return { settings: s, canToggle: isOwner, ...passState(), products, tasks, stats: purchaseStats(names) };
+  return { settings: s, canToggle: isOwner, ...passState(), products, tasks, stats: purchaseStats(names, margins) };
+}
+
+// ─── Заказы по заявкам на скидку ────────────────────────────────────────────
+//
+// 08.11: отметка Ozon is_purchased у заявки не работает (0 из 566 одобренных, даже у заявки,
+// по которой точно есть заказ). Надёжный признак — в самом заказе: в financial_data.products[].actions
+// Ozon пишет акцию «WANNADISCOUNT-ГГГГММДД». Раз в час забираем заказы FBS (v4) и FBO (v3) за 10 дней
+// (первый раз — за 30) и сохраняем строки с этой меткой; статус (отмена) обновляется при повторе.
+const ORDERS_EVERY_MS = 60 * 60_000;
+const ORDERS_KEY = 'discounts:ozon:ordersAt';
+const WANNA = /WANNADISCOUNT/i;
+
+function ordersDb(): any {
+  const d = db();
+  d.exec(`CREATE TABLE IF NOT EXISTS discount_order (
+    mp TEXT NOT NULL, posting TEXT NOT NULL, article TEXT NOT NULL, scheme TEXT, status TEXT, created_at TEXT,
+    qty INTEGER, price REAL, customer_price REAL, action TEXT, seen_at INTEGER NOT NULL,
+    PRIMARY KEY (mp, posting, article));
+  CREATE INDEX IF NOT EXISTS discount_order_created ON discount_order (mp, created_at);`);
+  return d;
+}
+
+export type DiscountOrderRow = { posting: string; article: string; scheme: 'FBS' | 'FBO'; status: string; createdAt: string; qty: number; price: number; customerPrice: number | null; action: string };
+
+/** Строки отправления с меткой заявки на скидку. Деньги v4 — { amount }, v3 — строка. */
+export function discountOrderRows(p: any, scheme: 'FBS' | 'FBO'): DiscountOrderRow[] {
+  const money = (v: any) => num(v && typeof v === 'object' && 'amount' in v ? v.amount : v);
+  const fin: any[] = p?.financial_data?.products ?? [];
+  const prods: any[] = p?.products ?? [];
+  const out: DiscountOrderRow[] = [];
+  fin.forEach((f, i) => {
+    const action = (f?.actions ?? []).find((a: unknown) => WANNA.test(String(a)));
+    if (!action) return;
+    const pr = prods.find(x => String(x.sku) === String(f.product_id)) ?? prods[i] ?? {};
+    out.push({
+      posting: String(p.posting_number), article: up(pr.offer_id), scheme, status: String(p.status ?? ''),
+      createdAt: String(p.in_process_at || p.created_at || ''), qty: num(pr.quantity ?? f.quantity) || 1,
+      price: money(pr.price), customerPrice: money(f.customer_price) || null, action: String(action),
+    });
+  });
+  return out;
+}
+
+async function syncOrders(): Promise<void> {
+  const last = Number(adsMetaGet(ORDERS_KEY) || 0);
+  if (Date.now() - last < ORDERS_EVERY_MS) return;
+  const days = last ? 10 : 30;
+  const filter = { since: new Date(Date.now() - days * 864e5).toISOString(), to: new Date().toISOString() };
+  const rows: DiscountOrderRow[] = [];
+  for (const [scheme, path] of [['FBS', 'v4/posting/fbs/list'], ['FBO', 'v3/posting/fbo/list']] as const) {
+    let cursor: string | undefined;
+    for (let page = 0; page < 200; page++) {
+      const j = await ozPost(path, { dir: 'ASC', filter, limit: 100, with: { financial_data: true }, ...(cursor ? { cursor } : {}) });
+      const batch: any[] = j?.postings ?? j?.result?.postings ?? [];
+      for (const p of batch) rows.push(...discountOrderRows(p, scheme));
+      cursor = j?.cursor;
+      if (!j?.has_next || !cursor || !batch.length) break;
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+  const st = ordersDb().prepare(`INSERT INTO discount_order (mp, posting, article, scheme, status, created_at, qty, price, customer_price, action, seen_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (mp, posting, article) DO UPDATE SET status = excluded.status,
+    qty = excluded.qty, price = excluded.price, customer_price = excluded.customer_price, seen_at = excluded.seen_at`);
+  for (const r of rows) st.run(MP, r.posting, r.article, r.scheme, r.status, r.createdAt, r.qty, r.price, r.customerPrice, r.action, Date.now());
+  adsMetaSet(ORDERS_KEY, String(Date.now()));
+  console.log(`[discounts] заказы по заявкам: за ${days} дн. найдено ${rows.length}`);
+}
+
+/** Прибыль по заказу: экономика товара сейчас при цене ЛК из заказа (оценка). */
+export function orderProfit(input: OzonCalcInput | null | undefined, unitPrice: number, qty: number): number | null {
+  if (!input || !(input.price > 0) || !(input.cost > 0) || !(unitPrice > 0)) return null;
+  const r = calcOzonProfit({ ...input, price: unitPrice, acquiring: Math.round(input.acquiring / input.price * unitPrice) });
+  return r ? r.profit * qty : null;
 }
 
 /**
- * Эффективность скидок: сколько одобренных заявок закончились покупкой (is_purchased от Ozon).
- * Окна 7 и 30 дней по дате заявки; по товарам — за 30 дней.
+ * Эффективность скидок (08.11, переделано на настоящие заказы): одобренные заявки за окно →
+ * заказы с меткой WANNADISCOUNT за то же окно. Отменённые считаются отдельно и в выручку не идут.
+ * Кто одобрил (агент / вручную) — по последней одобренной заявке на этот товар до заказа (≤ 72 ч).
  */
-function purchaseStats(names: Map<string, any>): any {
+function purchaseStats(names: Map<string, any>, margins: Record<string, MarginRow>): any {
   const since30 = new Date(Date.now() - 30 * 864e5).toISOString();
   const since7 = new Date(Date.now() - 7 * 864e5).toISOString();
-  const rows = db().prepare("SELECT raw, by FROM discount_task WHERE mp = ? AND status = 'APPROVED' AND created_at >= ?").all(MP, since30) as any[];
-  type Agg = { approved: number; bought: number; revenue: number; pctSum: number; pctN: number };
-  const agg = (): Agg => ({ approved: 0, bought: 0, revenue: 0, pctSum: 0, pctN: 0 });
+  const tasks = (db().prepare("SELECT raw, by FROM discount_task WHERE mp = ? AND status = 'APPROVED' AND created_at >= ?").all(MP, since30) as any[])
+    .map(r => { const x = JSON.parse(r.raw); return { t: toTask(x), price: num(x.approved_price), by: r.by === 'agent' ? 'agent' : 'hand' }; });
+  const orders = ordersDb().prepare('SELECT * FROM discount_order WHERE mp = ? AND created_at >= ? ORDER BY created_at DESC').all(MP, since30) as any[];
+
+  type Agg = { approved: number; orders: number; cancelled: number; units: number; revenue: number; profit: number; profitN: number; pctSum: number; pctN: number };
+  const agg = (): Agg => ({ approved: 0, orders: 0, cancelled: 0, units: 0, revenue: 0, profit: 0, profitN: 0, pctSum: 0, pctN: 0 });
   const w7 = agg(), w30 = agg(), byAgent = agg(), byHand = agg();
   const per = new Map<string, Agg>();
+  const pa = (art: string) => { if (!per.has(art)) per.set(art, agg()); return per.get(art)!; };
   let first = '';
-  for (const r of rows) {
-    const x = JSON.parse(r.raw);
-    const t = toTask(x);
-    const price = num(x.approved_price);
+  for (const { t, price, by } of tasks) {
     const pct = t.showcase > 0 && price > 0 ? (1 - price / t.showcase) * 100 : null;
-    const qty = num(x.approved_quantity_min) || 1;
-    const add = (a: Agg) => {
-      a.approved++;
-      if (pct != null) { a.pctSum += pct; a.pctN++; }
-      if (t.purchased) { a.bought++; a.revenue += price * qty; }
-    };
-    add(w30); if (t.createdAt >= since7) add(w7);
-    add(r.by === 'agent' ? byAgent : byHand);
-    if (!per.has(t.article)) per.set(t.article, agg());
-    add(per.get(t.article)!);
+    for (const a of [w30, t.createdAt >= since7 ? w7 : null, by === 'agent' ? byAgent : byHand, pa(t.article)]) {
+      if (!a) continue; a.approved++; if (pct != null) { a.pctSum += pct; a.pctN++; }
+    }
     if (!first || t.createdAt < first) first = t.createdAt;
   }
-  const out = (a: Agg) => ({ approved: a.approved, bought: a.bought, conv: a.approved ? Math.round(a.bought / a.approved * 1000) / 10 : null,
-    revenue: Math.round(a.revenue), avgPct: a.pctN ? Math.round(a.pctSum / a.pctN * 10) / 10 : null });
+  const list: any[] = [];
+  for (const o of orders) {
+    const cancelled = /cancel/i.test(o.status);
+    const at = Date.parse(o.created_at);
+    const src = tasks.filter(x => x.t.article === o.article && Date.parse(x.t.createdAt) <= at && at - Date.parse(x.t.createdAt) <= 72 * 3600_000)
+      .sort((a, b) => b.t.createdAt.localeCompare(a.t.createdAt))[0];
+    const profit = cancelled ? null : orderProfit(margins[o.article]?.input as OzonCalcInput | null, o.price, o.qty);
+    const base = src?.t.base || margins[o.article]?.retail || 0;
+    list.push({ posting: o.posting, article: o.article, name: names.get(o.article)?.name ?? '', scheme: o.scheme, status: o.status, cancelled,
+      createdAt: o.created_at, qty: o.qty, price: o.price, customerPrice: o.customer_price, base: base || null,
+      pct: base > 0 && o.price > 0 ? Math.round((1 - o.price / base) * 1000) / 10 : null,
+      profit: profit == null ? null : Math.round(profit), by: src ? src.by : null });
+    for (const a of [w30, o.created_at >= since7 ? w7 : null, src?.by === 'agent' ? byAgent : byHand, pa(o.article)]) {
+      if (!a) continue;
+      if (cancelled) { a.cancelled++; continue; }
+      a.orders++; a.units += o.qty; a.revenue += o.price * o.qty;
+      if (profit != null) { a.profit += profit; a.profitN++; }
+    }
+    if (!first || o.created_at < first) first = o.created_at;
+  }
+  const out = (a: Agg) => ({ approved: a.approved, orders: a.orders, cancelled: a.cancelled, units: a.units,
+    conv: a.approved ? Math.round(a.orders / a.approved * 1000) / 10 : null, revenue: Math.round(a.revenue),
+    profit: a.profitN ? Math.round(a.profit) : null, marginPct: a.profitN && a.revenue > 0 ? Math.round(a.profit / a.revenue * 1000) / 10 : null,
+    avgPct: a.pctN ? Math.round(a.pctSum / a.pctN * 10) / 10 : null });
   const products = [...per.entries()].map(([article, a]) => ({ article, name: names.get(article)?.name ?? '', photo: names.get(article)?.photo ?? '', ...out(a) }))
-    .sort((a, b) => b.approved - a.approved);
-  return { since: first || null, w7: out(w7), w30: out(w30), agent: out(byAgent), hand: out(byHand), products };
+    .sort((a, b) => b.orders - a.orders || b.approved - a.approved);
+  return { since: first || null, ordersAt: Number(adsMetaGet(ORDERS_KEY) || 0) || null, w7: out(w7), w30: out(w30), agent: out(byAgent), hand: out(byHand), products, orders: list.slice(0, 200) };
 }
 
 // ─── Напоминание в чат «AV | OZON»: товары без правила ─────────────────────
@@ -584,6 +674,8 @@ async function notifyUnset(): Promise<void> {
 export function scheduleDiscounts(): void {
   setTimeout(() => { void runPass('старт'); setInterval(() => { void runPass(); }, POLL_MS).unref(); }, 90_000).unref();
   setTimeout(() => { void notifyUnset(); setInterval(() => { void notifyUnset(); }, 15 * 60_000).unref(); }, 120_000).unref();
+  const orders = () => { if (process.env.OZON_CLIENT_ID && process.env.OZON_API_KEY) syncOrders().catch(e => console.warn("[discounts] заказы по заявкам:", (e as Error).message)); };
+  setTimeout(() => { orders(); setInterval(orders, 10 * 60_000).unref(); }, 150_000).unref();
   const s = getDiscountSettings();
   console.log(`[discounts] заявки на скидку Ozon: опрос раз в 2 мин, автоответ ${s.auto ? 'ВКЛЮЧЁН' : 'выключен (только показ)'}`);
 }

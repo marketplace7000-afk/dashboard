@@ -29,9 +29,11 @@ type Task = {
   by: 'agent' | 'user' | null; byName: string | null; appliedAt: number | null; error: string | null;
   purchased: boolean;
 };
-/** Эффективность: одобрено → купили (is_purchased от Ozon). */
-type Eff = { approved: number; bought: number; conv: number | null; revenue: number; avgPct: number | null };
-type Stats = { since: string | null; w7: Eff; w30: Eff; agent: Eff; hand: Eff; products: (Eff & { article: string; name: string; photo: string })[] };
+/** Эффективность: одобренные заявки → заказы с меткой WANNADISCOUNT (08.11). */
+type Eff = { approved: number; orders: number; cancelled: number; units: number; conv: number | null; revenue: number; profit: number | null; marginPct: number | null; avgPct: number | null };
+type DOrder = { posting: string; article: string; name: string; scheme: string; status: string; cancelled: boolean; createdAt: string; qty: number;
+  price: number; customerPrice: number | null; base: number | null; pct: number | null; profit: number | null; by: 'agent' | 'hand' | null };
+type Stats = { since: string | null; ordersAt: number | null; w7: Eff; w30: Eff; agent: Eff; hand: Eff; products: (Eff & { article: string; name: string; photo: string })[]; orders: DOrder[] };
 type Data = {
   settings: { auto: boolean; defaultMode: 'manual' | 'decline' }; canToggle: boolean;
   lastRun: number; lastError: string | null; lastSummary: string; products: Product[]; tasks: Task[]; stats?: Stats;
@@ -501,34 +503,38 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
   );
 }
 
-/** «Эффективность скидок»: сколько одобренных заявок закончились покупкой. */
+/** «Эффективность скидок»: одобренные заявки → настоящие заказы по ним (метка WANNADISCOUNT в заказе). */
 function Effect({ stats }: { stats?: Stats }) {
   if (!stats) return <div className="dr-empty">Нет данных</div>;
   const Tile = ({ label, e }: { label: string; e: Eff }) => (
     <div className="dr-eff-tile">
       <div className="dr-tile-label">{label}</div>
-      <div className="dr-eff-main"><b>{e.conv == null ? '—' : pctS(e.conv)}</b><span>купили</span></div>
-      <div className="dr-cap">одобрено {e.approved} · купили {e.bought}</div>
-      <div className="dr-cap">средняя скидка {e.avgPct == null ? '—' : pctS(e.avgPct)} · выручка {rub(e.revenue)}</div>
+      <div className="dr-eff-main"><b>{e.orders}</b><span>заказов по скидке</span></div>
+      <div className="dr-cap">одобрено заявок {e.approved} · конверсия {e.conv == null ? '—' : pctS(e.conv)}{e.cancelled ? ` · отменено ${e.cancelled}` : ''}</div>
+      <div className="dr-cap">выручка {rub(e.revenue)} · прибыль {e.profit == null ? '—' : rub(e.profit)}{e.marginPct == null ? '' : ` (${pct1(e.marginPct)})`}</div>
+      <div className="dr-cap">средняя одобренная скидка {e.avgPct == null ? '—' : pctS(e.avgPct)}</div>
     </div>
   );
+  const ST: Record<string, string> = { awaiting_packaging: 'ждёт сборки', awaiting_deliver: 'ждёт отгрузки', delivering: 'в доставке', delivered: 'доставлен', cancelled: 'отменён', awaiting_registration: 'оформляется' };
   return (
     <div className="dr-eff">
       <div className="dr-eff-tiles">
         <Tile label="За 7 дней" e={stats.w7} />
         <Tile label="За 30 дней" e={stats.w30} />
-        <Tile label="Ответил агент (30 дн)" e={stats.agent} />
+        <Tile label="Одобрил агент (30 дн)" e={stats.agent} />
         <Tile label="Вручную: кабинет и сайт (30 дн)" e={stats.hand} />
       </div>
       <div className="dr-note">
-        «Купили» — Ozon отмечает у одобренной заявки, что покупатель оформил заказ по одобренной цене.
-        Отметка может появиться не сразу — сайт перепроверяет одобренные заявки раз в час.
-        {stats.since ? ` Данные собираются с ${time(stats.since)}.` : ''}
+        Заказ «по скидке» — в самом заказе Ozon стоит отметка, что цена из заявки на скидку. Сайт проверяет заказы FBS и FBO раз в час
+        {stats.ordersAt ? ` (последний раз ${time(stats.ordersAt)})` : ''}. Отменённые заказы в выручку и прибыль не входят.
+        Выручка — наша цена в ЛК из заказа; прибыль — оценка по нынешней экономике товара (себестоимость, комиссия, логистика) при этой цене.
+        Кто одобрил — по последней одобренной заявке на этот товар за 72 часа до заказа.
+        {stats.since ? ` Данные с ${time(stats.since)}.` : ''}
       </div>
       <div className="dr-table-wrap">
         <table className="dr-table">
           <thead><tr>
-            <th className="l">Товар</th><th>Одобрено<br />заявок</th><th>Купили</th><th>Конверсия</th><th>Средняя<br />скидка</th><th>Выручка<br />по скидке</th>
+            <th className="l">Товар</th><th>Одобрено<br />заявок</th><th>Заказов<br />по скидке</th><th>Отменено</th><th>Конверсия</th><th>Средняя<br />скидка</th><th>Выручка</th><th>Прибыль</th>
           </tr></thead>
           <tbody>
             {stats.products.map(p => (
@@ -538,13 +544,40 @@ function Effect({ stats }: { stats?: Stats }) {
                   <div><div className="dr-name" title={p.name}>{p.name || p.article}</div><div className="dr-art">{p.article}</div></div>
                 </div></td>
                 <td><b>{p.approved}</b></td>
-                <td><b className={p.bought ? 'good' : ''}>{p.bought}</b></td>
+                <td><b className={p.orders ? 'good' : ''}>{p.orders}</b></td>
+                <td>{p.cancelled || '—'}</td>
                 <td><b>{p.conv == null ? '—' : pctS(p.conv)}</b></td>
                 <td>{p.avgPct == null ? '—' : pctS(p.avgPct)}</td>
-                <td>{p.bought ? rub(p.revenue) : '—'}</td>
+                <td>{p.orders ? rub(p.revenue) : '—'}</td>
+                <td>{p.profit == null ? '—' : <><b className={tone(p.marginPct)}>{rub(p.profit)}</b>{p.marginPct == null ? null : <div className="dr-cap">{pct1(p.marginPct)}</div>}</>}</td>
               </tr>
             ))}
-            {!stats.products.length && <tr><td colSpan={6} className="dr-empty">За 30 дней одобренных заявок нет</td></tr>}
+            {!stats.products.length && <tr><td colSpan={8} className="dr-empty">За 30 дней одобренных заявок и заказов по скидке нет</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="dr-eff-h">Заказы по скидке</h3>
+      <div className="dr-table-wrap">
+        <table className="dr-table">
+          <thead><tr>
+            <th className="l">Когда</th><th className="l">Товар</th><th>Заказ</th><th>Наша цена<br />в заказе</th><th>Скидка<br />от ЛК</th><th>Покупатель<br />заплатил</th><th>Прибыль</th><th>Одобрил</th><th>Статус</th>
+          </tr></thead>
+          <tbody>
+            {stats.orders.map(o => (
+              <tr key={o.posting + o.article} className={o.cancelled ? 'dim' : ''}>
+                <td className="l nw">{time(o.createdAt)}</td>
+                <td className="l"><div className="dr-name" title={o.name}>{o.name || o.article}</div><div className="dr-art">{o.article}</div></td>
+                <td className="nw">{o.posting}<div className="dr-cap">{o.scheme}{o.qty > 1 ? ` · ${o.qty} шт` : ''}</div></td>
+                <td><b>{rub(o.price)}</b>{o.base ? <div className="dr-cap">цена ЛК {rub(o.base)}</div> : null}</td>
+                <td><b className={o.pct != null && o.pct > MAX_DISCOUNT ? 'bad' : ''}>{o.pct == null ? '—' : pctS(o.pct)}</b></td>
+                <td>{rub(o.customerPrice)}</td>
+                <td>{o.profit == null ? '—' : <b className={o.profit <= 0 ? 'bad' : ''}>{rub(o.profit)}</b>}</td>
+                <td>{o.by === 'agent' ? 'агент' : o.by === 'hand' ? 'вручную' : '—'}</td>
+                <td>{ST[o.status] ?? o.status}</td>
+              </tr>
+            ))}
+            {!stats.orders.length && <tr><td colSpan={9} className="dr-empty">Заказов по скидке пока нет (или сайт ещё не проверил заказы — раз в час)</td></tr>}
           </tbody>
         </table>
       </div>

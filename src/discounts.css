@@ -153,3 +153,5 @@ button.dr-tile:hover { border-color: var(--accent); }
 .dr-eff-main b { font-size: 32px; font-weight: 600; line-height: 1.1; }
 .dr-eff-main span { color: var(--muted); font-size: 17px; }
 .dr-eff .dr-note { margin: 0 18px; }
+.dr-eff-h { font-size: 18px; margin: 18px 0 8px; }
+.dr-table tr.dim td { opacity: .5; }

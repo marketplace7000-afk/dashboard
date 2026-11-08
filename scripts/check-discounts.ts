@@ -1,6 +1,8 @@
 // Проверка решений агента «Заявки на скидку» (08.11.2026).
-import { decide, toTask, apiPrice, unsetProducts, isBuyoutCard, marginAtDiscount, maxPctForMargin, saveRules, listRules, type DiscountRule } from '../api/_lib/discounts';
+import { decide, toTask, apiPrice, unsetProducts, isBuyoutCard, discountOrderRows, orderProfit, marginAtDiscount, maxPctForMargin, saveRules, listRules, type DiscountRule } from '../api/_lib/discounts';
 import { _useAdsDbForTests } from '../api/_lib/ads/store';
+import { calcOzonProfit } from "../src/utils/ozonProfit";
+const calcProfit1000 = () => calcOzonProfit(inp)!.profit;
 import type { OzonCalcInput } from '../src/utils/ozonProfit';
 
 let ok = true;
@@ -84,6 +86,16 @@ const un = unsetProducts({ A: rule({ maxPct: 1 }), B: rule({ mode: 'decline' }),
 eq('без правила: C (снят), D (без размера), F (нет правила)', un.map(x => x.article), ['C', 'D', 'F']);
 
 eq('карточка выкупов: 199 ₽ — да, 200 ₽ — нет, нет цены — нет', [isBuyoutCard(199), isBuyoutCard(200), isBuyoutCard(null), isBuyoutCard(0)], [true, false, false, false]);
+
+// Заказ по заявке (08.11): метка WANNADISCOUNT в financial_data.products[].actions. Живой FBS-заказ, деньги v4 — { amount }.
+const fbs = { posting_number: "0150258733-0324-1", status: "awaiting_packaging", in_process_at: "2026-11-08T12:28:49Z",
+  products: [{ sku: 1, offer_id: "allpowers-stan2kwh-ap-r2500-v2", quantity: 1, price: { amount: "112984", currency: "RUB" } }],
+  financial_data: { products: [{ product_id: 1, customer_price: { amount: "60734" }, actions: ["Округление", "WANNADISCOUNT-20261108"] }] } };
+const rows = discountOrderRows(fbs, "FBS");
+eq("заказ по заявке распознан", rows.map(r => [r.article, r.price, r.customerPrice, r.qty]), [["ALLPOWERS-STAN2KWH-AP-R2500-V2", 112984, 60734, 1]]);
+eq("заказ без метки — не по заявке", discountOrderRows({ ...fbs, financial_data: { products: [{ product_id: 1, actions: ["Округление"] }] } }, "FBS").length, 0);
+eq("FBO: деньги строкой", discountOrderRows({ posting_number: "x", products: [{ sku: 5, offer_id: "a", price: "990.00", quantity: 2 }], financial_data: { products: [{ product_id: 5, actions: ["WANNADISCOUNT-20261101"] }] } }, "FBO")[0].price, 990);
+eq("прибыль заказа = прибыль при цене ЛК × шт", orderProfit(inp, 1000, 2), 2 * (calcProfit1000()));
 
 console.log(ok ? '\nЗаявки на скидку: в порядке.' : '\nОШИБКА');
 if (!ok) process.exit(1);

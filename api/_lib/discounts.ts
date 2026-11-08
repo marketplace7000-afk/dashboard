@@ -6,7 +6,8 @@
  * ответ — v1/actions/discounts-task/approve (своя цена) и …/decline. Проверено на живом
  * кабинете 08.11: за 4 дня ~500 одобренных вручную заявок.
  *
- * Правило задаётся по товару: «одобрять до N %», «отклонять» или «решают менеджеры».
+ * Правило задаётся по товару: «одобрять» (до N % и/или пока маржа не ниже X %) или «отклонять».
+ * Режим не выбран — агент заявку не трогает, её обрабатывают вручную (решение владельца 08.11).
  * Процент скидки — от цены, которую покупатель видит на витрине сейчас (original_price
  * заявки: наша цена минус скидки Ozon). Можно добавить «маржа не ниже X %» — тогда
  * агент не опустит цену ниже точки, где маржа падает под порог.
@@ -121,7 +122,8 @@ export function saveRules(input: any, who: string): number {
 
 export type DiscountSettings = { auto: boolean; defaultMode: 'manual' | 'decline' };
 export function getDiscountSettings(): DiscountSettings {
-  return { auto: adsMetaGet('discounts:ozon:auto') === '1', defaultMode: adsMetaGet('discounts:ozon:default') === 'decline' ? 'decline' : 'manual' };
+  // 08.11: «по умолчанию отклонять» убрано по решению владельца — товар без режима всегда обрабатывают вручную.
+  return { auto: adsMetaGet('discounts:ozon:auto') === '1', defaultMode: 'manual' };
 }
 export function setDiscountSettings(p: any): DiscountSettings {
   if (p?.auto !== undefined) adsMetaSet('discounts:ozon:auto', p.auto ? '1' : '0');
@@ -164,17 +166,17 @@ const fmtPct = (v: number) => String(v).replace('.', ',');
 export function decide(t: Pick<DiscountTask, 'showcase' | 'requested'>, rule: DiscountRule | undefined, defaultMode: 'manual' | 'decline', input: OzonCalcInput | null | undefined): Decision {
   const skip = (reason: string): Decision => ({ action: 'skip', price: null, pct: null, marginPct: null, reason });
   const mode = rule ? rule.mode : defaultMode;
-  if (mode === 'manual') return skip(rule ? 'товар оставлен менеджерам' : 'для товара нет правила — решают менеджеры');
+  if (mode === 'manual') return skip('режим не выбран — обработать вручную');
   if (mode === 'decline') return { action: 'decline', price: null, pct: null, marginPct: null, reason: rule ? 'товар в списке «отклонять»' : 'для товара нет правила — по умолчанию отклоняем' };
 
   const show = t.showcase;
-  if (!(show > 0) || !(t.requested > 0)) return skip('в заявке нет цены — решают менеджеры');
-  if (rule!.maxPct == null && rule!.minMargin == null) return skip('не задан размер скидки — решают менеджеры');
+  if (!(show > 0) || !(t.requested > 0)) return skip('в заявке нет цены — обработать вручную');
+  if (rule!.maxPct == null && rule!.minMargin == null) return skip('не задана ни скидка, ни мин. маржа — обработать вручную');
   let allowed = rule!.maxPct ?? 90;
   let byMargin = false;
   if (rule!.minMargin != null) {
     const m = maxPctForMargin(input, rule!.minMargin);
-    if (m == null) return skip('нет себестоимости, маржу не посчитать — решают менеджеры');
+    if (m == null) return skip('нет себестоимости, маржу не посчитать — обработать вручную');
     if (m < allowed) { allowed = m; byMargin = true; }
   }
   const askExact = (1 - t.requested / show) * 100;

@@ -15,10 +15,10 @@ eq('артикул — заглавными', t.article, 'AFERIY-STAN');
 const big = toTask(JSON.parse('{"id":"163517556571854498","offer_id":"x"}'));
 eq('номер заявки не теряет цифры', big.id, '163517556571854498');
 
-eq('нет правила, умолчание — менеджеры', decide(t, undefined, 'manual', null).action, 'skip');
+eq('режим не выбран → вручную', decide(t, undefined, 'manual', null).action, 'skip');
 eq('нет правила, умолчание — отклонять', decide(t, undefined, 'decline', null).action, 'decline');
 eq('товар «отклонять»', decide(t, rule({ mode: 'decline' }), 'manual', null).action, 'decline');
-eq('товар «менеджеры»', decide(t, rule({ mode: 'manual', maxPct: 10 }), 'decline', null).action, 'skip');
+eq('режим снят → вручную', decide(t, rule({ mode: 'manual', maxPct: 10 }), 'decline', null).action, 'skip');
 eq('одобрять, % не задан', decide(t, rule({}), 'manual', null).action, 'skip');
 
 const ok10 = decide(t, rule({ maxPct: 10 }), 'manual', null);
@@ -40,7 +40,15 @@ eq('… и маржа после — не ниже порога', (byMargin.marg
 eq('просят в рамках → как просили', decide({ showcase: 600, requested: 570 }, rule({ maxPct: 25, minMargin: 10 }), 'manual', inp).price, 570);
 eq('маржа уже ниже порога → отклонить', decide(small, rule({ maxPct: 20, minMargin: 30 }), 'manual', inp).action, 'decline');
 eq('скидка 0 % → отклонить', decide(small, rule({ maxPct: 0 }), 'manual', inp).action, 'decline');
-eq('маржа без себестоимости → менеджеры', decide(small, rule({ minMargin: 10 }), 'manual', null).action, 'skip');
+eq('маржа без себестоимости → вручную', decide(small, rule({ minMargin: 10 }), 'manual', null).action, 'skip');
+
+// Пример владельца 08.11: мин. маржа задана. Скидка покупателя опускает маржу ниже порога —
+// даём цену ровно под порог; не опускает — одобряем как просили (разница остаётся в прибыли).
+// inp: маржа без скидки 23,5 %, при −5 % — 20,6 %, при −10 % — 17,3 %.
+const own1 = decide({ showcase: 600, requested: 540 }, rule({ minMargin: 20 }), 'manual', inp); // просят −10 % → 17,3 % < 20
+eq('просьба роняет маржу ниже порога → цена под порог', [own1.action, (own1.marginPct ?? 0) >= 20 && (own1.marginPct ?? 0) < 20.2], ['approve', true]);
+const own2 = decide({ showcase: 600, requested: 570 }, rule({ minMargin: 20 }), 'manual', inp); // просят −5 % → 20,6 % ≥ 20
+eq('после скидки маржа выше порога → как просили', [own2.action, own2.price, own2.marginPct], ['approve', 570, 20.6]);
 
 console.log(ok ? '\nЗаявки на скидку: в порядке.' : '\nОШИБКА');
 if (!ok) process.exit(1);

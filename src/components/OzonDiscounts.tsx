@@ -65,8 +65,9 @@ function maxPctForMargin(input: OzonCalcInput | null, minMargin: number): number
 }
 
 type Filter = 'all' | 'requests' | 'norule' | 'approve' | 'decline';
-const FILTERS: [Filter, string][] = [['all', 'Все'], ['requests', 'Есть заявки'], ['norule', 'Без правила'], ['approve', 'Одобряем'], ['decline', 'Отклоняем']];
-const MODES: [Mode, string][] = [['approve', 'Одобрять'], ['decline', 'Отклонять'], ['manual', 'Менеджеры']];
+const FILTERS: [Filter, string][] = [['all', 'Все'], ['requests', 'Есть заявки'], ['norule', 'Режим не выбран'], ['approve', 'Одобряем'], ['decline', 'Отклоняем']];
+// «Менеджеров» нет (решение владельца 08.11): всё в автомат; режим не выбран — заявку обрабатывают вручную.
+const MODES: [Mode, string][] = [['approve', 'Одобрять'], ['decline', 'Отклонять']];
 
 export function OzonDiscounts() {
   const [data, setData] = useState<Data | null>(null);
@@ -142,13 +143,7 @@ export function OzonDiscounts() {
           <button className={view === 'products' ? 'active' : ''} onClick={() => setView('products')}>Товары и правила</button>
           <button className={view === 'tasks' ? 'active' : ''} onClick={() => setView('tasks')}>Заявки{pending.length ? ` · ждут ${pending.length}` : ''}</button>
         </div>
-        <span className="dr-def">
-          Товары без правила:
-          <span className="sa-seg">
-            <button className={data.settings.defaultMode === 'manual' ? 'active' : ''} onClick={() => setSettings({ defaultMode: 'manual' })}>решают менеджеры</button>
-            <button className={data.settings.defaultMode === 'decline' ? 'active' : ''} onClick={() => setSettings({ defaultMode: 'decline' })}>отклонять</button>
-          </span>
-        </span>
+        <span className="dr-def">Режим не выбран — заявки по товару обрабатываются вручную в кабинете Ozon</span>
       </div>
 
       {view === 'products'
@@ -167,6 +162,7 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
   const [filter, setFilter] = useState<Filter>('all');
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkPct, setBulkPct] = useState('10');
+  const [bulkMargin, setBulkMargin] = useState('');
   // Правки, ещё не дошедшие до сервера, — чтобы поле не прыгало при обновлении списка.
   const [local, setLocal] = useState<Record<string, Partial<Rule>>>({});
 
@@ -175,7 +171,7 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
     return data.products
       .map(p => ({ ...p, rule: p.rule || local[p.article] ? { ...(p.rule ?? { article: p.article, mode: 'manual' as Mode, maxPct: null, minMargin: null, updatedAt: 0, updatedBy: '' }), ...local[p.article] } as Rule : null }))
       .filter(p => !s || p.article.toLowerCase().includes(s) || p.name.toLowerCase().includes(s))
-      .filter(p => filter === 'all' ? true : filter === 'requests' ? p.req7 > 0 : filter === 'norule' ? !p.rule : p.rule?.mode === filter)
+      .filter(p => filter === 'all' ? true : filter === 'requests' ? p.req7 > 0 : filter === 'norule' ? !p.rule || p.rule.mode === 'manual' : p.rule?.mode === filter)
       .sort((a, b) => b.pending - a.pending || b.req7 - a.req7 || (b.showcase ?? 0) - (a.showcase ?? 0));
   }, [data.products, q, filter, local]);
 
@@ -207,11 +203,16 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
         <div className="dr-bulk">
           <b>Выбрано: {sel.size}</b>
           <span className="dr-bulk-group">
-            <button className="btn btn-primary" onClick={() => bulk({ mode: 'approve', maxPct: Number(bulkPct.replace(',', '.')) || 0 })}>Одобрять до</button>
-            <input className="input dr-num" value={bulkPct} onChange={e => setBulkPct(e.target.value)} inputMode="decimal" /> %
+            Скидка до <input className="input dr-num" value={bulkPct} onChange={e => setBulkPct(e.target.value)} inputMode="decimal" placeholder="—" /> %,
+            маржа не ниже <input className="input dr-num" value={bulkMargin} onChange={e => setBulkMargin(e.target.value)} inputMode="decimal" placeholder="—" /> %
+            <button className="btn btn-primary" onClick={() => bulk({
+              mode: 'approve',
+              maxPct: bulkPct.trim() === '' ? null : Number(bulkPct.replace(',', '.')),
+              minMargin: bulkMargin.trim() === '' ? null : Number(bulkMargin.replace(',', '.')),
+            })}>Одобрять</button>
           </span>
           <button className="btn" onClick={() => bulk({ mode: 'decline' })}>Отклонять</button>
-          <button className="btn" onClick={() => bulk({ mode: 'manual' })}>Оставить менеджерам</button>
+          <button className="btn" onClick={() => bulk({ mode: 'manual' })}>Снять режим</button>
           <button className="btn" onClick={() => setSel(new Set())}><XIcon size={16} /> Снять выбор</button>
         </div>
       )}
@@ -223,12 +224,12 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
               <th className="dr-cb"><input type="checkbox" checked={allSel} onChange={toggleAll} /></th>
               <th>Товар</th>
               <th className="r">На витрине</th>
-              <th className="r">Маржа сейчас</th>
+              <th className="r">Текущая маржа</th>
               <th>Что делать с заявками</th>
               <th className="r">Макс. скидка</th>
+              <th className="r">Мин. маржа</th>
               <th className="r">Цена со скидкой</th>
               <th className="r">Маржа со скидкой</th>
-              <th className="r">Маржа не ниже</th>
               <th className="r">Заявок за 7 дн</th>
             </tr>
           </thead>
@@ -265,7 +266,7 @@ function NumInput({ value, onSave, placeholder, disabled }: { value: number | nu
 
 function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolean; onCheck: () => void; save: (a: string[], patch: Partial<Rule>) => Promise<void> }) {
   const r = p.rule;
-  const mode: Mode | null = r?.mode ?? null;
+  const mode: Mode | null = r && r.mode !== 'manual' ? r.mode : null;
   const show = p.showcase ?? 0;
   // Сколько реально даст агент: заданный процент, но не больше, чем позволяет порог маржи.
   const setPct = mode === 'approve' ? r?.maxPct ?? null : null;
@@ -299,12 +300,17 @@ function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolea
       <td>
         <div className="sa-seg dr-mode">
           {MODES.map(([k, l]) => (
-            <button key={k} className={`${mode === k ? 'active' : ''} m-${k}`} onClick={() => save([p.article], { mode: k })}>{l}</button>
+            <button key={k} className={`${mode === k ? 'active' : ''} m-${k}`} title={mode === k ? 'Нажмите ещё раз, чтобы снять режим' : ''}
+              onClick={() => save([p.article], { mode: mode === k ? 'manual' : k })}>{l}</button>
           ))}
         </div>
+        {!mode && <div className="dr-cap">не выбран — вручную</div>}
       </td>
       <td className="r">
-        {mode === 'approve' ? <NumInput value={r?.maxPct ?? null} placeholder="0" onSave={v => save([p.article], { maxPct: v })} /> : <span className="dr-cap">—</span>}
+        {mode === 'approve' ? <NumInput value={r?.maxPct ?? null} placeholder="—" onSave={v => save([p.article], { maxPct: v })} /> : <span className="dr-cap">—</span>}
+      </td>
+      <td className="r">
+        {mode === 'approve' ? <NumInput value={r?.minMargin ?? null} placeholder="—" onSave={v => save([p.article], { minMargin: v })} /> : <span className="dr-cap">—</span>}
       </td>
       <td className="r">
         {discPrice != null
@@ -315,9 +321,6 @@ function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolea
         {mode !== 'approve' || eff == null ? <span className="dr-cap">—</span>
           : !m ? <span className="dr-cap">{p.cost ? '—' : 'нет себестоимости'}</span>
           : <><b className={tone(m.pct)}>{pctS(m.pct)}</b><div className="dr-cap">{rub(m.rub)}</div></>}
-      </td>
-      <td className="r">
-        {mode === 'approve' ? <NumInput value={r?.minMargin ?? null} placeholder="—" onSave={v => save([p.article], { minMargin: v })} /> : <span className="dr-cap">—</span>}
       </td>
       <td className="r">
         {p.req7 ? <b>{p.req7}</b> : <span className="dr-cap">0</span>}
@@ -395,7 +398,7 @@ function Tasks({ data, post, reload }: { data: Data; post: PostFn; reload: () =>
                     {d ? (
                       <div>
                         <span className={`dr-badge ${d.action}`}>
-                          {d.action === 'approve' ? `Одобрить ${rub(d.price)}` : d.action === 'decline' ? 'Отклонить' : 'Менеджерам'}
+                          {d.action === 'approve' ? `Одобрить ${rub(d.price)}` : d.action === 'decline' ? 'Отклонить' : 'Вручную'}
                         </span>
                         {d.action === 'approve' && d.marginPct != null && <span className={`dr-m ${tone(d.marginPct)}`}> маржа {pctS(d.marginPct)}</span>}
                         <div className="dr-cap">{d.reason}</div>

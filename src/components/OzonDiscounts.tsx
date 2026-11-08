@@ -51,6 +51,8 @@ const time = (iso: string | number | null) => {
   const d = new Date(iso);
   return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
 };
+/** Потолок скидки — как на сервере (MAX_DISCOUNT_PCT): не больше 10 % от цены ЛК. */
+const MAX_DISCOUNT = 10;
 const isPending = (t: Task) => t.status === 'NEW' || t.status === 'SEEN';
 
 /**
@@ -210,6 +212,7 @@ function Products({ data, post, reload }: { data: Data; post: PostFn; reload: ()
   const bulk = async (patch: Partial<Rule>) => { await save([...sel], patch); setSel(new Set()); };
   const bulkApprove = () => {
     const p = num(bulkPct);
+    if (p != null && (p < 0 || p > MAX_DISCOUNT)) { window.alert(`Скидка — не больше ${MAX_DISCOUNT} % от цены в ЛК`); return; }
     void bulk({ mode: 'approve', maxPct: p, minMargin: p != null ? null : num(bulkMargin) });
     setBulkPct(''); setBulkMargin('');
   };
@@ -294,10 +297,13 @@ function RuleLimits({ maxPct, minMargin, onSave }: {
   const [mar, setMar] = useState(show(minMargin));
   const editing = useRef(false);
   useEffect(() => { if (!editing.current) { setPct(show(maxPct)); setMar(show(minMargin)); } }, [maxPct, minMargin]);
-  const ok = (s: string) => { const n = num(s); return s.trim() === '' || (n !== null && n >= 0 && n <= 90); };
+  const ok = (s: string, max: number) => { const n = num(s); return s.trim() === '' || (n !== null && n >= 0 && n <= max); };
   const commit = () => {
     editing.current = false;
-    if (!ok(pct) || !ok(mar)) { setPct(show(maxPct)); setMar(show(minMargin)); return; }
+    if (!ok(pct, MAX_DISCOUNT) || !ok(mar, 90)) {
+      if (!ok(pct, MAX_DISCOUNT)) window.alert(`Скидка — не больше ${MAX_DISCOUNT} % от цены в ЛК`);
+      setPct(show(maxPct)); setMar(show(minMargin)); return;
+    }
     const np = num(pct);
     const nm = np != null ? null : num(mar);
     if (np !== maxPct || nm !== minMargin) onSave({ maxPct: np, minMargin: nm });
@@ -318,9 +324,10 @@ function ProductRow({ p, checked, onCheck, save }: { p: Product; checked: boolea
   const show = p.showcase ?? 0;
 
   // Сколько реально даст агент: по скидке — заданный процент; по марже — пока маржа не ниже порога.
-  const eff = mode !== 'approve' ? null
+  const effRaw = mode !== 'approve' ? null
     : r?.maxPct != null ? r.maxPct
     : r?.minMargin != null ? maxPctForMargin(p.input, r.minMargin) : null;
+  const eff = effRaw == null ? null : Math.min(effRaw, MAX_DISCOUNT);
   const discPrice = eff != null && show > 0 ? Math.ceil(show * (1 - eff / 100)) : null;
   const newLk = eff != null && p.price ? Math.round(p.price * (1 - eff / 100)) : null;
   const m = eff != null ? marginAt(p.input, eff) : null;

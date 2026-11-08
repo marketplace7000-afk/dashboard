@@ -69,8 +69,12 @@ const HISTORY_EVERY_MS = 15 * 60_000;
 /** Раз в час — глубже по одобренным: у старых заявок меняется is_purchased (покупка). */
 const DEEP_EVERY_MS = 60 * 60_000;
 const DEEP_PAGES = 10;
-/** Защита: больше такой скидки от витрины агент/кнопка не отправят никогда. */
-const MAX_SAFE_PCT = 50;
+/**
+ * ЖЁСТКИЙ ПОТОЛОК (решение владельца 08.11 после убыточного заказа): скидка по любой заявке —
+ * не больше 10 % от нашей цены в ЛК. Проверяется в правилах, в решении агента и последней
+ * проверкой прямо перед отправкой в Ozon (apiPrice) — для агента и для кнопки на сайте.
+ */
+export const MAX_DISCOUNT_PCT = 10;
 
 // ─── Хранилище ──────────────────────────────────────────────────────────────
 
@@ -118,7 +122,7 @@ export function saveRules(input: any, who: string): number {
   const cur = listRules();
   const mode = input?.mode;
   if (mode !== undefined && !['approve', 'decline', 'manual'].includes(mode)) throw new Error('неизвестный режим');
-  let maxPct = 'maxPct' in (input ?? {}) ? limitPct(input.maxPct, 'Скидка', 90) : undefined;
+  let maxPct = 'maxPct' in (input ?? {}) ? limitPct(input.maxPct, 'Скидка', MAX_DISCOUNT_PCT) : undefined;
   let minMargin = 'minMargin' in (input ?? {}) ? limitPct(input.minMargin, 'Маржа', 90) : undefined;
   // Либо макс. скидка, либо мин. маржа (решение владельца 08.11): одно стирает другое.
   if (maxPct != null) minMargin = null;
@@ -186,7 +190,7 @@ export function decide(t: Pick<DiscountTask, 'showcase' | 'requested'>, rule: Di
   const show = t.showcase;
   if (!(show > 0) || !(t.requested > 0)) return skip('в заявке нет цены — обработать вручную');
   if (rule!.maxPct == null && rule!.minMargin == null) return skip('не задана ни скидка, ни мин. маржа — обработать вручную');
-  let allowed = rule!.maxPct ?? 90;
+  let allowed = Math.min(rule!.maxPct ?? MAX_DISCOUNT_PCT, MAX_DISCOUNT_PCT);
   let byMargin = false;
   if (rule!.minMargin != null) {
     const m = maxPctForMargin(input, rule!.minMargin);
@@ -285,9 +289,13 @@ function staleIds(pending: any[]): number {
  */
 export function apiPrice(t: Pick<DiscountTask, 'base' | 'showcase'>, buyerPrice: number): number {
   if (!(t.base > 0) || !(t.showcase > 0) || !(buyerPrice > 0)) throw new Error('в заявке нет цены ЛК или витрины — ответить вручную в кабинете');
-  const pct = (1 - buyerPrice / t.showcase) * 100;
-  if (pct > MAX_SAFE_PCT) throw new Error(`скидка ${Math.round(pct)} % — слишком большая, агент не отправит`);
-  return Math.min(Math.round(t.base), Math.ceil(buyerPrice * t.base / t.showcase));
+  const lk = Math.min(Math.round(t.base), Math.ceil(buyerPrice * t.base / t.showcase));
+  // Последняя проверка — по самой цене, которая уйдёт в Ozon: не ниже ЛК × 0,9.
+  if (lk < Math.ceil(t.base * (1 - MAX_DISCOUNT_PCT / 100))) {
+    const pct = Math.round((1 - lk / t.base) * 1000) / 10;
+    throw new Error(`скидка ${String(pct).replace('.', ',')} % от цены ЛК — больше ${MAX_DISCOUNT_PCT} %, не отправлено`);
+  }
+  return lk;
 }
 
 /** Ответить Ozon пачкой. Возвращает ошибки по номерам заявок. */

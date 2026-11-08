@@ -35,9 +35,13 @@ eq('маржа при −10 % (цена ЛК 900)', marginAtDiscount(inp, 10), 1
 const lim = maxPctForMargin(inp, 10)!;
 eq('сколько можно дать при марже ≥ 10 %', lim, 19.7);
 const small = { showcase: 600, requested: 420 }; // просят −30 %
-const byMargin = decide(small, rule({ maxPct: 25, minMargin: 10 }), 'manual', inp);
-eq('маржа ограничивает скидку', [byMargin.action, byMargin.price, byMargin.pct], ['approve', Math.ceil(600 * (1 - lim / 100)), 19.7]);
-eq('… и маржа после — не ниже порога', (byMargin.marginPct ?? 0) >= 10, true);
+const lim18 = maxPctForMargin(inp, 18)!;
+const byMargin = decide(small, rule({ minMargin: 18 }), 'manual', inp);
+eq('маржа ограничивает скидку', [byMargin.action, byMargin.price, lim18 < 10], ['approve', Math.ceil(600 * (1 - lim18 / 100)), true]);
+eq('… и маржа после — не ниже порога', (byMargin.marginPct ?? 0) >= 18, true);
+// Потолок 10 % от цены ЛК (решение владельца 08.11).
+eq('маржа позволяет 19,7 % → всё равно не больше 10 %', decide(small, rule({ minMargin: 10 }), 'manual', inp).price, 540);
+eq('старое правило 25 % → не больше 10 %', decide(small, rule({ maxPct: 25 }), 'manual', inp).price, 540);
 eq('просят в рамках → как просили', decide({ showcase: 600, requested: 570 }, rule({ maxPct: 25, minMargin: 10 }), 'manual', inp).price, 570);
 eq('маржа уже ниже порога → отклонить', decide(small, rule({ maxPct: 20, minMargin: 30 }), 'manual', inp).action, 'decline');
 eq('скидка 0 % → отклонить', decide(small, rule({ maxPct: 0 }), 'manual', inp).action, 'decline');
@@ -53,6 +57,8 @@ eq('после скидки маржа выше порога → как прос
 
 // Либо макс. скидка, либо мин. маржа (решение владельца 08.11).
 _useAdsDbForTests(':memory:');
+let capErr = ''; try { saveRules({ article: 'Y', mode: 'approve', maxPct: 11 }, 't'); } catch (e) { capErr = (e as Error).message; }
+eq('правило больше 10 % не сохраняется', capErr.includes('до 10'), true);
 saveRules({ article: 'X', mode: 'approve', maxPct: 7 }, 't');
 saveRules({ article: 'X', minMargin: 17 }, 't');
 eq('мин. маржа стирает скидку', [listRules().X.maxPct, listRules().X.minMargin], [null, 17]);
@@ -67,7 +73,10 @@ eq('цена покупателя 112 984 → в ЛК', sent, 188236);
 eq('после пересчёта Ozon покупатель платит не меньше', Math.round(sent * 113323 / 188800) >= 112984, true);
 eq('«как просили» ≈ requested_price из заявки', Math.abs(apiPrice(live, 107657) - 179360) <= 1, true);
 let threw = ''; try { apiPrice(live, 50000); } catch (e) { threw = (e as Error).message; }
-eq('скидка больше 50 % не уходит', threw.startsWith('скидка 56 %'), true);
+eq('скидка 40 % от ЛК не уходит', threw.includes('больше 10 %'), true);
+let t11 = ''; try { apiPrice(live, Math.floor(113323 * 0.89)); } catch (e) { t11 = (e as Error).message; }
+eq('скидка 11 % не уходит', t11.includes('больше 10 %'), true);
+eq('скидка ровно 10 % уходит', apiPrice(live, Math.ceil(113323 * 0.9)) >= 188800 * 0.9, true);
 eq('не выше цены ЛК', apiPrice(live, 113323), 188800);
 
 console.log(ok ? '\nЗаявки на скидку: в порядке.' : '\nОШИБКА');

@@ -180,12 +180,10 @@ eq('png под видом jpg', imageMime(Buffer.from([0x89, 0x50, 0x4e, 0x47]),
   const { ozonChatMedia, ozonChatText } = await import('../api/_lib/reviews/sources');
   const { addMessages, chatMessagesView, isClosingText } = await import('../api/_lib/reviews/chatStore');
   const row = { uuid: 'ph1', sku: '1', offer_id: 'OZ-1', title: 'Товар', url: null, text: '', rating: 2, published_at: '2026-11-01T10:00:00Z', is_empty: true,
-    photos: ['https://ir.ozone.ru/s3/rp-photo-11/a.jpeg', 'http://evil.example/x.jpg'], videos: 1 };
+    photos: ['https://ir.ozone.ru/s3/rp-photo-11/a.jpeg'], videos: 1 } as any;
   ingestOzonReviews([row], false);
   const id = (getDb().prepare("SELECT id FROM items WHERE external_id = 'ph1'").get() as any).id;
-  eq('фото отзыва Ozon: только https + видео без кадра', mediaOf(`item:${id}`).map(m => [m.kind, m.url]), [['photo', 'https://ir.ozone.ru/s3/rp-photo-11/a.jpeg'], ['video', 'none:video']]);
-  ingestOzonReviews([row], false);
-  eq('повторный сбор не дублирует фото', mediaOf(`item:${id}`).length, 2);
+  eq('фото отзывов не собираются (решение 11.11)', mediaOf(`item:${id}`).length, 0);
   const raw = 'Вот так ![](https://api-seller.ozon.ru/v2/chat/file/messenger-rotated-3/abc.png) и ![](https://evil.example/v2/chat/file/x.png)';
   eq('фото чата Ozon: только адрес Ozon', ozonChatMedia(raw).map(m => m.url), ['https://api-seller.ozon.ru/v2/chat/file/messenger-rotated-3/abc.png']);
   eq('текст чата Ozon', ozonChatText(raw), 'Вот так [фото] и [фото]');

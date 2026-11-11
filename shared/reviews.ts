@@ -55,11 +55,7 @@ export type ReviewItem = {
   publishedAt: number | null;
   publishedBy: 'auto' | 'owner' | null;
   publishError: string | null;
-  /** Фото покупателя и то, что агент на них увидел. */
-  media?: ReviewMedia[];
 };
-
-export type ReviewMedia = { id: number; kind: 'photo' | 'video'; note: string | null; viewable: boolean; error: string | null };
 
 /** Пресеты списка над фильтрами (раздел 14 ТЗ). */
 export type ReviewView = 'unanswered' | 'pending' | 'answered' | 'all';

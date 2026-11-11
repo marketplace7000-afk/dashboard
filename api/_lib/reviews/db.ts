@@ -9,7 +9,6 @@ import {
   DEFAULT_REVIEW_SETTINGS,
   type ReviewItem, type ReviewSettings, type ReviewDirection, type CollectState,
 } from '../../../shared/reviews';
-import { addMedia, type MediaIn } from './media';
 
 let DatabaseSync: any = null;
 try { DatabaseSync = require('node:sqlite').DatabaseSync; } catch { DatabaseSync = null; }
@@ -183,32 +182,21 @@ export type UpsertInput = {
   sku?: string | null; offerId?: string | null; productName?: string | null; productUrl?: string | null;
   rating?: number | null; text: string; pros?: string | null; cons?: string | null; author?: string | null;
   createdAt: number; answered: boolean; mpAnswer?: string | null;
-  /** Фото и кадры видео покупателя (ссылки площадки). */
-  media?: MediaIn[];
 };
 
 /** Вставить или обновить запись. Черновик и статус не трогает (кроме «отвечено на площадке»). */
 export function upsertItem(x: UpsertInput): { inserted: boolean } {
-  const r = upsertRow(x);
-  // Фото нашлись у отзыва, к которому черновик уже написан «вслепую», — переписать с фото.
-  if (x.media?.length && addMedia(`item:${r.id}`, x.media) && !r.inserted && !x.answered && getSettings().autoDraft) {
-    getDb().prepare("UPDATE items SET status = 'new', draft_attempts = 0 WHERE id = ? AND answered_on_mp = 0 AND status IN ('drafted','escalated')").run(r.id);
-  }
-  return { inserted: r.inserted };
-}
-
-function upsertRow(x: UpsertInput): { inserted: boolean; id: number } {
   const d = getDb();
   const now = Date.now();
   const existing = d.prepare('SELECT id FROM items WHERE marketplace = ? AND external_id = ?').get(x.marketplace, x.externalId) as any;
   if (!existing) {
-    const ins = d.prepare(`INSERT INTO items (marketplace, kind, external_id, sku, offer_id, product_name, product_url, rating,
+    d.prepare(`INSERT INTO items (marketplace, kind, external_id, sku, offer_id, product_name, product_url, rating,
       text, pros, cons, author, created_at, answered_on_mp, mp_answer, status, first_seen_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)`)
       .run(x.marketplace, x.kind, x.externalId, x.sku ?? null, x.offerId ?? null, x.productName ?? null, x.productUrl ?? null,
         x.rating ?? null, x.text || '', x.pros ?? null, x.cons ?? null, x.author ?? null, x.createdAt,
         x.answered ? 1 : 0, x.mpAnswer ?? null, now, now);
-    return { inserted: true, id: Number(ins.lastInsertRowid) };
+    return { inserted: true };
   }
   d.prepare(`UPDATE items SET sku = COALESCE(?, sku), offer_id = COALESCE(?, offer_id), product_name = COALESCE(?, product_name),
       product_url = COALESCE(?, product_url), rating = COALESCE(?, rating), text = ?, pros = COALESCE(?, pros), cons = COALESCE(?, cons),
@@ -217,7 +205,7 @@ function upsertRow(x: UpsertInput): { inserted: boolean; id: number } {
     WHERE id = ?`)
     .run(x.sku ?? null, x.offerId ?? null, x.productName ?? null, x.productUrl ?? null, x.rating ?? null, x.text || '',
       x.pros ?? null, x.cons ?? null, x.answered ? 1 : 0, x.mpAnswer ?? null, now, existing.id);
-  return { inserted: false, id: existing.id };
+  return { inserted: false };
 }
 
 /**

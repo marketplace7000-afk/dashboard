@@ -1318,7 +1318,7 @@ code {
 .rv-page .rv-back { display: none; padding: 8px; min-height: 40px; }
 .rv-messages { flex: 1; display: flex; flex-direction: column; gap: 10px; max-height: 56vh; min-height: 240px; overflow: auto; padding: 20px 18px; background: var(--rv-soft); }
 .rv-msg { max-width: min(78%, 620px); padding: 10px 14px 8px; border-radius: 18px; font-size: 17px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-/* Фото покупателя (отзывы и чаты) */
+/* Фото покупателя в чатах */
 .rv-media { margin-top: 10px; display: grid; gap: 8px; white-space: normal; }
 .rv-media-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .rv-media-thumb { position: relative; display: block; width: 96px; height: 96px; border-radius: 12px; overflow: hidden; background: #eef1f5; border: 1px solid rgba(15,23,42,.08); }

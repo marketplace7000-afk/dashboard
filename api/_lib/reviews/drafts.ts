@@ -13,10 +13,6 @@ import { getStyleProfile } from './sources';
 import { publishAnswer } from './publish';
 import { directionOf, type ReviewItem } from '../../../shared/reviews';
 import { modelFor } from '../aiModels';
-import { mediaOf, imageBlocks, saveNotes, PHOTO_RULES } from './media';
-
-/** Сколько фото одного отзыва показываем модели (остальные обычно повторяют первые). */
-const REVIEW_PHOTOS_MAX = 4;
 
 export const SYSTEM_PROMPT = `Ты — сотрудник поддержки интернет-магазина автотоваров и электроники «avto-vibe» (Wildberries и Ozon). Пишешь ответ магазина на отзыв или вопрос покупателя на карточке товара. Ответ публичный: его читает не только автор, но и все, кто выбирает этот товар.
 
@@ -33,8 +29,6 @@ export const SYSTEM_PROMPT = `Ты — сотрудник поддержки и�
 - Длина — не больше 900 символов; мысль никогда не обрывай.
 - Обращение на «вы», по-русски, 1–5 предложений (больше — только если без этого не ответить на вопрос).
 
-${PHOTO_RULES}
-
 ЖЁСТКИЕ ПРАВИЛА:
 - Факты о товаре — только из выданных материалов (карточка, материалы Диска, прошлые ответы). Если точного ответа нет — НЕ ДОГАДЫВАЙСЯ: confidence "low", ответ без выдуманных цифр.
 - Не обещай денег, компенсаций, замены или подарков, которых магазин не предлагал в прошлых ответах.
@@ -43,7 +37,7 @@ ${PHOTO_RULES}
 - Не груби и не иронизируй, даже если покупатель резок.
 
 ВЕРНИ СТРОГО JSON без пояснений вокруг:
-{"answer": "текст ответа покупателю", "confidence": "high"|"medium"|"low", "category": "positive"|"neutral"|"negative"|"complaint"|"question", "needs_escalation": true|false, "escalation_reason": "до 12 слов или null", "photos": {"1": "что видно на фото 1"}, "sources_used": ["style", "card:<артикул>", "product:<артикул>", "history:<id>", "chat:<id>"]}
+{"answer": "текст ответа покупателю", "confidence": "high"|"medium"|"low", "category": "positive"|"neutral"|"negative"|"complaint"|"question", "needs_escalation": true|false, "escalation_reason": "до 12 слов или null", "sources_used": ["style", "card:<артикул>", "product:<артикул>", "history:<id>", "chat:<id>"]}
 
 needs_escalation = true, если: confidence = "low", ИЛИ брак/подделка/повреждение/возврат/замена, ИЛИ грубость/угрозы/суд/Роспотребнадзор/жалоба, ИЛИ оценка 1–2. Иначе — false.`;
 
@@ -162,9 +156,7 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
   if (item.answeredOnMarketplace || item.status === 'published' || item.status === 'skipped') return item;
   if (!opts.force && item.draftAnswer) return item;
   const s = getSettings();
-  // Фото покупателя: отзыв «без текста, но с фото» — уже не пустой, его надо рассмотреть.
-  const media = mediaOf(`item:${id}`);
-  const isEmptyReview = item.kind === 'review' && !`${item.text}${item.pros || ''}${item.cons || ''}`.trim() && !media.length;
+  const isEmptyReview = item.kind === 'review' && !`${item.text}${item.pros || ''}${item.cons || ''}`.trim();
   const codeReason = codeEscalation(item, s.escalateRatingMax);
 
   if (isEmptyReview && !codeReason && item.offerId && (item.rating ?? 0) >= 4) {
@@ -193,10 +185,6 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
   const style = getStyleProfile();
   const chatName = (src: string) => src === 'wb_chat' ? 'чат WB' : src === 'ozon_chat' ? 'чат Ozon' : 'Telegram';
 
-  const vis = media.length ? await imageBlocks(media.slice(0, REVIEW_PHOTOS_MAX).map(row => ({ row, label: '' }))) : { blocks: [], shown: [] };
-  const photoLine = !media.length ? ''
-    : `Покупатель приложил к ${item.kind === 'review' ? 'отзыву' : 'вопросу'} вложения: ${media.length} — ${vis.shown.map(s => `${s.label.split(' — ')[0]}${s.ok ? '' : ' (не открылось)'}`).join(', ')}${media.length > vis.shown.length ? ` (показаны первые ${vis.shown.length})` : ''}. Изображения — в начале сообщения.`;
-
   const dynamic = [
     `# ${item.kind === 'review' ? 'Отзыв' : 'Вопрос'} покупателя (${item.marketplace === 'wb' ? 'Wildberries' : 'Ozon'})`,
     `Товар: ${item.productName || '—'}; артикул: ${item.offerId || '—'}`,
@@ -205,7 +193,6 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
     item.pros ? `Достоинства: ${item.pros}` : '',
     item.cons ? `Недостатки: ${item.cons}` : '',
     `Текст: ${item.text || '(без текста)'}`,
-    photoLine,
     card ? (know.text ? `\n# Ещё о товаре (кроме карточки выше)\n${know.text}` : '')
       : `\n# Что известно о товаре\n${know.text || '(ни карточки, ни материалов — опирайся только на прошлые ответы, факты не придумывай)'}`,
     `\n# Наши прошлые ответы на похожие ${item.kind === 'review' ? 'отзывы' : 'вопросы'} (сначала — по этому товару)\n${past.length ? past.map(p => `[history:${p.id}] ${p.rating ? p.rating + '★ ' : ''}«${p.text || '(без текста)'}» → «${p.answer}»`).join('\n') : '(нет)'}`,
@@ -233,11 +220,9 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
       messages: [{ role: 'user', content: card
         ? [
           { type: 'text', text: `# Товар: ${item.productName || '—'}; артикул: ${item.offerId}\n${card}`, ...(cardReused ? { cache_control: { type: 'ephemeral' } } : {}) },
-          // Карточка — первой (она читается из кэша), фото покупателя — перед самим отзывом.
-          ...vis.blocks,
           { type: 'text', text: dynamic },
         ]
-        : vis.blocks.length ? [...vis.blocks, { type: 'text', text: dynamic }] : dynamic }],
+        : dynamic }],
     });
   } catch (e) {
     if (e instanceof BudgetExceeded) throw e;
@@ -250,7 +235,6 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
   try { j = extractJson(res.text); } catch {
     j = { answer: res.text.trim(), confidence: 'low', category: null, needs_escalation: true, escalation_reason: 'Модель вернула не JSON', sources_used: [] };
   }
-  saveNotes(vis.shown, j.photos);
   // Не обрезаем: обрубленный ответ хуже — длинный уходит на проверку менеджеру.
   const answer = String(j.answer || '').trim().slice(0, 4000);
   const reasons = [
@@ -260,7 +244,6 @@ export async function draftOne(id: number, opts: { force?: boolean } = {}): Prom
     j.needs_escalation ? (j.escalation_reason || 'Модель просит проверку') : null,
     j.confidence === 'low' ? 'Низкая уверенность' : null,
     !answer ? 'Пустой ответ' : null,
-    vis.shown.some(s => !s.ok) ? 'Фото покупателя не открылось — посмотрите его на площадке' : null,
   ].filter(Boolean) as string[];
   const reason = reasons.length ? [...new Set(reasons)].join('; ') : null;
 

@@ -486,9 +486,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   //   GET  /api/rnp?mp=wb|ozon&from=YYYY-MM-DD&to=YYYY-MM-DD
   //   POST /api/rnp/collect?mp=wb|ozon — внеочередной сбор (фоном)
   //   GET  /api/rnp/summary?mp=wb|ozon&from=YYYY-MM-DD&to=YYYY-MM-DD — выжимка для главной
+  //   POST /api/rnp/refresh — кнопка «Обновить» на главной (обе площадки, не чаще раза в 10 мин)
+  //   GET  /api/rnp/status — идёт ли сбор и когда был последний
   if (section === 'rnp') {
     try {
       const rnp = await import('./_lib/rnp');
+      if (parts[1] === 'refresh' && req.method === 'POST') return res.status(200).json(rnp.requestManualCollect());
+      if (parts[1] === 'status') return res.status(200).json({ ok: true, collecting: rnp.rnpCollecting(), collectedAt: rnp.rnpLastCollectedAt() });
       const mp = String(req.query.mp ?? 'wb') === 'ozon' ? 'ozon' : 'wb';
       if (parts[1] === 'summary') return res.status(200).json(rnp.getRnpSummary(mp, String(req.query.from ?? ''), String(req.query.to ?? '')));
       if (parts[1] === 'collect') {

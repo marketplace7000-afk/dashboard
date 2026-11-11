@@ -2135,6 +2135,7 @@ code {
 .db-excl { margin-top: 0; }
 .db-go { border: 1px solid var(--db-line); background: var(--db-surf); color: var(--db-text); border-radius: var(--db-r-s); padding: 6px 12px; font-size: var(--db-cap); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-weight: 400; cursor: pointer; }
 .db-go:hover { background: var(--db-acc-soft); color: var(--db-acc); border-color: transparent; }
+.db-go:disabled { cursor: progress; opacity: .75; }
 
 /* Плитки 2 × 2: крупной цифре нужно место, а мини-графику — ширина */
 .db-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; }

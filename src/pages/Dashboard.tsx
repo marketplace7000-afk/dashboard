@@ -6,9 +6,9 @@
  * (/api/rnp/summary), расходы — /api/fin-history.
  * Графики — components/DashCharts.tsx, оформление — блок .db в styles.css.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TrendUpIcon, TrendDownIcon, SpinnerIcon, ArrowsClockwiseIcon } from '@phosphor-icons/react';
-import { apiGet } from '../api/http';
+import { apiGet, apiPost } from '../api/http';
 import { mskDate } from '../utils/mskDate';
 import { noteSwallowed } from '../utils/log';
 import type { RnpSummary, RnpSummaryProduct } from '../../shared/rnp';
@@ -64,6 +64,44 @@ function useRnp(from: string, to: string, tick: number) {
     return () => { alive = false; };
   }, [from, to, tick]);
   return { ...data, loading };
+}
+
+/**
+ * Кнопка «Обновить»: просит сервер собрать свежие данные с WB и Ozon (сам он
+ * делает это раз в 2 часа), ждёт конца сбора и перечитывает главную.
+ * Сбор чаще раза в 10 минут сервер не запускает — тогда просто перечитываем.
+ */
+type RefreshResp = { started: boolean; collecting: boolean; collectedAt: number | null; fresh: boolean };
+function useManualRefresh(reload: () => void) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
+  const ago = (at: number | null) => at ? Math.max(1, Math.round((Date.now() - at) / 60_000)) : 0;
+  const run = useCallback(async () => {
+    setBusy(true); setNote('');
+    try {
+      const r = (await apiPost<RefreshResp>('/api/rnp/refresh')).data;
+      if (r.fresh) {
+        setNote(`данные собраны ${ago(r.collectedAt)} мин назад — новее пока нет`);
+      } else {
+        // Ждём конца сбора: опрашиваем раз в 10 с, но не дольше 8 минут.
+        const until = Date.now() + 8 * 60_000;
+        let done = false;
+        while (alive.current && Date.now() < until) {
+          await new Promise(res => setTimeout(res, 10_000));
+          const s = (await apiGet<{ collecting: boolean }>('/api/rnp/status')).data;
+          if (!s.collecting) { done = true; break; }
+        }
+        if (!done && alive.current) setNote('сбор ещё идёт — цифры обновятся позже');
+      }
+    } catch (e) {
+      noteSwallowed('dashboard', 'ручной сбор не запущен', e);
+      if (alive.current) setNote('не удалось запустить сбор — показаны последние данные');
+    }
+    if (alive.current) { setBusy(false); reload(); }
+  }, [reload]);
+  return { busy, note, run };
 }
 
 function useFin(from: string, to: string, tick: number) {
@@ -126,6 +164,7 @@ export function Dashboard({ onNav, can = () => true }: { onNav: Nav; can?: (k: s
   const [scope, setScope] = useState<Scope>('all');
   const [price, setPrice] = useState<Price>('before');
   const [tick, setTick] = useState(0);
+  const refresh = useManualRefresh(() => setTick(t => t + 1));
 
   const { from, to } = preset === 'custom' ? custom : presetRange(preset);
   const today = mskDate(0);
@@ -297,8 +336,11 @@ export function Dashboard({ onNav, can = () => true }: { onNav: Nav; can?: (k: s
             {to === today && ' · сегодня ещё не закрыт'}
             {collectedAt && ` · данные на ${new Date(collectedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`}
           </span>
-          <button type="button" className="db-go" onClick={() => setTick(t => t + 1)} title="Перечитать данные с сервера">
-            {rnp.loading ? <SpinnerIcon size={16} className="spin" /> : <ArrowsClockwiseIcon size={16} weight="bold" />} Обновить
+          {refresh.note && <span className="db-sub">{refresh.note}</span>}
+          <button type="button" className="db-go" onClick={refresh.run} disabled={refresh.busy}
+            title="Собрать свежие данные с WB и Ozon (около 2 минут, не чаще раза в 10 минут)">
+            {refresh.busy || rnp.loading ? <SpinnerIcon size={16} className="spin" /> : <ArrowsClockwiseIcon size={16} weight="bold" />}
+            {refresh.busy ? ' Собираю…' : ' Обновить'}
           </button>
         </div>
       </header>

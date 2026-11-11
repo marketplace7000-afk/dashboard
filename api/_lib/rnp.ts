@@ -1272,6 +1272,27 @@ export function rnpCollecting(): boolean {
   return run.collecting != null;
 }
 
+/** Когда последний раз собраны заказы (самое свежее из WB и Ozon), мс; нет — null. */
+export function rnpLastCollectedAt(): number | null {
+  const v = (['wb', 'ozon'] as const).map(mp => Number(metaGet(`collected:${mp}:sales`) || 0)).filter(Boolean);
+  return v.length ? Math.max(...v) : null;
+}
+
+/** Не чаще раза в 10 минут: сбор ходит в API площадок, а лимиты у них общие с кроном. */
+const MANUAL_COLLECT_GAP_MS = 10 * 60_000;
+
+/**
+ * Кнопка «Обновить» на главной: внеочередной сбор по обеим площадкам.
+ * Если данные собраны меньше 10 минут назад — сбор не запускаем, просто сообщаем.
+ */
+export function requestManualCollect(): { ok: true; started: boolean; collecting: boolean; collectedAt: number | null; fresh: boolean } {
+  const collectedAt = rnpLastCollectedAt();
+  if (run.collecting) return { ok: true, started: false, collecting: true, collectedAt, fresh: false };
+  if (collectedAt && Date.now() - collectedAt < MANUAL_COLLECT_GAP_MS) return { ok: true, started: false, collecting: false, collectedAt, fresh: true };
+  void collectRnp().catch(() => {});
+  return { ok: true, started: true, collecting: true, collectedAt, fresh: false };
+}
+
 // ─── Чтение ────────────────────────────────────────────────────────────────
 
 const MAX_DAYS = 120;

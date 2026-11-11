@@ -173,5 +173,36 @@ eq('«Максим» — не мессенджер', FORBIDDEN.test('Макси�
 }
 eq('png под видом jpg', imageMime(Buffer.from([0x89, 0x50, 0x4e, 0x47]), 'x.jpg'), 'image/png');
 
+// 13. Фото покупателей (11.11.2026): вложения сохраняются один раз, чужие адреса не скачиваются.
+{
+  const { addMedia, mediaOf, loadImage, saveNotes, toView } = await import('../api/_lib/reviews/media');
+  const { ingestOzonReviews } = await import('../api/_lib/reviews/collect');
+  const { ozonChatMedia, ozonChatText } = await import('../api/_lib/reviews/sources');
+  const { addMessages, chatMessagesView, isClosingText } = await import('../api/_lib/reviews/chatStore');
+  const row = { uuid: 'ph1', sku: '1', offer_id: 'OZ-1', title: 'Товар', url: null, text: '', rating: 2, published_at: '2026-11-01T10:00:00Z', is_empty: true,
+    photos: ['https://ir.ozone.ru/s3/rp-photo-11/a.jpeg', 'http://evil.example/x.jpg'], videos: 1 };
+  ingestOzonReviews([row], false);
+  const id = (getDb().prepare("SELECT id FROM items WHERE external_id = 'ph1'").get() as any).id;
+  eq('фото отзыва Ozon: только https + видео без кадра', mediaOf(`item:${id}`).map(m => [m.kind, m.url]), [['photo', 'https://ir.ozone.ru/s3/rp-photo-11/a.jpeg'], ['video', 'none:video']]);
+  ingestOzonReviews([row], false);
+  eq('повторный сбор не дублирует фото', mediaOf(`item:${id}`).length, 2);
+  const raw = 'Вот так ![](https://api-seller.ozon.ru/v2/chat/file/messenger-rotated-3/abc.png) и ![](https://evil.example/v2/chat/file/x.png)';
+  eq('фото чата Ozon: только адрес Ozon', ozonChatMedia(raw).map(m => m.url), ['https://api-seller.ozon.ru/v2/chat/file/messenger-rotated-3/abc.png']);
+  eq('текст чата Ozon', ozonChatText(raw), 'Вот так [фото] и [фото]');
+  addMessages('ozon', 'c-ph', [{ id: 'm1', at: 1000, fromBuyer: true, text: ozonChatText(raw), media: ozonChatMedia(raw) }]);
+  const view = chatMessagesView('ozon', 'c-ph');
+  eq('сообщение с фото для кабинета', [view[0].media?.length, view[0].media?.[0].viewable, 'url' in (view[0].media?.[0] as any)], [1, true, false]);
+  const m0 = mediaOf('chat:ozon:m1')[0];
+  saveNotes([{ n: 1, row: m0, ok: true, label: 'Фото 1' }], { '1': 'Экран магнитолы: «Нет соединения»' });
+  eq('описание фото сохранено', mediaOf('chat:ozon:m1')[0].note, 'Экран магнитолы: «Нет соединения»');
+  eq('спасибо + фото — не конец разговора', isClosingText('спасибо [фото: 1]', false), false);
+  addMedia('item:999', [{ kind: 'photo', url: 'https://evil.example/a.jpg' }, { kind: 'photo', url: 'wbdl:../../etc' }, { kind: 'photo', url: 'https://api-seller.ozon.ru/v1/product/list' }]);
+  for (const m of mediaOf('item:999')) {
+    let err = ''; try { await loadImage(m); } catch (e) { err = String((e as Error).message); }
+    eq(`чужой адрес не скачивается (${m.url.slice(0, 24)})`, /не из списка|неверный идентификатор|не вложение чата/.test(err), true);
+  }
+  void toView;
+}
+
 if (fails) { console.log(`\nОшибок: ${fails}`); process.exit(1); }
 console.log('\ncheck-reviews: всё в порядке');

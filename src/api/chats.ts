@@ -9,7 +9,8 @@ export type ChatThread = {
   sentAt: number | null; sentBy: string | null; sendError: string | null; canReply: boolean;
   productPhoto?: string | null; productUrl?: string | null;
 };
-export type ChatMsg = { id: string; at: number; fromBuyer: boolean; text: string };
+export type ChatMedia = { id: number; kind: 'photo' | 'video'; note: string | null; viewable: boolean; error: string | null };
+export type ChatMsg = { id: string; at: number; fromBuyer: boolean; text: string; media?: ChatMedia[] };
 export type ChatView = 'waiting' | 'drafts' | 'all';
 export type ChatMp = 'all' | 'wb' | 'ozon';
 export type ChatCounts = { waiting: number; drafts: number; wb: { waiting: number; drafts: number }; ozon: { waiting: number; drafts: number } };

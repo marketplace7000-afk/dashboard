@@ -9,6 +9,7 @@
 import { wbUpstream, ozonUpstream } from '../../_proxy';
 import { fetchWithRetry } from '../fetchRetry';
 import { upsertItem, markAnsweredExcept, setCollectState, rlog, getDb, kvGet, kvSet } from './db';
+import type { MediaIn } from './media';
 
 const OZON_REVIEWS_NOTE = 'Ozon не отдаёт отзывы по API на текущей подписке — их собирает агент на ПК из кабинета (раздел «Сборщики», задание «Отзывы Ozon»).';
 
@@ -50,6 +51,17 @@ function wbProduct(p: any) {
   };
 }
 
+/** Фото отзыва WB (полный размер) и кадр из видео. */
+function wbMedia(f: any): MediaIn[] {
+  const out: MediaIn[] = [];
+  for (const p of Array.isArray(f?.photoLinks) ? f.photoLinks : []) {
+    const url = p?.fullSize || p?.miniSize;
+    if (url) out.push({ kind: 'photo', url: String(url) });
+  }
+  if (f?.video) out.push({ kind: 'video', url: f.video.previewImage ? String(f.video.previewImage) : 'none:video' });
+  return out;
+}
+
 async function collectWbFeedbacks(withHistory: boolean): Promise<{ total: number; added: number }> {
   // take до 5000 — все неотвеченные одним запросом, значит список полный.
   const open = await wbGet('/api/v1/feedbacks?isAnswered=false&take=5000&skip=0&order=dateDesc');
@@ -61,7 +73,7 @@ async function collectWbFeedbacks(withHistory: boolean): Promise<{ total: number
     const r = upsertItem({
       marketplace: 'wb', kind: 'review', externalId: String(f.id), ...wbProduct(f),
       rating: Number(f.productValuation) || null, text: f.text || '', pros: f.pros || null, cons: f.cons || null,
-      author: f.userName || null, createdAt: ts(f.createdDate), answered: false,
+      author: f.userName || null, createdAt: ts(f.createdDate), answered: false, media: wbMedia(f),
     });
     if (r.inserted) added++;
   }
@@ -291,7 +303,19 @@ export function collectAll(): Promise<CollectSummary> {
 export type OzonReviewIn = {
   uuid: string; sku: string | null; offer_id: string | null; title: string | null; url: string | null;
   text: string; rating: number | null; published_at: string | null; is_empty: boolean;
+  /** С 11.11.2026: ссылки на фото отзыва, кадры видео и число видео (агент берёт их из карточки отзыва в кабинете). */
+  photos?: string[]; video_previews?: string[]; videos?: number;
+  pros?: string | null; cons?: string | null;
 };
+
+function ozonMedia(x: OzonReviewIn): MediaIn[] {
+  const out: MediaIn[] = [];
+  for (const u of Array.isArray(x.photos) ? x.photos : []) if (typeof u === 'string' && u.startsWith("https://")) out.push({ kind: 'photo', url: u });
+  const prev = (Array.isArray(x.video_previews) ? x.video_previews : []).filter(u => typeof u === 'string' && u.startsWith("https://"));
+  for (const u of prev) out.push({ kind: 'video', url: u });
+  for (let i = prev.length; i < Math.min(Number(x.videos) || 0, 3); i++) out.push({ kind: 'video', url: 'none:video' });
+  return out;
+}
 
 /**
  * Отзывы «ждут ответа» из кабинета Ozon (сценарий ozon_reviews на ПК).
@@ -308,7 +332,8 @@ export function ingestOzonReviews(rows: OzonReviewIn[], complete: boolean): { to
       sku: x.sku ? String(x.sku) : null, offerId: x.offer_id ? String(x.offer_id) : null,
       productName: x.title ? String(x.title).slice(0, 300) : null, productUrl: x.url ? String(x.url) : null,
       rating: Number(x.rating) || null, text: String(x.text || '').slice(0, 5000),
-      createdAt: ts(x.published_at), answered: false,
+      pros: x.pros ? String(x.pros).slice(0, 3000) : null, cons: x.cons ? String(x.cons).slice(0, 3000) : null,
+      createdAt: ts(x.published_at), answered: false, media: ozonMedia(x),
     });
     if (r.inserted) added++;
   }

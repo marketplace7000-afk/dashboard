@@ -21,7 +21,15 @@ import {
 import { kvGet, kvUpdatedAt } from './db';
 import { listThreads, threadWithMessages, draftThread, sendThread, chatTick, chatCounts, chatTotals, scheduleChats } from './chats';
 import { getThread, patchThread } from './chatStore';
-import { DIRECTIONS, type ReviewCounters, type ReviewView } from '../../../shared/reviews';
+import { DIRECTIONS, type ReviewCounters, type ReviewView, type ReviewItem } from '../../../shared/reviews';
+import { mediaOfMany, getMedia, loadImage, toView } from './media';
+
+/** Фото покупателя к отзывам (без адресов — картинка отдаётся через /api/reviews/media/<id>). */
+function withMedia<T extends ReviewItem | null>(items: T[]): T[] {
+  const by = mediaOfMany(items.filter(Boolean).map(it => `item:${it!.id}`));
+  return items.map(it => { const m = it && by.get(`item:${it.id}`); return it && m?.length ? { ...it, media: m.map(toView) } : it; });
+}
+const one = (id: number) => withMedia([getItem(id)])[0];
 
 function body(req: VercelRequest): any {
   if (typeof req.body === 'string') { try { return JSON.parse(req.body || '{}'); } catch { return {}; } }
@@ -71,7 +79,7 @@ function listItems(q: Record<string, any>) {
   const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const total = (getDb().prepare(`SELECT COUNT(*) AS n FROM items ${w}`).get(...args) as any).n;
   const rows = getDb().prepare(`SELECT * FROM items ${w} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...args, limit, offset) as any[];
-  return { total, items: rows.map(rowToItem) };
+  return { total, items: withMedia(rows.map(rowToItem)) };
 }
 
 export async function handleReviews(req: VercelRequest, res: VercelResponse, rest: string[]) {
@@ -79,6 +87,17 @@ export async function handleReviews(req: VercelRequest, res: VercelResponse, res
   try {
     if (a === 'overview' && req.method === 'GET') {
       return res.status(200).json({ ok: true, counters: counters(), collect: readCollectState(), spendMonthUsd: spendThisMonth(), settings: getSettings() });
+    }
+    // Фото покупателя: уменьшенная копия (ключи площадок остаются на сервере).
+    if (a === 'media' && b && req.method === 'GET') {
+      const m = getMedia(Number(b));
+      if (!m) return res.status(404).json({ ok: false, error: 'not_found' });
+      try {
+        const im = await loadImage(m, 1600);
+        res.setHeader('Content-Type', im.mime);
+        res.setHeader('Cache-Control', 'private, max-age=604800');
+        return res.status(200).send(im.data);
+      } catch (e) { return err(res, e, 502); }
     }
     if (a === 'items' && !b && req.method === 'GET') {
       return res.status(200).json({ ok: true, ...listItems(req.query as any) });
@@ -88,22 +107,22 @@ export async function handleReviews(req: VercelRequest, res: VercelResponse, res
       if (!getItem(id)) return res.status(404).json({ ok: false, error: 'not_found' });
       if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method_not_allowed' });
       const p = body(req);
-      if (c === 'draft') return res.status(200).json({ ok: true, item: await draftOne(id, { force: true }) });
+      if (c === 'draft') { await draftOne(id, { force: true }); return res.status(200).json({ ok: true, item: one(id) }); }
       if (c === 'save') {
         const text = String(p.text ?? '').slice(0, 1000);
         const it = getItem(id)!;
         patchItem(id, { draft_answer: text, status: it.status === 'new' ? 'drafted' : it.status });
-        return res.status(200).json({ ok: true, item: getItem(id) });
+        return res.status(200).json({ ok: true, item: one(id) });
       }
       if (c === 'publish') {
         const r = await publishAnswer(id, String(p.text ?? getItem(id)!.draftAnswer ?? ''), 'owner');
         return res.status(r.ok ? 200 : 400).json(r);
       }
-      if (c === 'skip') { patchItem(id, { status: 'skipped' }); return res.status(200).json({ ok: true, item: getItem(id) }); }
+      if (c === 'skip') { patchItem(id, { status: 'skipped' }); return res.status(200).json({ ok: true, item: one(id) }); }
       if (c === 'unskip') {
         const it = getItem(id)!;
         patchItem(id, { status: it.draftAnswer ? (it.escalationReason ? 'escalated' : 'drafted') : 'new' });
-        return res.status(200).json({ ok: true, item: getItem(id) });
+        return res.status(200).json({ ok: true, item: one(id) });
       }
       return res.status(404).json({ ok: false, error: 'unknown_action' });
     }

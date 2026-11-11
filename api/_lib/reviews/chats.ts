@@ -12,8 +12,12 @@ import { getStyleProfile, syncWbChats, syncOzonChats, fillChatProducts, WB_CHAT_
 import { ozonUpstream } from '../../_proxy';
 import { codeEscalation, extractJson, FORBIDDEN } from './drafts';
 import {
-  chatDb, chatMessages, getThread, patchThread, rowToThread, replySignOf, addMessages, type ChatThread,
+  chatDb, chatMessages, chatMessagesView, chatMediaOwner, getThread, patchThread, rowToThread, replySignOf, addMessages, type ChatThread,
 } from './chatStore';
+import { mediaOfMany, imageBlocks, saveNotes, PHOTO_RULES, type MediaRow } from './media';
+
+/** Сколько фото покупателя показываем модели за один черновик (свежие — в первую очередь). */
+const CHAT_PHOTOS_MAX = 6;
 import { modelFor } from '../aiModels';
 
 /** Лимит площадки на одно сообщение чата (WB — по документации buyer-chat-api; у Ozon держим так же). */
@@ -39,6 +43,9 @@ export const CHAT_PROMPT = `Ты — сотрудник поддержки ин�
 
 ЕСЛИ НИЧЕГО НЕ ПОМОГЛО: не настаивай, что товар исправен, и не уходи в бесконечные проверки. Если по переписке покупатель уже выполнил наши рекомендации (основные способы решения из материалов товара испробованы), а проблема осталась — деликатно признай, что, похоже, дело в конкретном экземпляре, извинись за неудобство и предложи оформить возврат (или обмен) через личный кабинет площадки, коротко подскажи, как это сделать. Без обвинений покупателя и без намёков, что он что-то сделал не так.
 
+${PHOTO_RULES}
+В переписке у сообщений с вложениями стоит пометка: «Фото N» — это изображение из начала сообщения; «на фото: …» — фото из прошлой части разговора, которое уже было рассмотрено (вот его описание).
+
 ЖЁСТКИЕ ПРАВИЛА:
 - Факты о товаре (совместимость, характеристики, комплектация) — только из выданных материалов и прошлых ответов магазина. Нет данных — не выдумывай: confidence "low", спроси уточнение или скажи, что уточнишь.
 - Никаких ссылок, телефонов, мессенджеров (Telegram, WhatsApp, Макс, Viber), taplink, названий других площадок — маркетплейсы это запрещают, даже если раньше магазин так писал.
@@ -46,7 +53,7 @@ export const CHAT_PROMPT = `Ты — сотрудник поддержки ин�
 - Не груби и не иронизируй.
 
 ВЕРНИ СТРОГО JSON без пояснений вокруг:
-{"answer": "текст сообщения покупателю", "confidence": "high"|"medium"|"low", "category": "question"|"setup"|"problem"|"return"|"complaint"|"other", "needs_escalation": true|false, "escalation_reason": "до 12 слов или null", "sources_used": ["style", "card:<артикул>", "product:<артикул>", "history:<id>", "chat:<id>"]}
+{"answer": "текст сообщения покупателю", "confidence": "high"|"medium"|"low", "category": "question"|"setup"|"problem"|"return"|"complaint"|"other", "needs_escalation": true|false, "escalation_reason": "до 12 слов или null", "photos": {"1": "что видно на фото 1"}, "sources_used": ["style", "card:<артикул>", "product:<артикул>", "history:<id>", "chat:<id>"]}
 
 needs_escalation = true, если: confidence = "low", ИЛИ брак/возврат/замена/деньги, ИЛИ грубость/угрозы/суд/Роспотребнадзор/жалоба. Иначе — false.`;
 
@@ -93,7 +100,7 @@ export function chatCounts(): ChatCounts {
 export function threadWithMessages(mp: string, chatId: string) {
   const th = getThread(mp, chatId);
   if (!th) return null;
-  return { thread: th, messages: chatMessages(mp, chatId, 300) };
+  return { thread: th, messages: chatMessagesView(mp, chatId, 300) };
 }
 
 // ─── Черновик ──────────────────────────────────────────────────────────────
@@ -124,6 +131,39 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
   const chatName = (src: string) => src === 'wb_chat' ? 'чат WB' : src === 'ozon_chat' ? 'чат Ozon' : 'Telegram';
   const shorten = (t: string, n: number) => t.length > n ? `${t.slice(0, n).trimEnd()}…` : t;
 
+  // ── Фото покупателя ──
+  // Модели показываем: все фото из сообщений, на которые отвечаем (после нашего последнего ответа),
+  // и ещё не рассмотренные фото из последних 15 сообщений. Уже рассмотренные раньше идут описанием.
+  const mediaBy = mediaOfMany(msgs.map(m => chatMediaOwner(mp, m.id)));
+  let tailStart = msgs.length;
+  while (tailStart > 0 && msgs[tailStart - 1].fromBuyer) tailStart--;
+  const asImage = new Set<number>();
+  for (let i = msgs.length - 1, left = CHAT_PHOTOS_MAX; i >= 0 && left > 0; i--) {
+    if (!msgs[i].fromBuyer) continue;
+    if (i < tailStart && i < msgs.length - 15) break;
+    for (const row of mediaBy.get(chatMediaOwner(mp, msgs[i].id)) || []) {
+      if (left <= 0) break;
+      if (row.url.startsWith('none:') || (i < tailStart && row.note)) continue;
+      asImage.add(row.id); left--;
+    }
+  }
+  const toShow: { row: MediaRow; label: string }[] = [];
+  msgs.forEach(m => { for (const row of mediaBy.get(chatMediaOwner(mp, m.id)) || []) if (asImage.has(row.id)) toShow.push({ row, label: `сообщение покупателя от ${fmt(m.at)}` }); });
+  const vis = toShow.length ? await imageBlocks(toShow) : { blocks: [], shown: [] };
+  const shownBy = new Map(vis.shown.map(s => [s.row.id, s]));
+  /** Пометка о вложениях сообщения для текста переписки. */
+  const attach = (msgId: string, fromBuyer: boolean): string => {
+    const rows = mediaBy.get(chatMediaOwner(mp, msgId)) || [];
+    if (!rows.length || !fromBuyer) return '';
+    const parts = rows.map(row => {
+      const s = shownBy.get(row.id);
+      if (s) return s.ok ? `Фото ${s.n}` : `Фото ${s.n} (не открылось)`;
+      if (row.note) return `на фото: ${row.note}`;
+      return row.url.startsWith('none:') ? 'видео (недоступно)' : 'фото (не показано)';
+    });
+    return ` ⟨вложения: ${parts.join('; ')}⟩`;
+  };
+
   const dynamic = [
     `# Диалог в чате ${mp === 'wb' ? 'Wildberries' : 'Ozon'}`,
     th.offerId || th.productName
@@ -131,7 +171,7 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
       : `Покупатель: ${th.clientName || '—'}; товар: НЕ ОПРЕДЕЛЁН (площадка его не передала) — не угадывай, см. правило о товаре`,
     `\n# Переписка (старые сверху, время МСК)`,
     // Последние 15 сообщений — целиком, более ранние — коротко: нить разговора остаётся, а запрос легче.
-    ...msgs.map((m, i) => `[${fmt(m.at)}] ${m.fromBuyer ? 'Покупатель' : 'Магазин'}: ${i >= msgs.length - 15 ? m.text.slice(0, 1200) : shorten(m.text, 200)}`),
+    ...msgs.map((m, i) => `[${fmt(m.at)}] ${m.fromBuyer ? 'Покупатель' : 'Магазин'}: ${i >= msgs.length - 15 ? m.text.slice(0, 1200) : shorten(m.text, 200)}${attach(m.id, m.fromBuyer)}`),
     `\n# Что известно о товаре\n${know.text || '(ни карточки, ни материалов — опирайся только на прошлые ответы, факты не придумывай)'}`,
     past.length ? `\n# Наши ответы на похожие вопросы по этому товару\n${past.map(p => `[history:${p.id}] «${p.text || '(без текста)'}» → «${p.answer}»`).join('\n')}` : '',
     chats.length ? `\n# Как магазин отвечал в похожих переписках (часто про ДРУГИЕ товары: бери тон и подход, а не факты и инструкции)\n${chats.map(p => `[chat:${p.id}] (${chatName(p.source)}) «${p.question}» → «${p.answer}»`).join('\n')}` : '',
@@ -147,7 +187,7 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
         { type: 'text', text: CHAT_PROMPT },
         { type: 'text', text: styleBlock, cache_control: { type: 'ephemeral', ttl: '1h' } },
       ],
-      messages: [{ role: 'user', content: dynamic }],
+      messages: [{ role: 'user', content: vis.blocks.length ? [...vis.blocks, { type: 'text', text: dynamic }] : dynamic }],
     });
   } catch (e) {
     if (e instanceof BudgetExceeded) throw e;
@@ -159,6 +199,7 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
   try { j = extractJson(res.text); } catch {
     j = { answer: res.text.trim(), confidence: 'low', needs_escalation: true, escalation_reason: 'Модель вернула не JSON', sources_used: [] };
   }
+  saveNotes(vis.shown, j.photos);
   let answer = String(j.answer || '').trim();
   let cost = res.cost;
   // Длиннее лимита площадки — не обрезаем, а просим ужать (короткий дешёвый запрос только по тексту ответа).
@@ -180,6 +221,7 @@ export async function draftThread(mp: string, chatId: string): Promise<ChatThrea
     j.needs_escalation ? (j.escalation_reason || 'Модель просит проверку') : null,
     j.confidence === 'low' ? 'Низкая уверенность' : null,
     !answer ? 'Пустой ответ' : null,
+    vis.shown.some(s => !s.ok) ? 'Фото покупателя не открылось — посмотрите его на площадке' : null,
   ].filter(Boolean) as string[];
   const reason = reasons.length ? [...new Set(reasons)].join('; ') : null;
   patchThread(mp, chatId, {

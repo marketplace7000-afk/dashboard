@@ -3,6 +3,7 @@
 // «Спасибо»/«ок» после нашего ответа — разговор завершён, ответа не ждёт (08.11.2026).
 // Вид: стили .rv- в styles.css, общие детали — components/InboxUi.tsx (13.10.2026).
 import { useEffect, useRef, useState } from 'react';
+import { BuyerMedia } from '../components/BuyerMedia';
 import {
   ArrowsClockwiseIcon, WarningIcon, SpinnerIcon, PaperPlaneRightIcon, SparkleIcon, MagnifyingGlassIcon, ArrowLeftIcon, ChatsCircleIcon,
   ArrowSquareOutIcon,
@@ -261,8 +262,9 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
         {msgs.map(m => (
           <div key={m.id} className={`rv-msg ${m.fromBuyer ? 'rv-msg--buyer' : 'rv-msg--shop'}`}>
             {/^\[(фото|фото\/файл|файл[^\]]*|фото: \d+)\]$/.test(m.text.trim())
-              ? <span className="rv-muted">Фото или файл — открыть можно в кабинете {MP_NAME[th.marketplace]}</span>
-              : m.text}
+              ? (m.media?.length ? null : <span className="rv-muted">Фото или файл — открыть можно в кабинете {MP_NAME[th.marketplace]}</span>)
+              : (m.media?.length ? m.text.replace(/\s*\[фото[^\]]*\]/g, '').trim() : m.text)}
+            <BuyerMedia media={m.media} mpName={MP_NAME[th.marketplace]} />
             <time>{m.fromBuyer ? '' : 'Магазин · '}{fmt(m.at)}</time>
           </div>
         ))}

@@ -17,6 +17,7 @@ import { stripPii } from './kb';
 import { askClaude } from './claude';
 import { chatDb, addMessages, chatMessages, setThreadMeta, getThread, wbOfferByNm } from './chatStore';
 import { modelFor } from '../aiModels';
+import type { MediaIn } from './media';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const errText = (e: unknown) => String((e as Error)?.message ?? e).slice(0, 200);
@@ -127,7 +128,9 @@ export function cardOfferIds(): string[] {
 }
 
 // ─── 2. Чаты покупателей ────────────────────────────────────────────────────
-type ChatMsg = { id: string; at: number; fromBuyer: boolean; text: string };
+type ChatMsg = { id: string; at: number; fromBuyer: boolean; text: string; media?: MediaIn[] };
+/** Пометки о вложениях («[фото: 2]», «[файл: …]») — в базу знаний их не берём. */
+const stripMarks = (t: string) => t.replace(/\s*\[(фото|файл|карточка)[^\]]*\]/g, '').trim();
 
 /**
  * Пары из ленты одного чата: подряд идущие сообщения покупателя → ближайший ответ магазина.
@@ -172,15 +175,25 @@ export function wbChatHeaders(): Record<string, string> {
   return own ? { Authorization: own } : (wbUpstream('feedbacks').headers as any);
 }
 
-/** Текст события WB: текст сообщения или пометка о вложении. */
+/** Текст события WB: текст сообщения и пометка о вложении (с 11.11.2026 пометка ставится и при наличии текста). */
 function wbEventText(e: any): string {
   const t = String(e.message?.text || '').trim();
-  if (t) return t;
   const att = e.message?.attachments || {};
-  if (att.images?.length) return `[фото: ${att.images.length}]`;
-  if (att.files?.length) return `[файл: ${att.files.map((f: any) => f.name).filter(Boolean).join(', ') || att.files.length}]`;
-  if (att.goodCard) return '[карточка товара]';
-  return '';
+  const mark = att.images?.length ? `[фото: ${att.images.length}]`
+    : att.files?.length ? `[файл: ${att.files.map((f: any) => f.name).filter(Boolean).join(', ') || att.files.length}]`
+    : (!t && att.goodCard) ? '[карточка товара]' : '';
+  return [t, mark].filter(Boolean).join(' ');
+}
+
+/** Картинки события WB: фото и файлы-картинки (скачиваются по downloadID токеном чатов). */
+function wbEventMedia(e: any): MediaIn[] {
+  const att = e.message?.attachments || {};
+  const out: MediaIn[] = [];
+  for (const im of att.images || []) if (im?.downloadID) out.push({ kind: 'photo', url: `wbdl:${im.downloadID}` });
+  for (const f of att.files || []) {
+    if (f?.downloadID && (/^image\//i.test(String(f.contentType || '')) || /\.(jpe?g|png|webp|heic|gif)$/i.test(String(f.name || '')))) out.push({ kind: 'photo', url: `wbdl:${f.downloadID}` });
+  }
+  return out;
 }
 
 let wbSyncing: Promise<{ events: number; pairs: number }> | null = null;
@@ -215,6 +228,34 @@ async function syncWbChatsOnce(maxPages: number): Promise<{ events: number; pair
   let next = kvGet<number | null>('wbchat_next', null);
   let events = 0;
   const touched = new Set<string>();
+  // Разово (11.11.2026): фото из сообщений последних 14 дней — раньше от них сохранялась только пометка «[фото]».
+  // Курсор событий WB — это время в миллисекундах, поэтому перечитываем ленту с отметки «14 дней назад».
+  if (next && !kvGet<boolean>('wbchat_media_backfill_v1', false)) {
+    kvSet('wbchat_media_backfill_v1', true);
+    try {
+      let from = Date.now() - 14 * 86400_000;
+      for (let page = 0; page < 80 && from < next; page++) {
+        const j = await get(`/api/v1/seller/events?next=${from}`);
+        const evs: any[] = j?.result?.events || [];
+        const byChat = new Map<string, ChatMsg[]>();
+        for (const e of evs) {
+          if (e.eventType !== 'message' || !e.chatID) continue;
+          const media = wbEventMedia(e);
+          const text = wbEventText(e);
+          if (!media.length || !text) continue;
+          const arr = byChat.get(e.chatID) || [];
+          arr.push({ id: String(e.eventID), at: Number(e.addTimestamp) || Date.parse(e.addTime) || 0, fromBuyer: e.sender === 'client', text: text.slice(0, 2000), media });
+          byChat.set(e.chatID, arr);
+        }
+        for (const [id, arr] of byChat) addMessages('wb', id, arr);
+        const nx = Number(j?.result?.next) || 0;
+        if (!evs.length || !nx || nx <= from) break;
+        from = nx;
+        await sleep(1200);
+      }
+      rlog('info', 'Чаты WB: фото за 14 дней догружены');
+    } catch (e) { rlog('warn', 'Чаты WB: догрузка фото не удалась', { error: errText(e) }); }
+  }
   for (let page = 0; page < maxPages; page++) {
     const j = await get(`/api/v1/seller/events${next ? `?next=${next}` : ''}`);
     const evs: any[] = j?.result?.events || [];
@@ -224,7 +265,7 @@ async function syncWbChatsOnce(maxPages: number): Promise<{ events: number; pair
       const text = wbEventText(e);
       if (!text) continue;
       const arr = byChat.get(e.chatID) || [];
-      arr.push({ id: String(e.eventID), at: Number(e.addTimestamp) || Date.parse(e.addTime) || 0, fromBuyer: e.sender === 'client', text: text.slice(0, 2000) });
+      arr.push({ id: String(e.eventID), at: Number(e.addTimestamp) || Date.parse(e.addTime) || 0, fromBuyer: e.sender === 'client', text: text.slice(0, 2000), media: wbEventMedia(e) });
       byChat.set(e.chatID, arr);
     }
     for (const [id, arr] of byChat) {
@@ -241,7 +282,7 @@ async function syncWbChatsOnce(maxPages: number): Promise<{ events: number; pair
   for (const id of touched) {
     const th = getThread('wb', id);
     // Пометки о вложениях в базу знаний не берём.
-    pairs += savePairs('wb_chat', id, th?.offerId || null, chatMessages('wb', id).filter(m => !/^\[(фото|файл|карточка)/.test(m.text)));
+    pairs += savePairs('wb_chat', id, th?.offerId || null, chatMessages('wb', id).map(m => ({ ...m, text: stripMarks(m.text) })).filter(m => m.text));
   }
   return { events, pairs };
 }
@@ -249,6 +290,13 @@ async function syncWbChatsOnce(maxPages: number): Promise<{ events: number; pair
 /** Текст сообщения Ozon: картинки-ссылки ![](…) → «[фото]». */
 export function ozonChatText(s: string): string {
   return String(s || '').replace(/!\[[^\]]*\]\([^)\s]*\)/g, '[фото]').trim();
+}
+
+/** Ссылки на фото из сообщения Ozon — только вложения чата на адресе самого Ozon. */
+export function ozonChatMedia(s: string): MediaIn[] {
+  const out: MediaIn[] = [];
+  for (const m of String(s || '').matchAll(/!\[[^\]]*\]\((https:\/\/api-seller\.ozon\.ru\/v\d+\/chat\/file\/[^)\s]+)\)/g)) out.push({ kind: 'photo', url: m[1] });
+  return out;
 }
 
 /** Название и артикул Ozon по sku: карта активных товаров + карточки (в т.ч. архивные). */
@@ -360,6 +408,13 @@ async function syncOzonChatsOnce(maxChats: number): Promise<{ chats: number; pai
   chatDb();
   // v2: с 06.10 сообщения Ozon хранятся в chat_messages (раньше — только пары), поэтому новый список «увиденных».
   const seen = kvGet<Record<string, string>>('ozchat_seen2', {});
+  // Разово (11.11.2026): диалоги, где покупатель ждёт ответа, перечитываем — чтобы подтянуть их фото.
+  if (!kvGet<boolean>('ozchat_media_backfill_v1', false)) {
+    kvSet('ozchat_media_backfill_v1', true);
+    const rows = chatDb().prepare(`SELECT chat_id FROM chat_threads WHERE marketplace = 'ozon' AND last_from_buyer = 1
+      AND status IN ('new','drafted','escalated') AND last_at >= ?`).all(Date.now() - 14 * 86400_000) as any[];
+    for (const r of rows) delete seen[r.chat_id];
+  }
   const todo: { id: string; last: string }[] = [];
   let cursor = '';
   for (let page = 0; page < 50 && todo.length < maxChats; page++) {
@@ -387,10 +442,11 @@ async function syncOzonChatsOnce(maxChats: number): Promise<{ chats: number; pai
         if (m?.context?.sku && !sku) sku = String(m.context.sku);
         if (!/customer|seller/i.test(type)) continue;  // уведомления, бот, поддержка — не переписка
         // Фото покупателя Ozon присылает ссылкой-разметкой ![](https://api-seller.ozon.ru/…) — это не текст.
-        let text = ozonChatText(Array.isArray(m?.data) ? m.data.join('\n') : String(m?.data || ''));
+        const raw = Array.isArray(m?.data) ? m.data.join('\n') : String(m?.data || '');
+        let text = ozonChatText(raw);
         if (!text && (m?.images?.length || m?.files?.length)) text = '[фото/файл]';
         if (!text) continue;
-        msgs.push({ id: String(m.message_id), at: Date.parse(m.created_at) || 0, fromBuyer: /customer/i.test(type), text: text.slice(0, 2000) });
+        msgs.push({ id: String(m.message_id), at: Date.parse(m.created_at) || 0, fromBuyer: /customer/i.test(type), text: text.slice(0, 2000), media: ozonChatMedia(raw) });
       }
       // Пометка о товаре обычно в начале чата: в длинной переписке она старше последних 100 сообщений.
       // Один раз на чат, чтобы не листать историю при каждом новом сообщении.
@@ -409,7 +465,7 @@ async function syncOzonChatsOnce(maxChats: number): Promise<{ chats: number; pai
       const { offerId, name } = ozonOfferName(sku, skuMap);
       setThreadMeta('ozon', id, { replySign: id, sku, offerId, productName: name });
       messages += addMessages('ozon', id, msgs);
-      pairs += savePairs('ozon_chat', id, offerId, msgs.filter(m => !/^\[(фото|файл)/.test(m.text)));
+      pairs += savePairs('ozon_chat', id, offerId, msgs.map(m => ({ ...m, text: stripMarks(m.text) })).filter(m => m.text));
       seen[id] = last;
     } catch (e) {
       rlog('warn', 'Ozon: история чата не получена', { error: errText(e) });

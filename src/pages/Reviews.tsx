@@ -2,6 +2,7 @@
 // Сбор, черновики и публикация — на сервере (/api/reviews/*); здесь только экран.
 // Вид: стили .rv- в styles.css, общие детали — components/InboxUi.tsx (13.10.2026).
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { BuyerMedia } from '../components/BuyerMedia';
 import {
   StarIcon, ArrowsClockwiseIcon, WarningIcon, SpinnerIcon, PaperPlaneRightIcon, SparkleIcon, ArrowSquareOutIcon,
   MagnifyingGlassIcon, XIcon,
@@ -362,6 +363,7 @@ function ItemCard({ it, selected, onSelect, onReplace, onDrop }: {
             {it.cons && <div><dt>Недостатки</dt><dd>{it.cons}</dd></div>}
           </dl>
         )}
+        <BuyerMedia media={it.media} mpName={it.marketplace === 'wb' ? 'WB' : 'Ozon'} />
       </div>
 
       {answered ? (

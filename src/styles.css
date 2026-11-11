@@ -1318,6 +1318,17 @@ code {
 .rv-page .rv-back { display: none; padding: 8px; min-height: 40px; }
 .rv-messages { flex: 1; display: flex; flex-direction: column; gap: 10px; max-height: 56vh; min-height: 240px; overflow: auto; padding: 20px 18px; background: var(--rv-soft); }
 .rv-msg { max-width: min(78%, 620px); padding: 10px 14px 8px; border-radius: 18px; font-size: 17px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Фото покупателя (отзывы и чаты) */
+.rv-media { margin-top: 10px; display: grid; gap: 8px; white-space: normal; }
+.rv-media-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.rv-media-thumb { position: relative; display: block; width: 96px; height: 96px; border-radius: 12px; overflow: hidden; background: #eef1f5; border: 1px solid rgba(15,23,42,.08); }
+.rv-media-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rv-media-thumb--none { display: grid; place-items: center; font-size: 15px; color: var(--muted); }
+.rv-media-tag { position: absolute; left: 6px; bottom: 6px; padding: 1px 7px; border-radius: 999px; background: rgba(15,23,42,.72); color: #fff; font-size: 13px; line-height: 1.5; }
+.rv-media-note { font-size: 15px; line-height: 1.45; color: var(--muted); max-width: 80ch; overflow-wrap: anywhere; }
+.rv-media-note b { font-weight: 600; color: inherit; }
+.rv-media-note--bad { color: #b42318; }
+@media (max-width: 760px) { .rv-media-thumb { width: 84px; height: 84px; } }
 .rv-msg time { display: block; margin-top: 4px; font-size: 15px; color: var(--muted); text-align: right; }
 .rv-msg--buyer { align-self: flex-start; background: #fff; border-bottom-left-radius: 6px; box-shadow: 0 1px 2px rgba(15,23,42,.06); }
 .rv-msg--shop { align-self: flex-end; background: color-mix(in srgb, var(--mp) 11%, #fff); border-bottom-right-radius: 6px; }

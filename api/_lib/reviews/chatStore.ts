@@ -7,8 +7,10 @@
  */
 import { getDb, kvGet, safeJson } from './db';
 import { rnpProductLookup } from '../rnp';
+import { addMedia, mediaOfMany, toView, type MediaIn, type MediaView } from './media';
 
-export type ChatMsgRow = { id: string; at: number; fromBuyer: boolean; text: string };
+export type ChatMsgRow = { id: string; at: number; fromBuyer: boolean; text: string; media?: MediaIn[] };
+export const chatMediaOwner = (mp: string, msgId: string) => `chat:${mp}:${msgId}`;
 
 let ready = false;
 export function chatDb(): any {
@@ -75,14 +77,36 @@ export function addMessages(mp: 'wb' | 'ozon', chatId: string, msgs: ChatMsgRow[
   // Наше сообщение, отправленное из дашборда, лежит с временным id «local:…» — заменяем настоящим событием.
   const dropLocal = d.prepare("DELETE FROM chat_messages WHERE marketplace = ? AND chat_id = ? AND msg_id LIKE 'local:%' AND text = ?");
   let n = 0;
+  let lateMedia = 0;
   for (const m of msgs) {
     if (!m.text.trim()) continue;
     if (!m.fromBuyer && !m.id.startsWith('local:')) dropLocal.run(mp, chatId, m.text.slice(0, 4000));
     const r = ins.run(mp, chatId, m.id, m.at, m.fromBuyer ? 1 : 0, m.text.slice(0, 4000));
     if (r.changes) n++;
+    // Фото нашлись у сообщения, которое уже лежало в базе без них (до 11.11.2026 хранилась только пометка «[фото]»).
+    if (addMedia(chatMediaOwner(mp, m.id), m.media) && !r.changes && m.fromBuyer) lateMedia = Math.max(lateMedia, m.at);
   }
   if (n) touchThread(mp, chatId);
+  // Черновик к этим сообщениям написан без фото — переписать (только свежие диалоги, где покупатель ждёт ответа).
+  if (lateMedia) {
+    d.prepare(`UPDATE chat_threads SET status = 'new', draft_attempts = 0 WHERE marketplace = ? AND chat_id = ?
+      AND status IN ('drafted','escalated') AND last_from_buyer = 1 AND last_at >= ?
+      AND NOT EXISTS (SELECT 1 FROM chat_messages m WHERE m.marketplace = chat_threads.marketplace
+        AND m.chat_id = chat_threads.chat_id AND m.from_buyer = 0 AND m.at > ?)`)
+      .run(mp, chatId, Date.now() - 48 * 3600_000, lateMedia);
+  }
   return n;
+}
+
+/** Сообщения диалога для кабинета: с фото (без адресов) и тем, что агент на них увидел. */
+export function chatMessagesView(mp: string, chatId: string, limit = 300): (Omit<ChatMsgRow, 'media'> & { media?: MediaView[] })[] {
+  const msgs = chatMessages(mp, chatId, limit);
+  const by = mediaOfMany(msgs.map(m => chatMediaOwner(mp, m.id)));
+  return msgs.map(m => {
+    const list = by.get(chatMediaOwner(mp, m.id));
+    const { media: _in, ...rest } = m;
+    return list?.length ? { ...rest, media: list.map(toView) } : rest;
+  });
 }
 
 export function chatMessages(mp: string, chatId: string, limit = 500): ChatMsgRow[] {

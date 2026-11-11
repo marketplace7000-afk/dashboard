@@ -8,8 +8,9 @@
  *                     у новинки цена плановая, её задают вручную;
  *   заказы, реклама — база РНП, сбор раз в 2 часа. Месяцы до октября 2026 — из отчёта финансиста
  *                     (заказы в РНП есть только с 12.09);
- *   маржа           — таблица финансиста, столбец «Маржа с налогом, %». Точную маржу по свежим
- *                     заказам посчитать нельзя: выкупы и удержания становятся известны позже.
+ *   маржа           — таблица финансиста: «Маржа» в рублях ÷ «Выручка», как считает сам финансист
+ *                     (итог раздела — по всему кабинету за месяц, у товара — по его строкам).
+ *                     Точную маржу по свежим заказам посчитать нельзя: выкупы и удержания становятся известны позже.
  * Хранение — .av-cache/plan.sqlite: при выкладке сайта папка не затирается.
  */
 import { join } from 'node:path';
@@ -34,9 +35,9 @@ const API_FROM_MONTH = '2026-10';
 const FIN_EVERY_MS = 60 * 60_000;
 
 /** Столбцы листов финансиста, считая с нуля (сверено с заголовками 02.11.2026). */
-const FIN_LAYOUT: Record<PlanMp, { sheet: string; range: string; month: number; article: number; orders: number; rub: number; ads: number; marginRub: number; marginPct: number }> = {
-  wb: { sheet: 'АБС_WB_артикулы', range: 'A7:BK8000', month: 1, article: 5, orders: 7, rub: 8, ads: 22, marginRub: 56, marginPct: 58 },
-  ozon: { sheet: 'ABC_Ozon', range: 'A8:BK8000', month: 1, article: 4, orders: 6, rub: 7, ads: 23, marginRub: 54, marginPct: 56 },
+const FIN_LAYOUT: Record<PlanMp, { sheet: string; range: string; month: number; article: number; orders: number; rub: number; revenue: number; ads: number; marginRub: number }> = {
+  wb: { sheet: 'АБС_WB_артикулы', range: 'A7:BK8000', month: 1, article: 5, orders: 7, rub: 8, revenue: 15, ads: 22, marginRub: 56 },
+  ozon: { sheet: 'ABC_Ozon', range: 'A8:BK8000', month: 1, article: 4, orders: 6, rub: 7, revenue: 15, ads: 23, marginRub: 54 },
 };
 
 let db: any = null;
@@ -70,6 +71,8 @@ function getDb(): any {
   `);
   // Архив (02.11.2026): товар скрыт начиная с этого месяца, прошлые месяцы не меняются.
   try { db.exec('ALTER TABLE plan_article ADD COLUMN archived_from TEXT'); } catch { /* столбец уже есть */ }
+  // Выручка финансиста (11.11.2026): маржа = маржа ₽ ÷ выручка. Новый столбец — перечитать отчёт сразу.
+  try { db.exec('ALTER TABLE plan_fin ADD COLUMN revenue REAL'); db.exec("DELETE FROM plan_meta WHERE key = 'fin:at'"); } catch { /* столбец уже есть */ }
   return db;
 }
 const metaGet = (k: string): string | null => (getDb().prepare('SELECT value FROM plan_meta WHERE key = ?').get(k) as any)?.value ?? null;
@@ -91,25 +94,27 @@ async function refreshFinance(): Promise<void> {
   for (const mp of ['wb', 'ozon'] as const) {
     const L = FIN_LAYOUT[mp];
     const rows = await readSheetRange(FIN_SHEET_ID, `'${L.sheet}'!${L.range}`);
-    const by = new Map<string, { orders: number; rub: number; ads: number; marginRub: number; marginPct: number | null; top: number }>();
+    const by = new Map<string, { orders: number; rub: number; revenue: number; ads: number; marginRub: number }>();
     for (const r of rows) {
       const m = Number(r?.[L.month]);
       const art = up(r?.[L.article]);
       if (!art || !Number.isInteger(m) || m < 1 || m > 12) continue;
       const key = `${FIN_YEAR}-${String(m).padStart(2, '0')}|${art}`;
-      const x = by.get(key) ?? { orders: 0, rub: 0, ads: 0, marginRub: 0, marginPct: null, top: -1 };
-      const orders = num(r[L.orders]);
-      x.orders += orders; x.rub += num(r[L.rub]); x.ads += num(r[L.ads]); x.marginRub += num(r[L.marginRub]);
-      // Артикул изредка занимает несколько строк: процент берём из строки с наибольшими заказами.
-      if (orders > x.top && r[L.marginPct] !== '' && r[L.marginPct] !== undefined) { x.marginPct = num(r[L.marginPct]) * 100; x.top = orders; }
+      const x = by.get(key) ?? { orders: 0, rub: 0, revenue: 0, ads: 0, marginRub: 0 };
+      // Артикул бывает в нескольких строках (несколько ИП): суммируем.
+      x.orders += num(r[L.orders]); x.rub += num(r[L.rub]); x.revenue += num(r[L.revenue]); x.ads += num(r[L.ads]); x.marginRub += num(r[L.marginRub]);
       by.set(key, x);
     }
     if (!by.size) throw new Error(`лист «${L.sheet}» пуст или изменился`);
-    const ins = d.prepare('INSERT INTO plan_fin (mp, month, article, orders, rub, ads, margin_rub, margin_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const ins = d.prepare('INSERT INTO plan_fin (mp, month, article, orders, rub, ads, margin_rub, margin_pct, revenue) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     d.exec('BEGIN');
     try {
       d.prepare('DELETE FROM plan_fin WHERE mp = ?').run(mp);
-      for (const [k, x] of by) { const [month, art] = k.split('|'); ins.run(mp, month, art, x.orders, x.rub, x.ads, x.marginRub, x.marginPct); }
+      for (const [k, x] of by) {
+        const [month, art] = k.split('|');
+        // Как в таблице: «Маржа с налогом, %» = маржа ÷ выручка. Без выручки (ещё нет выкупов) процента нет.
+        ins.run(mp, month, art, x.orders, x.rub, x.ads, x.marginRub, x.revenue > 0 ? (x.marginRub / x.revenue) * 100 : null, x.revenue);
+      }
       d.exec('COMMIT');
     } catch (e) { d.exec('ROLLBACK'); throw e; }
   }
@@ -133,11 +138,18 @@ function finByArticle(mp: PlanMp, month: string): Map<string, FinRow> {
 }
 
 /** Последняя известная маржа каждого артикула не позже месяца `month`. */
-function latestMargins(mp: PlanMp, month: string): Map<string, { pct: number; rub: number; month: string }> {
-  const rows = getDb().prepare(`SELECT article, month, margin_rub, margin_pct FROM plan_fin WHERE mp = ? AND month <= ? AND margin_pct IS NOT NULL AND orders > 0 ORDER BY month DESC`).all(mp, month) as any[];
-  const out = new Map<string, { pct: number; rub: number; month: string }>();
-  for (const r of rows) if (!out.has(String(r.article))) out.set(String(r.article), { pct: Number(r.margin_pct), rub: Number(r.margin_rub) || 0, month: String(r.month) });
+function latestMargins(mp: PlanMp, month: string): Map<string, { pct: number; rub: number; rev: number; month: string }> {
+  const rows = getDb().prepare(`SELECT article, month, margin_rub, margin_pct, revenue FROM plan_fin WHERE mp = ? AND month <= ? AND margin_pct IS NOT NULL AND revenue > 0 ORDER BY month DESC`).all(mp, month) as any[];
+  const out = new Map<string, { pct: number; rub: number; rev: number; month: string }>();
+  for (const r of rows) if (!out.has(String(r.article))) out.set(String(r.article), { pct: Number(r.margin_pct), rub: Number(r.margin_rub) || 0, rev: Number(r.revenue) || 0, month: String(r.month) });
   return out;
+}
+
+/** Маржа всего кабинета за месяц так, как её видит финансист: Σ маржи ÷ Σ выручки по всем строкам листа.
+ *  Если за месяц выручки ещё нет — последний месяц, где она есть. */
+function finCabinetMargin(mp: PlanMp, month: string): { rub: number; rev: number } | null {
+  const r = getDb().prepare('SELECT SUM(margin_rub) rub, SUM(revenue) rev FROM plan_fin WHERE mp = ? AND month = (SELECT MAX(month) FROM plan_fin WHERE mp = ? AND month <= ? AND revenue > 0)').get(mp, mp, month) as any;
+  return r && Number(r.rev) > 0 ? { rub: Number(r.rub) || 0, rev: Number(r.rev) } : null;
 }
 
 const STATUS = (s: unknown): PlanStatus => { const v = String(s ?? '').trim(); return v === 'Вывод' ? 'Вывод' : v === 'Новинка' ? 'Новинка' : 'Рабочий'; };
@@ -284,7 +296,7 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; ar
       fact, factRub, pct: pctOf(fact, qty), pctRub: pctOf(factRub, planRub),
       expected: pace.expected, forecast: pace.forecast, needPerDay: pace.needPerDay, pace7, behind: pace.behind,
       ads, drr: factRub > 0 ? (ads / factRub) * 100 : null,
-      marginPct: m ? m.pct : null, marginRub: m ? m.rub : null, marginMonth: m ? m.month : null,
+      marginPct: m ? m.pct : null, marginRub: m ? m.rub : null, marginRev: m ? m.rev : null, marginMonth: m ? m.month : null,
       stock, stockFbo, stockFbs, transit, stockShort: !isPast && stock !== null && remain > stock + (transit ?? 0), stockShortShared: false,
       prevFact: pf === null ? null : Math.round(pf), orders30: sum(article, addDays(today, -30), yesterday).cnt, daily,
     });
@@ -312,7 +324,8 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; ar
   return { rows, archived, head, factSource, catalog, approxTo, finMonth };
 }
 
-function totalsOf(rows: PlanRow[], month: string, today: string): PlanTotals {
+/** cabinet — маржа кабинетов из отчёта финансиста; без неё (выборка по артикулу) — по строкам товаров. */
+function totalsOf(rows: PlanRow[], month: string, today: string, cabinet?: ({ rub: number; rev: number } | null)[]): PlanTotals {
   const planned = rows.filter(r => r.qty > 0);
   const qty = planned.reduce((s, r) => s + r.qty, 0);
   const planRub = planned.reduce((s, r) => s + r.planRub, 0);
@@ -326,8 +339,8 @@ function totalsOf(rows: PlanRow[], month: string, today: string): PlanTotals {
   const pace = calcPace({ qty, month, today, factToYesterday, factTotal: fact, pace7 });
   const avg = fact > 0 ? factRub / fact : (qty > 0 ? planRub / qty : 0);
   const left = Math.max(0, qty - factToYesterday);
-  const marginBase = rows.filter(r => r.marginPct !== null && r.factRub > 0);
-  const marginW = marginBase.reduce((s, r) => s + r.factRub, 0);
+  const mBase = cabinet ? cabinet.filter((x): x is { rub: number; rev: number } => !!x) : rows.filter(r => r.marginRev !== null && r.marginRev > 0).map(r => ({ rub: r.marginRub ?? 0, rev: r.marginRev ?? 0 }));
+  const mRub = mBase.reduce((s, x) => s + x.rub, 0), mRev = mBase.reduce((s, x) => s + x.rev, 0);
   const needSum = planned.reduce((s, r) => s + (r.needPerDay ?? 0), 0);
   const rubLeft = Math.max(0, planRub - rows.reduce((s, r) => s + (r.daily.length ? r.daily.filter(x => x.date <= yesterday).reduce((a, x) => a + x.cnt, 0) * (r.fact ? r.factRub / r.fact : 0) : r.factRub), 0));
   return {
@@ -336,7 +349,7 @@ function totalsOf(rows: PlanRow[], month: string, today: string): PlanTotals {
     forecastRub: pace.forecast === null ? null : pace.forecast * avg,
     needPerDay: pace.needPerDay, needRubPerDay: pace.daysLeft > 0 && left >= 0 && qty > 0 ? rubLeft / pace.daysLeft : null, pace7,
     ads, drr: factRub > 0 ? (ads / factRub) * 100 : null,
-    marginPct: marginW > 0 ? marginBase.reduce((s, r) => s + (r.marginPct ?? 0) * r.factRub, 0) / marginW : null,
+    marginPct: mRev > 0 ? (mRub / mRev) * 100 : null, marginRub: mRev > 0 ? mRub : null,
     needSumByArticle: pace.needPerDay === null ? null : needSum,
   };
 }
@@ -358,9 +371,11 @@ function mergeRows(wb: PlanRow[], oz: PlanRow[]): PlanRow[] {
     const x = by.get(r.article);
     const part = { qty: r.qty, fact: r.fact };
     if (!x) { by.set(r.article, { ...r, mp: 'all', [r.mp as PlanMp]: part, daily: r.daily.map(d => ({ ...d })) }); continue; }
-    const marginBase = x.factRub + r.factRub;
-    x.marginPct = x.marginPct !== null && r.marginPct !== null && marginBase > 0
-      ? (x.marginPct * x.factRub + r.marginPct * r.factRub) / marginBase : x.marginPct ?? r.marginPct;
+    if (r.marginRev !== null) {
+      x.marginRub = (x.marginRub ?? 0) + (r.marginRub ?? 0); x.marginRev = (x.marginRev ?? 0) + r.marginRev;
+      x.marginPct = x.marginRev > 0 ? (x.marginRub / x.marginRev) * 100 : null;
+      if (!x.marginMonth || (r.marginMonth && r.marginMonth > x.marginMonth)) x.marginMonth = r.marginMonth;
+    }
     x.qty += r.qty; x.planRub += r.planRub; x.fact += r.fact; x.factRub += r.factRub; x.ads += r.ads;
     x.needPerDay = x.needPerDay === null && r.needPerDay === null ? null : (x.needPerDay ?? 0) + (r.needPerDay ?? 0);
     x.pace7 = x.pace7 === null && r.pace7 === null ? null : (x.pace7 ?? 0) + (r.pace7 ?? 0);
@@ -430,7 +445,7 @@ export async function getPlan(viewIn: unknown, monthIn: unknown, user: PlanUser)
     canApprove: view !== 'all' && user.role === 'owner',
     factSource: parts[0].factSource,
     finance: { month: parts[0].finMonth, approxTo: parts[0].approxTo, checkedAt: Number(metaGet('fin:at')) || null, error: err || null },
-    rows, totals: totalsOf(rows, month, today), catalog, months: knownMonths(), archived: parts.flatMap(x => x.archived),
+    rows, totals: totalsOf(rows, month, today, (view === 'all' ? ['wb', 'ozon'] as const : [view]).map(mp => finCabinetMargin(mp, month))), catalog, months: knownMonths(), archived: parts.flatMap(x => x.archived),
   };
 }
 
@@ -446,7 +461,7 @@ export async function getPlanStats(viewIn: unknown, articleIn: unknown): Promise
     const parts = view === 'all' ? [await buildMp('wb', month), await buildMp('ozon', month)] : [await buildMp(view, month)];
     let rows = view === 'all' ? mergeRows(parts[0].rows, parts[1].rows) : parts[0].rows;
     if (article) rows = rows.filter(r => r.article === article);
-    const t = totalsOf(rows, month, today);
+    const t = totalsOf(rows, month, today, article ? undefined : (view === 'all' ? ['wb', 'ozon'] as const : [view]).map(mp => finCabinetMargin(mp, month)));
     const states = new Set(parts.map(p => (rowsHaveLine(p.rows) ? p.head.state : 'none')));
     const state = (states.size > 1 ? 'mixed' : [...states][0]) as PlanStatRow['state'];
     out.push({ month, state, qty: t.qty, planRub: t.planRub, fact: t.fact, factRub: t.factRub, pct: t.pct, pctRub: t.pctRub, ads: t.ads, drr: t.drr, marginPct: t.marginPct, factSource: parts[0].factSource });

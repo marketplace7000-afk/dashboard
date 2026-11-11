@@ -253,8 +253,9 @@ function MonthPlan({ view, month, setMonth }: { view: PlanView; month: string; s
               sub={t.forecast === null ? '' : `прогноз: ${n0(t.forecast)} шт`} note={t.forecastRub === null ? undefined : `≈ ${rub(t.forecastRub)}`} />}
             <Kpi label="Реклама" main={rub(t.ads)} sub={`${pct(t.drr)} от заказов`} />
             <Kpi label="Маржа, финансист" main={pct(t.marginPct)}
-              sub={data.finance.approxTo ? `примерно по ${ddmm(data.finance.approxTo)}` : data.finance.month ? shortMonth(data.finance.month) : 'отчёта ещё нет'}
-              title="Маржа с налогом из таблицы финансиста, средняя с весом заказов в рублях. Обновляется, когда финансист заполняет отчёт" />
+              sub={t.marginRub === null ? '' : rub(t.marginRub)}
+              note={data.finance.approxTo ? `примерно по ${ddmm(data.finance.approxTo)}` : data.finance.month ? shortMonth(data.finance.month) : 'отчёта ещё нет'}
+              title="Как в отчёте финансиста: маржа с налогом в рублях ÷ выручка, по всему кабинету за месяц. Обновляется, когда финансист заполняет отчёт" />
           </div>
         </>
       )}
@@ -290,7 +291,7 @@ function MonthPlan({ view, month, setMonth }: { view: PlanView; month: string; s
                     <th>{sortBtn('factRub', 'Факт, ₽')}</th>
                     <th className="l" title="Чёрная риска: сколько должно быть к вчерашнему дню при ровных продажах">{sortBtn('pct', 'Выполнение')}</th>
                     <th>{sortBtn('drr', 'Реклама', 'Расход на рекламу ÷ заказы в рублях')}</th>
-                    <th>{sortBtn('marginPct', 'Маржа', 'Из отчёта финансиста, последний заполненный месяц')}</th>
+                    <th>{sortBtn('marginPct', 'Маржа', 'Из отчёта финансиста: маржа ÷ выручка товара, последний месяц с продажами')}</th>
                     <th className="l">Статус</th>
                     <th aria-label="Действия" />
                   </tr>

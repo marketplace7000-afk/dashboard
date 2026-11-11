@@ -252,7 +252,7 @@ function MonthPlan({ view, month, setMonth }: { view: PlanView; month: string; s
             {data.period === 'current' && <Kpi label="Темп за 7 дней, в день" main={t.pace7 === null ? '–' : `${n1(t.pace7)} шт`} tone={t.needPerDay !== null && t.pace7 !== null && t.pace7 < t.needPerDay ? 'bad' : 'good'}
               sub={t.forecast === null ? '' : `прогноз: ${n0(t.forecast)} шт`} note={t.forecastRub === null ? undefined : `≈ ${rub(t.forecastRub)}`} />}
             <Kpi label="Реклама" main={rub(t.ads)} sub={`${pct(t.drr)} от заказов`} />
-            <Kpi label="Маржа, финансист" main={pct(t.marginPct)}
+            <Kpi label="Маржа, финансист" main={pct1(t.marginPct)}
               sub={t.marginRub === null ? '' : rub(t.marginRub)}
               note={data.finance.approxTo ? `примерно по ${ddmm(data.finance.approxTo)}` : data.finance.month ? shortMonth(data.finance.month) : 'отчёта ещё нет'}
               title="Как в отчёте финансиста: маржа с налогом в рублях ÷ выручка, по всему кабинету за месяц. Обновляется, когда финансист заполняет отчёт" />
@@ -673,7 +673,7 @@ function Stats({ view, onOpen }: { view: PlanView; onOpen: (m: string) => void }
                   <td>{n0(r.qty)}</td><td><b>{n0(r.fact)}</b></td>
                   <td><b className={pctClass(r.pct, null, r.qty)}>{pct(r.pct)}</b></td>
                   <td>{rub(r.planRub)}</td><td>{rub(r.factRub)}</td><td>{pct(r.pctRub)}</td>
-                  <td>{rub(r.ads)}</td><td>{pct(r.drr)}</td><td>{pct(r.marginPct)}</td>
+                  <td>{rub(r.ads)}</td><td>{pct(r.drr)}</td><td>{pct1(r.marginPct)}</td>
                   <td className="l muted">{r.factSource === 'finance' ? 'отчёт финансиста' : 'API площадки'}</td>
                 </tr>
               ))}

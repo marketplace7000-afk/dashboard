@@ -211,7 +211,16 @@ async function collectOzonQuestionHistory(skuMap: Record<string, string>, recent
       getDb().prepare('UPDATE items SET mp_answer = ? WHERE id = ?').run(text || '', row.id);
       await new Promise(res => setTimeout(res, 300));
     } catch (e) {
-      rlog('warn', 'Ozon: не удалось получить ответ на вопрос', { id: row.external_id, error: String((e as Error).message) });
+      const msg = String((e as Error).message);
+      // 12.11.2026: вопрос удалён на Ozon (покупателем или модерацией) после того, как мы его забрали.
+      // Раньше такой вопрос спрашивали каждые полчаса вечно, а остальные за ним не обрабатывались.
+      if (/ 404: /.test(msg) && /question not found/i.test(msg)) {
+        getDb().prepare("UPDATE items SET mp_answer = '', status = 'skipped', publish_error = ?, updated_at = ? WHERE id = ?")
+          .run('Вопрос удалён на Ozon: отвечать не на что', Date.now(), row.id);
+        rlog('info', 'Ozon: вопрос удалён на площадке, закрыт', { id: row.external_id });
+        continue;
+      }
+      rlog('warn', 'Ozon: не удалось получить ответ на вопрос', { id: row.external_id, error: msg });
       break;
     }
   }

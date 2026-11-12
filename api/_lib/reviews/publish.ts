@@ -26,6 +26,11 @@ export async function publishAnswer(id: number, text: string, by: 'owner' | 'aut
     else return { ok: false, error: 'Ответы на отзывы Ozon — через агента на ПК (этап в разработке)' };
   } catch (e) {
     const msg = String((e as Error)?.message ?? e).slice(0, 300);
+    if (e instanceof QuestionGone) {
+      patchItem(id, { publish_error: msg, status: 'skipped' });
+      rlog('info', `Вопрос удалён на площадке, закрыт: ${item.externalId}`, { by });
+      return { ok: false, error: msg, item: getItem(id) };
+    }
     patchItem(id, { publish_error: msg });
     rlog('error', `Публикация не удалась: ${item.marketplace}/${item.kind} ${item.externalId}`, { error: msg, by });
     return { ok: false, error: msg, item: getItem(id) };
@@ -59,6 +64,19 @@ async function publishOzonQuestion(item: ReviewItem, text: string): Promise<void
     method: 'POST',
     headers: { ...(up.headers as any), 'Content-Type': 'application/json' },
     body: JSON.stringify({ question_id: item.externalId, sku: Number(item.sku), text }),
-  }, { maxRetries: 1, timeoutMs: 20_000 });
-  if (!r.ok) throw new Error(`Ozon ${r.status}: ${(await r.text().catch(() => '')).slice(0, 200)}`);
+  }, { maxRetries: 2, timeoutMs: 20_000 }); // 429 «лимит в секунду» — ответ не создан, повторять безопасно
+  if (r.ok) return;
+  const body = (await r.text().catch(() => '')).slice(0, 200);
+  // 12.11.2026: на удалённый вопрос Ozon отвечает «invalid argument» — проверяем и говорим по-человечески.
+  if (r.status === 400 || r.status === 404) {
+    const info = await fetchWithRetry(`${up.base}/v1/question/info`, {
+      method: 'POST', headers: { ...(up.headers as any), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question_id: item.externalId }),
+    }, { maxRetries: 1, timeoutMs: 20_000 }).then(x => x.ok ? x.json() : null).catch(() => null) as { id?: string } | null;
+    if (info && !info.id) throw new QuestionGone();
+  }
+  throw new Error(`Ozon ${r.status}: ${body}`);
 }
+
+/** Вопроса на Ozon больше нет: его удалил покупатель или модерация. */
+class QuestionGone extends Error { constructor() { super('Вопрос удалён на Ozon (покупателем или модерацией): отвечать не на что'); } }

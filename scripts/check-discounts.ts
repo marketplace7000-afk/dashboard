@@ -1,5 +1,5 @@
 // Проверка решений агента «Заявки на скидку» (08.11.2026).
-import { decide, toTask, apiPrice, unsetProducts, isBuyoutCard, discountOrderRows, orderProfit, marginAtDiscount, maxPctForMargin, saveRules, listRules, type DiscountRule } from '../api/_lib/discounts';
+import { decide, toTask, apiPrice, unsetProducts, isBuyoutCard, ozonMinDiscount, asAskedRetry, discountOrderRows, orderProfit, marginAtDiscount, maxPctForMargin, saveRules, listRules, type DiscountRule } from '../api/_lib/discounts';
 import { _useAdsDbForTests } from '../api/_lib/ads/store';
 import { calcOzonProfit } from "../src/utils/ozonProfit";
 const calcProfit1000 = () => calcOzonProfit(inp)!.profit;
@@ -71,15 +71,15 @@ eq('скидка стирает мин. маржу', [listRules().X.maxPct, list
 // отправили цену покупателя 112 984 — Ozon записал 67 816 (= 112 984 × 113 323 / 188 800).
 const live = { base: 188800, showcase: 113323 };
 const sent = apiPrice(live, 112984);
-eq('цена покупателя 112 984 → в ЛК', sent, 188236);
-eq('после пересчёта Ozon покупатель платит не меньше', Math.round(sent * 113323 / 188800) >= 112984, true);
+eq('цена покупателя 112 984 → в ЛК (вниз)', sent, 188235);
+eq('после пересчёта Ozon цена покупателя — в пределах 1 ₽', Math.abs(sent * 113323 / 188800 - 112984) < 1, true);
 eq('«как просили» ≈ requested_price из заявки', Math.abs(apiPrice(live, 107657) - 179360) <= 1, true);
 let threw = ''; try { apiPrice(live, 50000); } catch (e) { threw = (e as Error).message; }
 eq('скидка 40 % от ЛК не уходит', threw.includes('больше 10 %'), true);
 let t11 = ''; try { apiPrice(live, Math.floor(113323 * 0.89)); } catch (e) { t11 = (e as Error).message; }
 eq('скидка 11 % не уходит', t11.includes('больше 10 %'), true);
 eq('скидка ровно 10 % уходит', apiPrice(live, Math.ceil(113323 * 0.9)) >= 188800 * 0.9, true);
-eq('не выше цены ЛК', apiPrice(live, 113323), 188800);
+eq('без скидки не уходит: ниже цены ЛК хотя бы на 1 ₽', apiPrice(live, 113323), 188799);
 
 // Напоминание в чат Ozon (08.11): товар без правила, режим снят или «Одобрять» без размера.
 const un = unsetProducts({ A: rule({ maxPct: 1 }), B: rule({ mode: 'decline' }), C: rule({ mode: 'manual' }), D: rule({}), E: rule({ minMargin: 15 }) }, ['A', 'B', 'C', 'D', 'E', 'F']);
@@ -96,6 +96,23 @@ eq("заказ по заявке распознан", rows.map(r => [r.article, 
 eq("заказ без метки — не по заявке", discountOrderRows({ ...fbs, financial_data: { products: [{ product_id: 1, actions: ["Округление"] }] } }, "FBS").length, 0);
 eq("FBO: деньги строкой", discountOrderRows({ posting_number: "x", products: [{ sku: 5, offer_id: "a", price: "990.00", quantity: 2 }], financial_data: { products: [{ product_id: 5, actions: ["WANNADISCOUNT-20261101"] }] } }, "FBO")[0].price, 990);
 eq("прибыль заказа = прибыль при цене ЛК × шт", orderProfit(inp, 1000, 2), 2 * (calcProfit1000()));
+
+// Минимум Ozon (12.11): живые отказы. Скидка для покупателя ≥ 300 ₽ (у дешёвых — 5 % витрины).
+eq('минимум Ozon: 300 ₽ / 5 % у дешёвых', [ozonMinDiscount(87930), ozonMinDiscount(4928)], [300, 246]);
+const eco = toTask({ id: 1, offer_id: 'e', base_price: 151000, original_price: 87930, discount: 63370, requested_price: 150485, status: 'NEW' });
+const ecoD = decide(eco, rule({ maxPct: 0.1 }), 'manual', null);
+eq('ECOFLOW: правило 0,1 %, просят −300 ₽ → как просили', [ecoD.action, ecoD.price], ['approve', 87630]);
+const ecoLk = apiPrice(eco, ecoD.price!);
+eq('… в ЛК скидка не меньше 300 ₽ для покупателя', 87930 - ecoLk * 87930 / 151000 >= 300, true);
+const afe = toTask({ id: 2, offer_id: 'a', base_price: 184458, original_price: 111143, discount: 73615, requested_price: 183960, status: 'NEW' });
+const afeD = decide(afe, rule({ maxPct: 0.3 }), 'manual', null);
+eq('AFERIY: как просили, в ЛК = requested_price', [afeD.price, apiPrice(afe, afeD.price!)], [110843, 183960]);
+const allp = toTask({ id: 3, offer_id: 'b', base_price: 104848, original_price: 65626, discount: 39522 + 623, requested_price: 103373, status: 'NEW' });
+const bigD = decide(allp, rule({ maxPct: 0.3 }), 'manual', null);
+eq('просят больше минимума, правило меньше → минимум Ozon 300 ₽', [bigD.action, 65626 - bigD.price!], ['approve', 300]);
+eq('правило по марже: минимум Ozon роняет маржу → отклонить', decide({ showcase: 600, requested: 540 }, rule({ minMargin: 23.4 }), 'manual', inp).action, 'decline');
+eq('повтор после отказа: как просили', asAskedRetry(eco, rule({ maxPct: 0.1 }), null)?.price, 87630);
+eq('повтор: больше 10 % — нет', asAskedRetry(toTask({ id: 4, offer_id: 'x', base_price: 1000, original_price: 600, discount: 1000 - 500 }), rule({ maxPct: 1 }), null), null);
 
 console.log(ok ? '\nЗаявки на скидку: в порядке.' : '\nОШИБКА');
 if (!ok) process.exit(1);

@@ -180,6 +180,16 @@ export function maxPctForMargin(input: OzonCalcInput | null | undefined, minMarg
 const pctOff = (from: number, to: number) => (from > 0 ? Math.round((1 - to / from) * 1000) / 10 : 0);
 const fmtPct = (v: number) => String(v).replace('.', ',');
 
+/**
+ * Минимальная скидка, которую принимает Ozon (12.11, по 151 отказу за 09–12.11): для покупателя
+ * не меньше 300 ₽, у дешёвых товаров — 5 % витрины. Меньше — Ozon отвечает «Одобренная скидка
+ * меньше минимально возможной» (или «…цена больше или равна цене товара»), и заявку доделывал менеджер
+ * ровно на 300 ₽. Покупатели чаще всего так и просят: −300 ₽ или −5 %.
+ */
+export const OZON_MIN_DISCOUNT_RUB = 300;
+export const ozonMinDiscount = (showcase: number) => Math.min(OZON_MIN_DISCOUNT_RUB, Math.floor(showcase * 0.05));
+const OZON_MIN_ERR = /меньше минимально возможной|больше или равна цене товара/i;
+
 /** Что делать с заявкой. Чистая функция — проверяется в scripts/check-discounts.ts. */
 export function decide(t: Pick<DiscountTask, 'showcase' | 'requested'>, rule: DiscountRule | undefined, defaultMode: 'manual' | 'decline', input: OzonCalcInput | null | undefined): Decision {
   const skip = (reason: string): Decision => ({ action: 'skip', price: null, pct: null, marginPct: null, reason });
@@ -206,7 +216,22 @@ export function decide(t: Pick<DiscountTask, 'showcase' | 'requested'>, rule: Di
   if (askExact <= allowed + 1e-9) {
     return { action: 'approve', price: Math.round(t.requested), pct: ask, marginPct: marginAtDiscount(input, Math.max(0, askExact)), reason: `одобряем как просили: −${fmtPct(ask)} %` };
   }
-  const price = Math.ceil(show * (1 - allowed / 100));
+  let price = Math.ceil(show * (1 - allowed / 100));
+  // Встречная скидка меньше минимума Ozon — Ozon её не примет. Поднимаем до минимума (но не больше,
+  // чем просил покупатель, и не больше потолка 10 %); при правиле по марже — только если маржа держится.
+  const minDisc = ozonMinDiscount(show);
+  if (show - price < minDisc) {
+    const p2 = Math.max(Math.round(t.requested), show - minDisc);
+    const pct2 = (1 - p2 / show) * 100;
+    const m2 = marginAtDiscount(input, pct2);
+    if (pct2 <= MAX_DISCOUNT_PCT + 1e-9 && (rule!.minMargin == null || (m2 != null && m2 >= rule!.minMargin))) {
+      const pr = pctOff(show, p2);
+      return { action: 'approve', price: p2, pct: pr, marginPct: m2,
+        reason: p2 <= Math.round(t.requested) ? `одобряем как просили: −${fmtPct(pr)} % (меньше Ozon не принимает)` : `просили −${fmtPct(ask)} %, даём минимум Ozon −${show - p2} ₽ (−${fmtPct(pr)} %)` };
+    }
+    if (byMargin) return { action: 'decline', price: null, pct: null, marginPct: marginAtDiscount(input, 0),
+      reason: `минимальная скидка Ozon ${minDisc} ₽ опускает маржу ниже ${fmtPct(rule!.minMargin!)} %` };
+  }
   const pct = pctOff(show, price);
   return { action: 'approve', price, pct, marginPct: marginAtDiscount(input, (1 - price / show) * 100),
     reason: `просили −${fmtPct(ask)} %, даём −${fmtPct(pct)} %${byMargin ? ` (ограничила маржа ${fmtPct(rule!.minMargin!)} %)` : ''}` };
@@ -284,18 +309,32 @@ function staleIds(pending: any[]): number {
 
 /**
  * Цена для approve: из цены покупателя (наш масштаб) — в масштаб ЛК, как ждёт Ozon.
- * Округляем вверх, чтобы после обратного пересчёта Ozon покупатель не получил больше скидки.
+ * Округляем вниз (12.11): иначе скидка выходила на доли рубля меньше и Ozon отказывал по минимуму.
  * Бросает ошибку, если цену не проверить или скидка подозрительно большая.
  */
 export function apiPrice(t: Pick<DiscountTask, 'base' | 'showcase'>, buyerPrice: number): number {
   if (!(t.base > 0) || !(t.showcase > 0) || !(buyerPrice > 0)) throw new Error('в заявке нет цены ЛК или витрины — ответить вручную в кабинете');
-  const lk = Math.min(Math.round(t.base), Math.ceil(buyerPrice * t.base / t.showcase));
+  // 12.11: округляем ВНИЗ. Вверх скидка выходила на доли рубля меньше задуманной (просили −300 ₽ —
+  // уходило −299,7 ₽), и Ozon отказывал «меньше минимально возможной». Разница — меньше 1 ₽.
+  // (requested_price из заявки не берём: у части заявок он не сходится с discount.)
+  const lk = Math.min(Math.round(t.base) - 1, Math.floor(buyerPrice * t.base / t.showcase));
   // Последняя проверка — по самой цене, которая уйдёт в Ozon: не ниже ЛК × 0,9.
   if (lk < Math.ceil(t.base * (1 - MAX_DISCOUNT_PCT / 100))) {
     const pct = Math.round((1 - lk / t.base) * 1000) / 10;
     throw new Error(`скидка ${String(pct).replace('.', ',')} % от цены ЛК — больше ${MAX_DISCOUNT_PCT} %, не отправлено`);
   }
   return lk;
+}
+
+/** Повтор после отказа Ozon «скидка меньше минимальной»: как просил покупатель, если в потолке 10 % и (при правиле по марже) маржа держится. */
+export function asAskedRetry(t: ReturnType<typeof toTask>, rule: DiscountRule | undefined, input: OzonCalcInput | null | undefined): Decision | null {
+  if (!rule || rule.mode !== 'approve' || !(t.showcase > 0) || !(t.requested > 0)) return null;
+  const pct = (1 - t.requested / t.showcase) * 100;
+  if (pct > MAX_DISCOUNT_PCT + 1e-9) return null;
+  const m = marginAtDiscount(input, Math.max(0, pct));
+  if (rule.minMargin != null && (m == null || m < rule.minMargin)) return null;
+  return { action: 'approve', price: Math.round(t.requested), pct: pctOff(t.showcase, t.requested), marginPct: m,
+    reason: `Ozon не принял меньшую скидку — одобряем как просили: −${fmtPct(pctOff(t.showcase, t.requested))} %` };
 }
 
 /** Ответить Ozon пачкой. Возвращает ошибки по номерам заявок. */
@@ -383,6 +422,20 @@ export async function runPass(why = 'по таймеру'): Promise<string> {
         else if (d.action === 'decline') decline.push({ t, d });
       }
       const e1 = await send('approve', approve), e2 = await send('decline', decline);
+      const retry: typeof approve = [];
+      for (const a of approve) {
+        if (!OZON_MIN_ERR.test(e1.get(a.t.id) ?? '')) continue;
+        const r = asAskedRetry(a.t, rules[a.t.article], margins[a.t.article]?.input as OzonCalcInput | null);
+        if (r) retry.push({ t: a.t, d: r });
+      }
+      if (retry.length) {
+        const e3 = await send('approve', retry);
+        for (const x of retry) {
+          const i = approve.findIndex(a => a.t.id === x.t.id);
+          approve[i] = x;
+          if (e3.has(x.t.id)) e1.set(x.t.id, e3.get(x.t.id)!); else e1.delete(x.t.id);
+        }
+      }
       for (const { t, d } of approve) markApplied(t.id, 'agent', 'агент', d, e1.get(t.id) ?? null);
       for (const { t, d } of decline) markApplied(t.id, 'agent', 'агент', d, e2.get(t.id) ?? null);
       const failed = e1.size + e2.size;

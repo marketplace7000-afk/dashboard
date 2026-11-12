@@ -16,7 +16,8 @@
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { mskDate } from './mskDate';
-import { planArticleFacts, rnpLatestStocks, rnpLinks } from './rnp';
+import { planArticleFacts, rnpLatestStocks, rnpLinks, sellerPrices } from './rnp';
+import { getCosts, resolveCost } from './costs';
 import {
   addDays, avgCheck, calcPace, monthEnd, monthStart, pctOf, pickPrice, sharedStockShort, shiftMonth,
   type PlanBasis, type PlanDay, type PlanArchived, type PlanMp, type PlanResponse, type PlanRnp, type PlanRow, type PlanStatRow, type PlanStats, type PlanStatus, type PlanTotals, type PlanView,
@@ -208,6 +209,10 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; ar
   const fin = finByArticle(mp, month);
   const margins = latestMargins(mp, month);
   const stocks = rnpLatestStocks(mp);
+  // Себестоимость к цене в кабинете (12.11.2026): цена продавца без СПП из кэша ценовых API
+  // (cron обновляет его не реже раза в 3 часа), себестоимость — из «Склада», сверка раз в 5 минут.
+  const seller = await sellerPrices(mp).catch(() => ({} as Record<string, number>));
+  const costs = getCosts();
   const stockNow = await stockMaps(mp);
   let sheet: Record<string, any> = {};
   try { const { getStockSheet } = await import('./stockSheet'); sheet = (await getStockSheet(false)).items; } catch { /* остаток в пути просто не покажем */ }
@@ -275,6 +280,8 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; ar
     const pace = calcPace({ qty, month, today, startDate, factToYesterday, factTotal: fact, pace7 });
     const planRub = qty * price;
     const m = margins.get(article);
+    const priceNow = seller[article] ?? null;
+    const unitCost = resolveCost(article, costs)?.cost ?? null;
     const stockFbo = stockNow ? stockNow.fbo.get(article) ?? 0 : null;
     const stockFbs = stockNow ? stockNow.fbs.get(article) ?? 0 : null;
     const stock = stockNow ? stockFbo! + stockFbs! : null;
@@ -298,6 +305,7 @@ async function buildMp(mp: PlanMp, month: string): Promise<{ rows: PlanRow[]; ar
       ads, drr: factRub > 0 ? (ads / factRub) * 100 : null,
       marginPct: m ? m.pct : null, marginRub: m ? m.rub : null, marginRev: m ? m.rev : null, marginMonth: m ? m.month : null,
       stock, stockFbo, stockFbs, transit, stockShort: !isPast && stock !== null && remain > stock + (transit ?? 0), stockShortShared: false,
+      priceNow, unitCost, costPct: priceNow && unitCost && priceNow > 0 && unitCost > 0 ? (unitCost / priceNow) * 100 : null,
       prevFact: pf === null ? null : Math.round(pf), orders30: sum(article, addDays(today, -30), yesterday).cnt, daily,
     });
   }
@@ -350,8 +358,16 @@ function totalsOf(rows: PlanRow[], month: string, today: string, cabinet?: ({ ru
     needPerDay: pace.needPerDay, needRubPerDay: pace.daysLeft > 0 && left >= 0 && qty > 0 ? rubLeft / pace.daysLeft : null, pace7,
     ads, drr: factRub > 0 ? (ads / factRub) * 100 : null,
     marginPct: mRev > 0 ? (mRub / mRev) * 100 : null, marginRub: mRev > 0 ? mRub : null,
+    costPct: costPctOf(rows),
     needSumByArticle: pace.needPerDay === null ? null : needSum,
   };
+}
+
+/** Себестоимость ÷ цена в кабинете по товарам с планом, с весом плана в штуках. */
+function costPctOf(rows: PlanRow[]): number | null {
+  const base = rows.filter(r => r.costPct !== null && r.priceNow && r.unitCost && r.qty > 0);
+  const price = base.reduce((s, r) => s + (r.priceNow ?? 0) * r.qty, 0);
+  return price > 0 ? (base.reduce((s, r) => s + (r.unitCost ?? 0) * r.qty, 0) / price) * 100 : null;
 }
 
 /** Добавляет предупреждение «не хватит», которое появляется только с учётом плана второй площадки. */
@@ -371,6 +387,8 @@ function mergeRows(wb: PlanRow[], oz: PlanRow[]): PlanRow[] {
     const x = by.get(r.article);
     const part = { qty: r.qty, fact: r.fact };
     if (!x) { by.set(r.article, { ...r, mp: 'all', [r.mp as PlanMp]: part, daily: r.daily.map(d => ({ ...d })) }); continue; }
+    // Цены на площадках разные: в «Все площадки» процент себестоимости показываем, только если товар на одной площадке.
+    x.costPct = null; x.priceNow = null;
     if (r.marginRev !== null) {
       x.marginRub = (x.marginRub ?? 0) + (r.marginRub ?? 0); x.marginRev = (x.marginRev ?? 0) + r.marginRev;
       x.marginPct = x.marginRev > 0 ? (x.marginRub / x.marginRev) * 100 : null;
@@ -431,6 +449,9 @@ export async function getPlan(viewIn: unknown, monthIn: unknown, user: PlanUser)
     }
   }
   const rows = view === 'all' ? mergeRows(parts[0].rows, parts[1].rows) : parts[0].rows;
+  const totals = totalsOf(rows, month, today, (view === 'all' ? ['wb', 'ozon'] as const : [view]).map(mp => finCabinetMargin(mp, month)));
+  // В «Все площадки» у товара процента нет (цены разные), итог — по строкам обеих площадок.
+  if (view === 'all') totals.costPct = costPctOf(parts.flatMap(p => p.rows));
   const states = new Set(parts.map(p => p.head.state));
   const state = states.size > 1 ? 'mixed' : ([...states][0] as 'draft' | 'approved');
   const daysInMonth = Number(to.slice(8));
@@ -445,7 +466,7 @@ export async function getPlan(viewIn: unknown, monthIn: unknown, user: PlanUser)
     canApprove: view !== 'all' && user.role === 'owner',
     factSource: parts[0].factSource,
     finance: { month: parts[0].finMonth, approxTo: parts[0].approxTo, checkedAt: Number(metaGet('fin:at')) || null, error: err || null },
-    rows, totals: totalsOf(rows, month, today, (view === 'all' ? ['wb', 'ozon'] as const : [view]).map(mp => finCabinetMargin(mp, month))), catalog, months: knownMonths(), archived: parts.flatMap(x => x.archived),
+    rows, totals, catalog, months: knownMonths(), archived: parts.flatMap(x => x.archived),
   };
 }
 

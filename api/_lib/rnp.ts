@@ -1302,7 +1302,7 @@ const MAX_DAYS = 120;
  * та же база, что у «Среднего чека» в РНП и у «Цены ЛК» на листе «Цены».
  * Берём из прогретого кэша ценовых API (cron обновляет их сам), ключ — артикул UPPER.
  */
-async function sellerPrices(mp: RnpMp): Promise<Record<string, number>> {
+export async function sellerPrices(mp: RnpMp): Promise<Record<string, number>> {
   const map: Record<string, number> = {};
   const key = mp === 'wb'
     ? makeUpstreamCacheKey('wb:discounts', 'GET', 'api/v2/list/goods/filter', '?limit=1000', undefined)

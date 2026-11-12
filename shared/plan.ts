@@ -51,6 +51,10 @@ export type PlanRow = {
   /** Выручка финансиста за месяц marginMonth: маржа % = marginRub ÷ marginRev. */
   marginRev: number | null;
   marginMonth: string | null;
+  /** Цена в кабинете продавца сейчас (без СПП), себестоимость единицы и их отношение, %. */
+  priceNow: number | null;
+  unitCost: number | null;
+  costPct: number | null;
   /** FBO этой площадки + FBS всех своих складов, как в разделе «Остатки». */
   stock: number | null;
   stockFbo: number | null;
@@ -71,7 +75,7 @@ export type PlanTotals = {
   qty: number; planRub: number; fact: number; factRub: number; factOutOfPlan: number;
   pct: number | null; pctRub: number | null; expected: number | null; forecast: number | null; forecastRub: number | null;
   needPerDay: number | null; needRubPerDay: number | null; pace7: number | null;
-  ads: number; drr: number | null; marginPct: number | null; marginRub: number | null;
+  ads: number; drr: number | null; marginPct: number | null; marginRub: number | null; costPct: number | null;
   /** Сумма минимумов по артикулам: излишек одного товара не закрывает недобор другого. */
   needSumByArticle: number | null;
 };

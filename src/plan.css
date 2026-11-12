@@ -112,10 +112,10 @@
 .plan-table .plan-st { font-size: 18px; font-weight: 400; color: var(--p-q); background: transparent; padding: 0; }
 .plan-table .plan-acts .cm-mark { opacity: .55; }
 .plan-table .plan-acts .cm-mark:hover { opacity: 1; }
-.p-stock { display: grid; justify-items: end; font-size: 17px; line-height: 1.35; color: var(--muted); white-space: nowrap; }
+.p-stock { display: grid; justify-items: end; font-size: 16px; line-height: 1.3; color: var(--muted); white-space: nowrap; }
 .p-stock b { font-weight: 500; color: var(--text); }
 .p-stock .go { color: var(--accent); }
-.p-stock .short { color: var(--bad); font-weight: 500; }
+.p-stock .short { color: var(--bad); font-weight: 500; text-align: right; }
 .p-prog { width: 112px; display: grid; gap: 6px; }
 .p-prog b { font-weight: 600; }
 .p-prog .plan-prog { width: 100%; margin: 0; height: 5px; border-radius: 3px; }

@@ -30,7 +30,7 @@ const ddmm = (d: string | null) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}` : '
 const moscowMonth = () => new Date(Date.now() + 3 * 3_600_000).toISOString().slice(0, 7);
 
 type Filter = 'all' | 'behind' | 'outside' | 'loss' | 'new' | 'short';
-type SortKey = 'planRub' | 'factRub' | 'qty' | 'fact' | 'pct' | 'forecast' | 'pace7' | 'drr' | 'marginPct' | 'article';
+type SortKey = 'planRub' | 'factRub' | 'qty' | 'fact' | 'pct' | 'forecast' | 'pace7' | 'drr' | 'marginPct' | 'costPct' | 'article';
 type PostFn = (path: string, body: object) => Promise<any | null>;
 const SOURCE: Record<string, string> = {
   manual: 'плановая цена', frozen: 'зафиксирован', avg7: 'чек за 7 дней', avg30: 'чек за 30 дней', avg90: 'чек за 90 дней', none: 'задайте цену',
@@ -292,6 +292,7 @@ function MonthPlan({ view, month, setMonth }: { view: PlanView; month: string; s
                     <th className="l" title="Чёрная риска: сколько должно быть к вчерашнему дню при ровных продажах">{sortBtn('pct', 'Выполнение')}</th>
                     <th>{sortBtn('drr', 'Реклама', 'Расход на рекламу ÷ заказы в рублях')}</th>
                     <th>{sortBtn('marginPct', 'Маржа', 'Из отчёта финансиста: маржа ÷ выручка товара, последний месяц с продажами')}</th>
+                    <th>{sortBtn('costPct', 'Себест.', 'Себестоимость из «Склада» ÷ текущая цена в кабинете продавца (без СПП). Цена обновляется несколько раз в день')}</th>
                     <th className="l">Статус</th>
                     <th aria-label="Действия" />
                   </tr>
@@ -310,6 +311,7 @@ function MonthPlan({ view, month, setMonth }: { view: PlanView; month: string; s
                     <td className="l"><Progress p={t.pct} tone={pctClass(t.pct, t.expected, t.qty)} expected={t.expected} qty={t.qty} showMark={data.period === 'current'} outside={false} /></td>
                     <td>{pct1(t.drr)}</td>
                     <td>{pct1(t.marginPct)}</td>
+                    <td title="Средняя по товарам с планом, с весом плана в штуках">{pct1(t.costPct)}</td>
                     <td />
                     <td />
                   </tr>
@@ -467,9 +469,9 @@ function PlanLine({ r, data, open, onToggle, post, onArchive }: { r: PlanRow; da
         </td>
         <td>
           <div className="p-stock">
-            {r.stock === null ? '–' : <span>FBO <b>{n0(r.stockFbo)}</b> · FBS <b>{n0(r.stockFbs)}</b></span>}
-            {!!r.transit && <span className="go">едет {n0(r.transit)}</span>}
-            {r.stockShort && <span className="short" title={r.stockShortShared ? 'Свои склады общие для площадок: вместе с планом другой площадки товара не хватит' : 'Оставшийся план больше остатка и товара в пути'}>{r.stockShortShared ? `не хватит с учётом ${data.view === 'wb' ? 'Ozon' : data.view === 'ozon' ? 'WB' : 'обеих площадок'}` : 'не хватит'}</span>}
+            {r.stock === null ? '–' : <><span>FBO <b>{n0(r.stockFbo)}</b></span><span>FBS <b>{n0(r.stockFbs)}</b></span></>}
+            {!!r.transit && <span className="go">едет <b>{n0(r.transit)}</b></span>}
+            {r.stockShort && <span className="short" title={r.stockShortShared ? 'Свои склады общие для площадок: вместе с планом другой площадки товара не хватит' : 'Оставшийся план больше остатка и товара в пути'}>{r.stockShortShared ? <>не хватит<br />с учётом {data.view === 'wb' ? 'Ozon' : data.view === 'ozon' ? 'WB' : 'обеих площадок'}</> : 'не хватит'}</span>}
           </div>
         </td>
         <td className="pq">{r.pace7 === null ? '–' : n1(r.pace7)}</td>
@@ -490,6 +492,7 @@ function PlanLine({ r, data, open, onToggle, post, onArchive }: { r: PlanRow; da
         <td className="l"><Progress p={r.pct} tone={rowTone(r, data)} expected={r.expected} qty={r.qty} showMark={data.period === 'current'} outside={r.fact > 0} /></td>
         <td className="pq">{pct1(r.drr)}</td>
         <td className={`pq ${r.marginPct !== null && r.marginPct < 0 ? 'bad' : r.marginPct !== null && r.marginPct < 15 ? 'warn' : ''}`} title={r.marginMonth ? `Отчёт финансиста, ${shortMonth(r.marginMonth)}` : undefined}>{pct1(r.marginPct)}</td>
+        <td className="pq" title={r.costPct === null ? (r.mp === 'all' ? 'Цены на площадках разные — выберите WB или Ozon' : !r.unitCost ? 'Нет себестоимости в «Складе»' : 'Нет цены в кабинете') : `Себестоимость ${rub(r.unitCost)} ÷ цена в кабинете ${rub(r.priceNow)}`}>{pct1(r.costPct)}</td>
         <td className="l" onClick={e => e.stopPropagation()}>
           {can && !r.isNew
             ? <select className="plan-st" value={r.status} aria-label="Статус товара" onChange={e => post('line', { article: r.article, status: e.target.value })}>
@@ -505,7 +508,7 @@ function PlanLine({ r, data, open, onToggle, post, onArchive }: { r: PlanRow; da
           </span>
         </td>
       </tr>
-      {open && <tr className="plan-detail"><td colSpan={14}><Detail r={r} data={data} post={post} /></td></tr>}
+      {open && <tr className="plan-detail"><td colSpan={15}><Detail r={r} data={data} post={post} /></td></tr>}
     </Fragment>
   );
 }

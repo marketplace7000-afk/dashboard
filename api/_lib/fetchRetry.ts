@@ -70,9 +70,11 @@ export async function fetchWithRetry(
         // (лимит «1 запрос / ~2 мин на кабинет») — со старым порогом 120с мы сдавались
         // за 2 секунды до открытия окна, и прогрев analytics не проходил НИКОГДА.
         if (Number.isFinite(ra) && ra * 1000 > 200_000) return res;
-        const delay = Number.isFinite(ra) && ra > 0
-          ? ra * 1000 + 1_000
-          : Math.min(120_000, base429 * Math.pow(1.5, attempt));
+        // 12.11.2026: Ozon отвечает Retry-After: 1, но его посекундный бюджет общий на кабинет и после
+        // длинной выгрузки пуст несколько секунд — повтор через 2 с снова получал 429. Поэтому ждём
+        // не меньше растущей паузы (5 → 7,5 → 11 с), а если площадка просит больше — столько, сколько просит.
+        const grow = Math.min(120_000, base429 * Math.pow(1.5, attempt));
+        const delay = Number.isFinite(ra) && ra > 0 ? Math.max(ra * 1000 + 1_000, grow) : grow;
         await new Promise(r => setTimeout(r, delay));
         continue;
       }

@@ -19,6 +19,7 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
+import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import * as routeModule from './api/route';
 import { CRON_WARM_INTERVAL_MS } from './api/_lib/cronSchedule';
@@ -162,11 +163,19 @@ function scheduleCacheWarm() {
     try {
       // Длинный таймаут: прогрев кабинета WB держит паузы 65с между хостами,
       // полный проход может занять пару минут. Без таймаута undici падает на ~5 мин.
-      const r = await fetch(url, {
-        headers: secret ? { authorization: `Bearer ${secret}` } : {},
-        signal: AbortSignal.timeout(9 * 60_000),
+      // 12.11.2026: через node:http, а не fetch. У встроенного fetch свой предел ожидания заголовков
+      // (5 мин), и AbortSignal его не продлевает: при долгом проходе в журнал каждые 2 часа падало
+      // «cache warm failed: fetch failed», хотя прогрев шёл и завершался. Ждём до 20 минут.
+      const status = await new Promise<number>((resolve, reject) => {
+        const rq = http.get(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {}, timeout: 20 * 60_000 }, rs => {
+          rs.resume();
+          rs.on('end', () => resolve(rs.statusCode ?? 0));
+          rs.on('error', reject);
+        });
+        rq.on('timeout', () => rq.destroy(new Error('прогрев не ответил за 20 минут')));
+        rq.on('error', reject);
       });
-      console.log(`[autovibe] cache warm: ${r.status}`);
+      console.log(`[autovibe] cache warm: ${status}`);
     } catch (e) {
       console.warn('[autovibe] cache warm failed:', (e as Error).message);
     }

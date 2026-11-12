@@ -242,11 +242,23 @@ async function computeOzon(diag: string[]): Promise<Record<string, FactItem>> {
   // 14.10.2026: по 200 отправлений Ozon отвечал 429 «rate limit per second» даже при
   // запросах раз в 2 с (шлюз, ведро oz:accrual) — похоже, лимит считает отправления.
   // Берём по 50; если 429 останутся — смотреть журнал «факт логистики».
-  for (let i = 0; i < postings.length; i += 50) {
-    const chunk = postings.slice(i, i + 50).map(p => p.number);
+  // 12.11.2026 (опыт на живом кабинете): сразу после выгрузки списка отправлений посекундный бюджет
+  // Ozon пуст — первые порции начислений получали 429 при любом темпе. Даём бюджету восстановиться,
+  // а порции с отказом повторяем вторым заходом: раньше они молча выпадали из факта логистики.
+  await new Promise(r => setTimeout(r, 10_000));
+  const chunks: string[][] = [];
+  for (let i = 0; i < postings.length; i += 50) chunks.push(postings.slice(i, i + 50).map(p => p.number));
+  const retry: string[][] = [];
+  for (let ci = 0; ci < chunks.length || retry.length; ci++) {
+    let chunk: string[]; let second = false;
+    if (ci < chunks.length) chunk = chunks[ci];
+    else { if (ci === chunks.length) await new Promise(r => setTimeout(r, 30_000)); chunk = retry.shift()!; second = true; }
     let j: any;
     try { j = await ozPost('v1/finance/accrual/postings', { posting_numbers: chunk }); }
-    catch (e) { diag.push(`Ozon: accrual/postings — ${String((e as Error)?.message ?? e).slice(0, 120)}`); continue; }
+    catch (e) {
+      if (!second && /→ 429/.test(String((e as Error)?.message))) { retry.push(chunk); continue; }
+      diag.push(`Ozon: accrual/postings — ${String((e as Error)?.message ?? e).slice(0, 120)}`); continue;
+    }
     for (const pa of (j?.posting_accruals ?? [])) {
       const p = byNum.get(String(pa?.posting_number ?? ''));
       if (!p) continue;

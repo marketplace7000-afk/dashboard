@@ -11,6 +11,7 @@ import { listPins, type CardPin } from './cards';
 import { cardVisibility, type VisQuery } from './cardVisibility';
 import { seoOverview } from './cardSeo';
 import { listProposals, getAutopilotMode, ACTIONABLE } from './ads/autopilot';
+import type { PlanRnp } from '../../shared/plan';
 
 export type AdviceArea = 'margin' | 'ads' | 'text' | 'price' | 'stock' | 'sales';
 export type AdviceLevel = 'high' | 'mid' | 'low';
@@ -240,6 +241,30 @@ function fromNumbers(p: CardPin, market: CardMarket | null): Advice[] {
   return [...out, ...funnelAdvice(market)];
 }
 
+/**
+ * Связь с разделом «План» (12.11.2026): если товар отстаёт от плана месяца, совет говорит, сколько
+ * нужно заказов в день, и чем можно ускориться с учётом маржи, цены против рынка и запаса рекламы.
+ */
+export function fromPlan(p: CardPin, market: CardMarket | null, plan: PlanRnp | null): Advice[] {
+  if (!plan || plan.state === 'none') return [];
+  const art = (p.article || p.sku).toUpperCase();
+  const row = Object.entries(plan.byArticle).find(([k]) => k.toUpperCase() === art)?.[1];
+  if (!row || !row.behind || row.needPerDay == null) return [];
+  const m = p.margin;
+  const spot = spotOf(market);
+  const how = !m || m.pct == null ? 'Маржа сейчас не посчитана: сначала проверьте её.'
+    : m.below ? 'Маржа ниже минимума: ускоряться рекламой или скидкой нельзя, сначала верните маржу.'
+    : spot === 'above' ? 'Мы дороже рынка: сначала цена, реклама при такой цене план не догонит.'
+    : canBoostAds(p, market) ? 'Маржа и цена позволяют усилить рекламу или взять акцию.'
+    : 'Запас рекламы в рамках минимума исчерпан: остаются акции с расчётом маржи или пересмотр плана.';
+  const pace = row.pace7 == null ? 'темп пока не посчитан' : `сейчас ${row.pace7.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} в день`;
+  return [{
+    key: 'plan-behind', area: 'sales', level: 'mid', open: null,
+    title: `План месяца: ${row.fact} из ${row.qty} шт., отстаём`,
+    why: `До конца месяца ${plan.daysLeft} дн.: нужно ${row.needPerDay} заказов в день, ${pace}${plan.state === 'approved' ? '' : ' (план ещё не утверждён)'}. ${how}`,
+  }];
+}
+
 async function fromAds(p: CardPin, market: CardMarket | null, ids: Set<string>, pending: Awaited<ReturnType<typeof listProposals>>): Promise<Advice[]> {
   const boost = canBoostAds(p, market);
   const canApply = getAutopilotMode().mode !== 'off';
@@ -307,6 +332,14 @@ export async function allAdvice(fresh = false): Promise<Record<string, { items: 
     if (watch[mp] === undefined) { try { watch[mp] = getCompetitors(mp).watch; } catch (e) { console.warn('[cards] конкуренты:', (e as Error)?.message); watch[mp] = null; } }
     return watch[mp];
   };
+  const plans: Partial<Record<CardPin['mp'], PlanRnp | null>> = {};
+  const planOf = async (mp: CardPin['mp']) => {
+    if (plans[mp] === undefined) {
+      try { plans[mp] = await (await import('./plan')).getPlanForRnp(mp); }
+      catch (e) { console.warn('[cards] план месяца:', (e as Error)?.message); plans[mp] = null; }
+    }
+    return plans[mp] ?? null;
+  };
   const data: Record<string, { items: Advice[]; failed: string[]; market: CardMarket | null }> = {};
   for (const p of pins) {
     const it = rnpItems(p.mp).find(i => i.sku === p.sku);
@@ -320,8 +353,11 @@ export async function allAdvice(fresh = false): Promise<Record<string, { items: 
     if (w === null) failed.push('конкуренты');
     const market = w ? marketOf(p, findWatch(p, w)) : null;
     if (!p.margin) failed.push('маржа из раздела «Цены»');
+    const plan = await planOf(p.mp);
+    if (!plan) failed.push('план месяца');
     const items = [
       ...fromNumbers(p, market),
+      ...fromPlan(p, market, plan),
       ...(pending ? await safe('реклама', () => fromAds(p, market, ids, pending)) : []),
       ...await safe('видимость в поиске', () => fromVisibility(p, market)),
       ...await safe('запросы и текст', () => fromSeo(p)),

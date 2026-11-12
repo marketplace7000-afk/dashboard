@@ -14,6 +14,7 @@
 import { getOzonPerfToken, PERF_HOST } from './ozonPerfAuth';
 import { cacheGet, cacheSet, isFresh } from './cache';
 import { mskDate } from './mskDate';
+import { gate, note } from './gateway';
 import { unzipAll, isZip } from './zip';
 
 // v2: в SkuAdRow добавились показы/клики/корзины. Старые записи их не содержат,
@@ -409,9 +410,12 @@ async function buildSkuToOffer(): Promise<Map<string, string>> {
     'Content-Type': 'application/json',
   };
   const post = async (path: string, body: unknown) => {
-    const r = await fetch(`https://api-seller.ozon.ru/${path}`, {
+    const url = `https://api-seller.ozon.ru/${path}`;
+    await gate(url, 2);
+    const r = await fetch(url, {
       method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(40_000),
     });
+    note(url, r.status, Number(r.headers.get('retry-after')) || undefined);
     if (!r.ok) throw new Error(`${path} → ${r.status}`);
     return r.json() as any;
   };

@@ -1,6 +1,3 @@
-@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url('./fonts/inter-cyrillic.woff2') format('woff2-variations'); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
-@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url('./fonts/inter-latin.woff2') format('woff2-variations'); unicode-range: U+0000-00FF, U+2000-206F, U+2212; }
-@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url('./fonts/inter-latin-ext.woff2') format('woff2-variations'); unicode-range: U+20BD; }
 /* «План» (src/pages/Plan.tsx). С 02.11.2026 размеры и таблицы как в «Ведении карточек»: классы .cm-*, текст 18, цифры 21. */
 .plan .muted { color: var(--muted); }
 .plan-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -88,7 +85,8 @@
 .plan-found button.on { border-color: var(--accent); background: var(--accent-soft, #e8effd); }
 
 /* Таблица: одна строка на товар, спокойный стиль (одобрен владельцем 02.11). Разделяют воздух и насыщенность, а не рамки и заливки. */
-.plan { font-family: "Inter", "Golos Text", "Segoe UI", system-ui, sans-serif; }
+/* 12.11.2026: шрифт как во всём кабинете (Golos Text) — раньше «План» один был набран Inter. */
+.plan { font-family: inherit; }
 .plan button, .plan input, .plan select, .plan textarea { font-family: inherit; }
 .plan-table { --p-q: #5f6470; font-variant-numeric: tabular-nums; }
 .plan-table.cm-table.cm-list > thead > tr > th { font-size: 17px; font-weight: 600; color: var(--text); background: var(--card, #fff); border-bottom: 0; padding: 15px 11px; }

@@ -118,7 +118,7 @@ export function AiChatBubble({ currentPage }: Props) {
           <span style={{
             position: 'absolute', top: 6, right: 6,
             background: '#fff', color: '#6366f1',
-            fontSize: 14, fontWeight: 700,
+            fontSize: 14, fontWeight: 700, // design-ok: счётчик-значок на кнопке чата
             borderRadius: 10, padding: '1px 6px',
           }}>{Math.min(history.length, 99)}</span>
         )}

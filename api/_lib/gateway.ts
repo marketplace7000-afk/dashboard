@@ -57,7 +57,12 @@ const RULES: Rule[] = [
   // Начисления: прод 14.10 — серия 429 «rate limit per second» при запросах подряд
   // без паузы (факт логистики). Лимит в документации не назван — держим 2 с.
   { bucket: 'oz:accrual',        host: 'api-seller.ozon.ru', path: /^\/v1\/finance\/accrual\//,                     intervalMs: 2_000 },
-  { bucket: 'oz:seller',         host: 'api-seller.ozon.ru',                                                        intervalMs: 0 },
+  // Поисковые запросы карточки: и «Ведение карточек», и «Конкуренты Ozon» ходят в один метод друг за
+  // другом — общий интервал ставит их в одну очередь (12.11.2026: второй модуль всегда получал 429).
+  { bucket: 'oz:queries',        host: 'api-seller.ozon.ru', path: /^\/v1\/analytics\/product-queries\//,       intervalMs: 30_000 },
+  // 12.11.2026: у Ozon общий счётчик ~50 запросов в секунду на кабинет (заголовок ratelimit-remaining),
+  // его делят сайт, Baloo и боты. Без интервала наши модули могли выстрелить пачкой — держим ≤ 10 в секунду.
+  { bucket: 'oz:seller',         host: 'api-seller.ozon.ru',                                                        intervalMs: 100 },
   // ── Ozon Performance ── 100 000 в сутки; отчёты сериализует ozonSkuAds сам
   { bucket: 'oz-perf',           host: 'api-performance.ozon.ru',                                                   intervalMs: 0 },
 ];

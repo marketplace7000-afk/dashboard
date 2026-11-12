@@ -23,6 +23,7 @@
 import { cacheGet, cacheSet, ageMs } from './cache';
 import { readSheetRange } from './googleSheetsApi';
 import { listOzonFbsPostings } from './ozonFbsList';
+import { gate, note } from './gateway';
 
 const CACHE_KEY = 'fbo-stocks:v1';
 const KEEP_MS = 7 * 24 * 3600_000;     // показывать можно и старый снимок — с датой
@@ -55,7 +56,9 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 /** Запрос с повтором на 429 (у обеих площадок лимиты «в секунду/минуту»). */
 async function call(url: string, init: RequestInit, tries = 6): Promise<any> {
   for (let i = 0; i < tries; i++) {
+    await gate(url, 2, 10 * 60_000); // общая очередь площадки: снимок остатков — фоновая догрузка
     const r = await fetch(url, { ...init, signal: AbortSignal.timeout(60_000) });
+    note(url, r.status, Number(r.headers.get('x-ratelimit-retry') || r.headers.get('retry-after')) || undefined);
     if (r.status === 429) { await sleep(2500 * (i + 1)); continue; }
     const t = await r.text();
     if (!r.ok) throw new Error(`${url.replace(/^https:\/\/[^/]+/, '')} → ${r.status} ${t.slice(0, 160)}`);

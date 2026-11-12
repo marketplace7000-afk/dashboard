@@ -35,6 +35,7 @@ import { adsDb, adsMetaGet, adsMetaSet } from './ads/store';
 import { getMargins, type MarginRow } from './margin';
 import { rnpItems } from './rnp';
 import { normSku } from './costs';
+import { gate, note } from './gateway';
 import { calcOzonProfit, type OzonCalcInput } from '../../src/utils/ozonProfit';
 
 export type DiscountMode = 'approve' | 'decline' | 'manual';
@@ -245,7 +246,11 @@ const bigIds = (text: string) => text.replace(/"(id|prev_task_id|task_id)"\s*:\s
 
 async function ozPost(path: string, body: unknown): Promise<any> {
   const raw = JSON.stringify(body).replace(/"(id)":"(\d+)"/g, '"$1":$2');
-  const r = await fetch(`https://api-seller.ozon.ru/${path}`, { method: 'POST', headers: ozHeaders(), body: raw, signal: AbortSignal.timeout(30_000) });
+  // Общая очередь Ozon (gateway): опрос заявок не должен выстреливать одновременно с прогревом. Повторов нет — тут есть действия.
+  const url = `https://api-seller.ozon.ru/${path}`;
+  await gate(url, 0);
+  const r = await fetch(url, { method: 'POST', headers: ozHeaders(), body: raw, signal: AbortSignal.timeout(30_000) });
+  note(url, r.status, Number(r.headers.get('retry-after')) || undefined);
   const text = await r.text();
   if (!r.ok) throw new Error(`Ozon ${r.status}: ${text.slice(0, 300)}`);
   return JSON.parse(bigIds(text));

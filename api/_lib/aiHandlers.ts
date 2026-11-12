@@ -253,8 +253,35 @@ async function aiChat(body: any) {
 
   const localContextText = ctxLines.length > 1 ? ctxLines.join('\n') : '';
 
+  // Связь с остальными разделами (12.11.2026): чат раньше видел только продажи, рекламу Ozon и маржу.
+  // Сигналы советника уже сводят продажи, рекламу WB и Ozon, позиции, цены конкурентов, маржу и план
+  // месяца, а советы «Ведения карточек» — рынок, рекламу, текст и план. Отдаём их чату готовыми.
+  const linkLines: string[] = [];
+  try {
+    const { listSignals } = await import('./ads/signals');
+    const lvl = { critical: 'критично', warn: 'внимание', info: 'к сведению' } as const;
+    for (const mp of ['wb', 'ozon'] as const) {
+      const open = listSignals(mp).filter(s => s.status === 'open').slice(0, 12);
+      if (!open.length) continue;
+      linkLines.push(`## Сигналы советника, ${mp === 'wb' ? 'Wildberries' : 'Ozon'} (продажи, реклама, позиции, цены конкурентов, маржа, план месяца)`);
+      for (const s of open) linkLines.push(`- [${lvl[s.level]}] ${s.article || s.name || s.sku}: ${s.title}. ${String(s.text).slice(0, 260)}${s.days > 1 ? ` Держится ${s.days} дн.` : ''}`);
+    }
+  } catch (e) { console.warn('[ai-chat] сигналы советника не добавлены:', (e as Error)?.message); }
+  try {
+    const { allAdvice } = await import('./cardAdvice');
+    const adv = Object.entries(await allAdvice()).filter(([, v]) => v.items.length);
+    if (adv.length) {
+      linkLines.push('## Советы по закреплённым карточкам (раздел «Ведение карточек»: рынок конкурентов, реклама, текст, запас, план)');
+      for (const [key, v] of adv) {
+        const mk = v.market?.known && v.market.medianBuyer != null ? ` · рынок (медиана конкурентов) ${Math.round(v.market.medianBuyer).toLocaleString('ru-RU')} ₽` : '';
+        linkLines.push(`- ${key}${mk}: ${v.items.slice(0, 5).map(a => a.title).join('; ')}`);
+      }
+    }
+  } catch (e) { console.warn('[ai-chat] советы по карточкам не добавлены:', (e as Error)?.message); }
+  const linksText = linkLines.join('\n');
+
   // Сначала server-side (если есть), потом фронтовый поверх — он считается основным.
-  const fullContext = [serverContextText, localContextText].filter(Boolean).join('\n\n');
+  const fullContext = [serverContextText, localContextText, linksText].filter(Boolean).join('\n\n');
 
   // System: статичный кусок (правила) + контекст бизнеса. Оба маркируем
   // cache_control: ephemeral — Anthropic кэширует на 5 мин, повторные вопросы

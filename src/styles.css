@@ -2480,3 +2480,55 @@ code {
 .cm-market { background: var(--bg-2, #fff); border: 1px solid var(--line, #e5e7eb); border-radius: 10px; padding: 12px 14px; font-size: 18px; white-space: normal; text-align: left; }
 .cm-market-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; }
 .cm-market-head .btn { margin-left: auto; }
+
+/* ─── «РНП действия» (12.11.2026): календарь изменений по карточкам. Каркас — от РНП (.rnp-*). ─── */
+.act-table td.act-cell { padding: 0; min-width: 46px; width: 46px; height: 38px; text-align: center; cursor: pointer; border-left: 1px solid #f3f4f7; }
+.act-table td.act-cell:hover { box-shadow: inset 0 0 0 2px var(--accent-soft); }
+.act-table td.act-cell.act-open { box-shadow: inset 0 0 0 2px var(--accent); }
+.act-table td.act-we { background: #fafafb; }
+.act-table th.act-th { padding: 7px 4px; text-align: center; min-width: 46px; font-size: 15px; line-height: 1.2; }
+.act-table th.act-we { color: #b45309; }
+.act-table th.act-today { color: var(--accent-2); box-shadow: inset 0 -3px 0 var(--accent); }
+.act-wd { font-size: 13px; font-weight: 400; color: var(--muted); }
+.act-table .act-total { text-align: right; padding: 8px 12px; color: #475569; font-weight: 600; min-width: 64px; }
+.act-table th.act-total { text-align: right; }
+.act-col-kind { white-space: nowrap; }
+.act-col-kind .act-dot { margin-right: 7px; }
+.act-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--k, #94a3b8); flex-shrink: 0; }
+.act-dots { display: inline-flex; flex-wrap: wrap; gap: 3px; justify-content: center; align-items: center; max-width: 40px; }
+.act-mark { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 7px; background: var(--k); color: #fff; font-size: 14px; font-weight: 700; }
+.act-table td.act-heat1 { background: #eef2f7; }
+.act-table td.act-heat2 { background: #dde5ef; }
+.act-table td.act-heat3 { background: #c8d3e2; }
+.act-table td.act-adson { background: rgba(47,158,68,.13); }
+.act-table td.act-num { font-size: 15px; color: #334155; }
+.act-table tr.act-row-orders td { border-bottom-color: #e3e6eb; }
+.act-table tr.act-row-orders td.rnp-col-metric { color: var(--muted); }
+.act-notemark { color: #b45309; display: inline-flex; }
+.act-caret { border: none; background: none; padding: 4px 2px; cursor: pointer; color: var(--muted); align-self: center; }
+.act-caret:hover { color: var(--text); }
+.act-chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: #fff; font-size: 16px; cursor: pointer; color: var(--muted); }
+.act-chip .act-dot { background: #cbd5e1; }
+.act-chip.on { color: var(--text); border-color: #cbd2dc; background: var(--bg-2); }
+.act-chip.on .act-dot { background: var(--k); }
+
+.act-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100vw); z-index: 40; background: #fff; box-shadow: -12px 0 32px rgba(15,23,42,.16); display: flex; flex-direction: column; font-size: 17px; }
+.act-panel-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 18px 20px 14px; border-bottom: 1px solid var(--border); }
+.act-panel-date { font-size: 22px; font-weight: 700; }
+.act-panel-item { font-weight: 600; margin-top: 4px; overflow-wrap: anywhere; }
+.act-panel-name { font-size: 15px; }
+.act-panel-body { padding: 16px 20px 24px; overflow: auto; display: grid; gap: 14px; align-content: start; }
+.act-ev { border: 1px solid var(--border); border-left: 4px solid var(--k); border-radius: 10px; padding: 12px 14px; display: grid; gap: 8px; }
+.act-ev-head { display: flex; align-items: center; gap: 8px; }
+.act-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.act-diff-cap { font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+.act-diff-text { font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg-2); border-radius: 8px; padding: 8px 10px; max-height: 260px; overflow: auto; }
+.act-imgs { display: flex; flex-wrap: wrap; gap: 6px; }
+.act-imgs img { width: 96px; height: 128px; object-fit: cover; border-radius: 8px; background: var(--bg-2); display: block; }
+.act-empty { color: var(--muted); padding: 10px 0; }
+.act-notes { border-top: 1px solid var(--border); padding-top: 14px; display: grid; gap: 10px; }
+.act-notes-cap { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+.act-note { background: #fff8e6; border-radius: 10px; padding: 10px 12px; display: grid; gap: 6px; }
+.act-note-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.act-note-meta { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+.act-note-input { width: 100%; resize: vertical; font-size: 17px; }

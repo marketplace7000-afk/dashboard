@@ -689,6 +689,12 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
         const { collectRnp } = await import('./rnp');
         await collectRnp().catch(e => console.warn('[warm-extras] РНП не собрана:', (e as Error)?.message));
 
+        // «РНП действия»: слепки карточек и сравнение с прошлыми (сам пропускает, если сверяли менее 3 ч назад).
+        try {
+          const { collectActions } = await import('./rnpActions');
+          console.warn('[warm-extras] действия по карточкам:', await collectActions());
+        } catch (e) { console.warn('[warm-extras] действия по карточкам не сверены:', (e as Error)?.message); }
+
         // Поисковые запросы закреплённых карточек: cards.ts сам пропускает собранные менее суток назад.
         try {
           const { collectCardQueries } = await import('./cards');

@@ -290,6 +290,27 @@ export function rnpLatestStocks(mp: RnpMp): Map<string, number> {
   return out;
 }
 
+/** Сырые факты по выбранным метрикам за период — для «РНП действия» (api/_lib/rnpActions.ts). */
+export function rnpFactRows(mp: RnpMp, metrics: string[], from: string, to: string): { date: string; sku: string; metric: string; value: number }[] {
+  const d = getDb();
+  if (!d || !metrics.length) return [];
+  try {
+    return d.prepare(`SELECT date, sku, metric, value FROM rnp_fact WHERE mp = ? AND date >= ? AND date <= ? AND metric IN (${metrics.map(() => '?').join(',')}) ORDER BY date`)
+      .all(mp, from, to, ...metrics) as any[];
+  } catch { return []; }
+}
+
+/** Последняя известная цена покупателя по каждой карточке — для отсева техкарточек. */
+export function rnpLatestBuyerPrices(mp: RnpMp): Map<string, number> {
+  const out = new Map<string, number>();
+  const d = getDb();
+  if (!d) return out;
+  try {
+    for (const r of d.prepare(`SELECT sku, value FROM rnp_fact WHERE mp = ? AND metric = 'price_buyer' AND value > 0 ORDER BY date`).all(mp) as any[]) out.set(String(r.sku), num(r.value));
+  } catch { /* нет цен — отсев только по себестоимости */ }
+  return out;
+}
+
 /** Ссылка на карточку на площадке по артикулу. */
 export function rnpLinks(mp: RnpMp): Map<string, string> {
   const out = new Map<string, string>();

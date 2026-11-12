@@ -553,6 +553,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return handleDiscounts(req, res, String(parts[1] ?? ''), authUser(req));
   }
 
+  // ─── /api/rnp-actions — «РНП действия»: календарь изменений по карточкам (api/_lib/rnpActions.ts).
+  //   GET    /api/rnp-actions?mp=wb|ozon&from&to
+  //   POST   /api/rnp-actions/check          — сверить карточки сейчас (фоном)
+  //   POST   /api/rnp-actions/note           — { mp, sku, date, text } заметка к дню
+  //   POST   /api/rnp-actions/note/delete    — { id } убрать заметку
+  //   GET    /api/rnp-actions/photo/<sha1>   — сохранённая копия фото WB
+  if (section === 'rnp-actions') {
+    try {
+      const act = await import('./_lib/rnpActions');
+      if (parts[1] === 'photo') {
+        const buf = act.readPhoto(String(parts[2] ?? ''));
+        if (!buf) return res.status(404).end();
+        res.setHeader('Content-Type', 'image/webp');
+        res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+        return res.status(200).send(buf);
+      }
+      if (parts[1] === 'check' && req.method === 'POST') {
+        const already = act.actionsCollecting();
+        void act.collectActions(true).then(s => console.warn('[actions] ручная сверка:', s)).catch(() => {});
+        return res.status(200).json({ ok: true, started: !already });
+      }
+      if (parts[1] === 'note') {
+        if (req.method === 'POST' && parts[2] === 'delete') return res.status(200).json({ ok: act.deleteNote(Number(((req.body ?? {}) as Record<string, unknown>).id)) });
+        if (req.method === 'POST') {
+          const b = (req.body ?? {}) as Record<string, unknown>;
+          const r = act.addNote(b.mp === 'ozon' ? 'ozon' : 'wb', String(b.sku ?? ''), String(b.date ?? ''), String(b.text ?? ''), authUser(req).name);
+          return 'error' in r ? res.status(400).json({ ok: false, error: r.error }) : res.status(200).json({ ok: true, note: r });
+        }
+        return res.status(405).json({ ok: false, error: 'method' });
+      }
+      const mp = req.query.mp === 'ozon' ? 'ozon' : 'wb';
+      return res.status(200).json({ ...act.getActions(mp, String(req.query.from ?? ''), String(req.query.to ?? '')), collecting: act.actionsCollecting() });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
+    }
+  }
+
   // ─── /api/fbo — «Остатки FBO»: склады площадок по кластерам, поставки, спрос (api/_lib/fboStocks.ts).
   //   GET  /api/fbo          → последний снимок (старше 3 ч — фоном собирается новый)
   //   POST /api/fbo/refresh  → собрать заново (фоном)

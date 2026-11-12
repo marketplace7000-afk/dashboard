@@ -5,6 +5,7 @@
  * карточки товаров — раз в сутки; профиль стиля — раз в неделю.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { SLOTS, everyAligned } from '../cronSchedule';
 import {
   getDb, getSettings, saveSettings, readCollectState, readLog, rowToItem, patchItem, getItem, spendThisMonth, usageByDay,
 } from './db';
@@ -257,7 +258,7 @@ export function scheduleReviews(): void {
     }
   };
   setTimeout(tick, 60_000);
-  setInterval(tick, EVERY_MS).unref();
+  everyAligned(SLOTS.reviews, () => { void tick(); }); // по сетке часов, мимо минут Baloo (cronSchedule)
   // Чаты с покупателями — чаще: каждые 5 минут (сообщения в чате ждут ответа быстрее отзывов).
   scheduleChats();
 }

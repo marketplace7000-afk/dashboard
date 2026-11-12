@@ -245,7 +245,7 @@ async function computeOzon(diag: string[]): Promise<Record<string, FactItem>> {
   // 12.11.2026 (опыт на живом кабинете): сразу после выгрузки списка отправлений посекундный бюджет
   // Ozon пуст — первые порции начислений получали 429 при любом темпе. Даём бюджету восстановиться,
   // а порции с отказом повторяем вторым заходом: раньше они молча выпадали из факта логистики.
-  await new Promise(r => setTimeout(r, 10_000));
+  await new Promise(r => setTimeout(r, 30_000)); // 13.11: после списка бюджет пуст до ~25 с (замер)
   const chunks: string[][] = [];
   for (let i = 0; i < postings.length; i += 50) chunks.push(postings.slice(i, i + 50).map(p => p.number));
   const retry: string[][] = [];
@@ -310,7 +310,10 @@ export async function getLogisticsFact(noCache = false): Promise<LogisticsFact> 
     const fresh = await compute();
     // Пустой результат по обеим площадкам не кэшируем надолго — пусть попробует ещё раз.
     const empty = Object.keys(fresh.wb).length === 0 && Object.keys(fresh.ozon).length === 0;
-    await cacheSet(CACHE_KEY, fresh, empty ? 10 * 60_000 : TTL_MS);
+    // 13.11.2026: неполный расчёт (часть порций начислений Ozon получила отказ) держим 2 часа, а не 12:
+    // раньше он жил полсуток, и журнал каждый проход повторял старые отказы как новые.
+    const partial = fresh.diagnostics.some(d => d.includes('accrual/postings'));
+    await cacheSet(CACHE_KEY, fresh, empty ? 10 * 60_000 : partial ? 2 * 60 * 60_000 : TTL_MS);
     return fresh;
   } catch (e) {
     if (cached?.data) return cached.data;

@@ -17,3 +17,60 @@ export const CRON_WARM_INTERVAL_MS = 2 * 60 * 60_000;
  * Запас в 20 минут — на дрейф времени запуска.
  */
 export const REFRESH_LIVE_MS = CRON_WARM_INTERVAL_MS - 20 * 60_000;
+
+/**
+ * Сетка запусков по часам (13.11.2026), а не «от старта службы».
+ *
+ * Те же кабинеты WB и Ozon опрашивает скрипт Baloo (таблица «Склад»), и лимиты у нас общие:
+ *   • каждые 5 минут — старт в :03:04, :08:04, :13:04 …, идёт 10–30 с (заказы, остатки);
+ *   • каждый ЧЁТНЫЙ час МСК в :16 — сверка: отправления Ozon за 30 дней, заказы WB за 3 дня;
+ *   • раз в сутки: 02:02 и 02:06 склады, 03:54 и 04:20 карточки WB, 07:32 история продаж.
+ * Пока проходы шли через setInterval от запуска процесса, после каждой выкладки сетка
+ * сдвигалась и могла встать прямо на минуты Baloo (12.11: проход через 7 секунд после его старта).
+ *
+ * Смещения считаются от начала периода по часам: период 2 ч начинается в чётный час UTC,
+ * то есть в НЕЧЁТНЫЙ час по Москве — на сверку Baloo в :16 чётного часа не попадает.
+ */
+export const SLOTS = {
+  /** Большой проход: нечётный час МСК, :10:30. */
+  warm:           { periodMs: CRON_WARM_INTERVAL_MS, offsetMs: 10 * 60_000 + 30_000 },
+  /** Отзывы и вопросы: :09:30, :19:30 … — после запуска Baloo в :08 и мимо сверки в :16. */
+  reviews:        { periodMs: 10 * 60_000, offsetMs: 9 * 60_000 + 30_000 },
+  /** Чаты: :02:00, :07:00 … — за минуту до Baloo, мимо :16. */
+  chats:          { periodMs: 5 * 60_000, offsetMs: 2 * 60_000 },
+  /** Опрос заявок на скидку (один лёгкий запрос): нечётные минуты, :40 с — после обычного окончания запуска Baloo (:03:34), мимо :16. */
+  discountsPoll:  { periodMs: 2 * 60_000, offsetMs: 100_000 },
+  /** Заказы по заявкам (читает списки отправлений Ozon): :00:40, :10:40 … — мимо :03, :08 и :16. */
+  discountOrders: { periodMs: 10 * 60_000, offsetMs: 40_000 },
+} as const;
+
+/** Сколько миллисекунд до ближайшего запуска по сетке. */
+export function msUntilSlot(periodMs: number, offsetMs: number, now = Date.now()): number {
+  const wait = (offsetMs - (now % periodMs) + periodMs) % periodMs;
+  return wait === 0 ? periodMs : wait;
+}
+
+/** Запускать fn по сетке часов: каждый раз заново считаем время до слота — сетка не уплывает. */
+export function everyAligned(slot: { periodMs: number; offsetMs: number }, fn: () => void): void {
+  const arm = () => {
+    const t = setTimeout(() => { arm(); try { fn(); } catch (e) { console.warn('[schedule] задача упала:', (e as Error)?.message); } },
+      msUntilSlot(slot.periodMs, slot.offsetMs));
+    (t as any).unref?.();
+  };
+  arm();
+}
+
+/** Час по Москве (0–23). */
+export function mskHour(now = Date.now()): number {
+  return new Date(now + 3 * 3_600_000).getUTCHours();
+}
+
+/**
+ * Окно, когда Baloo выгружает карточки WB (03:54 основной кабинет, 04:20 Китай; минута плавает
+ * внутри часа). Свою полную выгрузку карточек в это время не начинаем: при общем отказе по лимиту
+ * Baloo делает три повтора и падает, а его справочник остаётся вчерашним на сутки.
+ */
+export function inBalooCardsWindow(now = Date.now()): boolean {
+  const h = mskHour(now);
+  return h === 3 || h === 4;
+}

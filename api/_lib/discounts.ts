@@ -36,6 +36,7 @@ import { getMargins, type MarginRow } from './margin';
 import { rnpItems } from './rnp';
 import { normSku } from './costs';
 import { gate, note } from './gateway';
+import { SLOTS, everyAligned } from './cronSchedule';
 import { calcOzonProfit, type OzonCalcInput } from '../../src/utils/ozonProfit';
 
 export type DiscountMode = 'approve' | 'decline' | 'manual';
@@ -730,10 +731,14 @@ async function notifyUnset(): Promise<void> {
 }
 
 export function scheduleDiscounts(): void {
-  setTimeout(() => { void runPass('старт'); setInterval(() => { void runPass(); }, POLL_MS).unref(); }, 90_000).unref();
+  // 13.11.2026: по сетке часов, мимо минут Baloo (cronSchedule); первый проход — вскоре после старта.
+  setTimeout(() => { void runPass('старт'); }, 90_000).unref();
+  everyAligned(SLOTS.discountsPoll, () => { void runPass(); });
   setTimeout(() => { void notifyUnset(); setInterval(() => { void notifyUnset(); }, 15 * 60_000).unref(); }, 120_000).unref();
   const orders = () => { if (process.env.OZON_CLIENT_ID && process.env.OZON_API_KEY) syncOrders().catch(e => console.warn("[discounts] заказы по заявкам:", (e as Error).message)); };
-  setTimeout(() => { orders(); setInterval(orders, 10 * 60_000).unref(); }, 150_000).unref();
+  // Читает списки отправлений Ozon — тот же метод, что у сверки Baloo в :16 чётного часа: по сетке :00:40, :10:40 …
+  setTimeout(orders, 150_000).unref();
+  everyAligned(SLOTS.discountOrders, orders);
   const s = getDiscountSettings();
   console.log(`[discounts] заявки на скидку Ozon: опрос раз в 2 мин, автоответ ${s.auto ? 'ВКЛЮЧЁН' : 'выключен (только показ)'}`);
 }

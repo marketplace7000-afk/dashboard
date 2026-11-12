@@ -33,7 +33,7 @@ import { refreshUsdRate } from './aiUsage';
 import { buildSnapshot } from './aiContext';
 import { recordDailySnapshot } from './history';
 import { mskDate, mskIso } from './mskDate';
-import { REFRESH_LIVE_MS } from './cronSchedule';
+import { REFRESH_LIVE_MS, inBalooCardsWindow } from './cronSchedule';
 import { wbFunnelBody, ozAnalyticsBody } from './period';
 import { noteSwallowed } from './log';
 
@@ -302,7 +302,8 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
     const key = makeUpstreamCacheKey('wb:content', 'POST', 'content/v2/get/cards/list', '', browserBody);
     const cached = await cacheGet<{ status: number }>(key);
     const cool = cronCooldownUntil.get(key) ?? 0;
-    if (!force && !needsRefresh(cached, TTL_12H)) {
+    // С 03:00 до 05:00 МСК карточки WB выгружает Baloo — свою полную выгрузку в это время не начинаем.
+    if (!force && (!needsRefresh(cached, TTL_12H) || (cached && inBalooCardsWindow()))) {
       results.push({ ns: 'wb:content', path: 'content/v2/get/cards/list', status: 200, ms: 0, ok: true, skipped: 'fresh' });
     } else if (!force && Date.now() < cool) {
       results.push({ ns: 'wb:content', path: 'content/v2/get/cards/list', status: 0, ms: 0, ok: false, skipped: 'cooldown' });
@@ -507,9 +508,10 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
   void getWbCommissions().catch(() => null);
   // Тарифы логистики/хранения WB (tariffs/box) — для калькулятора прибыли.
   void getWbBoxTariffs().catch(() => null);
-  void getWbStock().catch(() => null); // тёплый кэш остатков WB для фильтра «В продаже»
+  // Оба прогрева ниже листают все карточки WB: в окно выгрузки Baloo (03:00–05:00 МСК) их пропускаем.
+  if (!inBalooCardsWindow()) void getWbStock().catch(() => null); // тёплый кэш остатков WB для фильтра «В продаже»
   // Экономика карточек WB по nmId (комиссия + объём) — полный обход карточек.
-  void getWbCardEcon().catch(() => null);
+  if (!inBalooCardsWindow()) void getWbCardEcon().catch(() => null);
   // Начисления Ozon за 31 день (по дню на запрос, свежие дни перечитываются раз в час):
   // из них считают «Финансы» (/api/ozon-finance).
   // 20.10.2026 убраны прогревы, которые никто не читал: транзит и журнал поставок WB,
@@ -667,7 +669,7 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
       // Кэш 12 ч: отчёты площадок обновляются раз в сутки, чаще дёргать нечего.
       const { getLogisticsFact } = await import('./logisticsFact');
       const lf = await getLogisticsFact().catch(() => null);
-      console.warn(`[warm-extras] факт логистики: ${lf ? `WB товаров ${Object.keys(lf.wb).length}, Ozon ${Object.keys(lf.ozon).length}` : 'не удалось'}${lf?.diagnostics?.length ? ' · ' + lf.diagnostics.join('; ') : ''}`);
+      console.warn(`[warm-extras] факт логистики${lf ? ` (расчёт ${Math.round((Date.now() - lf.fetchedAt) / 60_000)} мин назад)` : ''}: ${lf ? `WB товаров ${Object.keys(lf.wb).length}, Ozon ${Object.keys(lf.ozon).length}` : 'не удалось'}${lf?.diagnostics?.length ? ' · ' + lf.diagnostics.join('; ') : ''}`);
       const { collectAdsBySku } = await import('./agents/adsAdvisor');
         for (const d of [7, 14, 30]) {
           const r = await collectAdsBySku(d).catch(() => null);

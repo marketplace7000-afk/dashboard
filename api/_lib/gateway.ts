@@ -46,7 +46,9 @@ const RULES: Rule[] = [
   { bucket: 'wb-stat:other',     host: 'statistics-api.wildberries.ru',                                             intervalMs: 1_000 },
   // Остальные хосты WB: интервал маленький, но 429 всё равно ставит общую паузу.
   { bucket: 'wb-feedbacks',      host: 'feedbacks-api.wildberries.ru',   intervalMs: 350 },
-  { bucket: 'wb-content',        host: 'content-api.wildberries.ru',     intervalMs: 600 },
+  // 13.11.2026: 1 с вместо 0,6 с — в тот же метод карточек ходит Baloo (пауза 0,65 с); вдвоём не должны
+  // выйти за лимит WB на content-api (100 запросов в минуту на кабинет).
+  { bucket: 'wb-content',        host: 'content-api.wildberries.ru',     intervalMs: 1_000 },
   { bucket: 'wb-common',         host: 'common-api.wildberries.ru',      intervalMs: 1_000 },
   { bucket: 'wb-prices',         host: 'discounts-prices-api.wildberries.ru', intervalMs: 600 },
   { bucket: 'wb-finance',        host: 'finance-api.wildberries.ru',     intervalMs: 60_000 },

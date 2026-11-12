@@ -6,6 +6,7 @@
  * Конституция 1.3.0, принцип X: разрешённая запись — текстовый ответ покупателю в чате WB/Ozon.
  */
 import { getDb, getSettings, rlog, kvGet, kvSet } from './db';
+import { SLOTS, everyAligned } from '../cronSchedule';
 import { askClaude, BudgetExceeded, budgetState } from './claude';
 import { productKnowledge, similarTgPairs, similarPastAnswers } from './kb';
 import { getStyleProfile, syncWbChats, syncOzonChats, fillChatProducts, WB_CHAT_BASE, wbChatHeaders } from './sources';
@@ -355,7 +356,7 @@ export function scheduleChats(): void {
   chatDb();
   const t = () => chatTick().catch(e => console.warn('[chats]', (e as Error).message));
   setTimeout(t, 90_000);
-  setInterval(t, 5 * 60_000).unref();
+  everyAligned(SLOTS.chats, () => { void t(); }); // по сетке часов, мимо минут Baloo (cronSchedule)
 }
 
 /** Для проверок: число диалогов и сообщений. */

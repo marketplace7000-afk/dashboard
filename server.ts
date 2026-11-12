@@ -22,7 +22,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import * as routeModule from './api/route';
-import { CRON_WARM_INTERVAL_MS } from './api/_lib/cronSchedule';
+import { SLOTS, everyAligned } from './api/_lib/cronSchedule';
 
 // api/ — CommonJS (см. api/package.json), а server.ts — ESM. Интероп tsx
 // заворачивает default-экспорт в несколько слоёв ({ default: { default: fn } }).
@@ -184,7 +184,8 @@ function scheduleCacheWarm() {
   setTimeout(run, 15_000);                    // первый прогрев вскоре после старта
   // Интервал — из api/_lib/cronSchedule (одно место истины). Раньше число жило
   // здесь, а /api/meta/status независимо рапортовал «раз в сутки».
-  setInterval(run, CRON_WARM_INTERVAL_MS);    // идемпотентно: свежее не перезапрашивает
+  // 13.11.2026: по сетке часов (нечётный час МСК, :10:30), а не от запуска службы — см. cronSchedule.
+  everyAligned(SLOTS.warm, () => { void run(); });   // идемпотентно: свежее не перезапрашивает
 
   // Выпуски советника по МСК (15.10.2026): за 25–40 минут до выпуска — тот же прогрев,
   // в момент выпуска — сборка сигналов по обеим площадкам (api/_lib/ads/signals.ts).

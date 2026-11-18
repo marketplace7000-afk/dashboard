@@ -4,7 +4,7 @@ import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, PaperPlaneTiltIcon,
   GearIcon,
   CaretRightIcon, MegaphoneIcon,
-  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, CalendarCheckIcon, BinocularsIcon, WarehouseIcon, UsersThreeIcon, PackageIcon, PushPinIcon, TargetIcon
+  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, CalendarCheckIcon, BinocularsIcon, WarehouseIcon, UsersThreeIcon, PackageIcon, PushPinIcon, WalletIcon, TargetIcon
 } from '@phosphor-icons/react';
 import { AgentHosts } from './pages/AgentHosts';
 import { Login } from './pages/Login';
@@ -16,6 +16,7 @@ import { Settings } from './pages/Settings';
 import { Ads } from './pages/Ads';
 import { Competitors } from './pages/Competitors';
 import { Cards } from './pages/Cards';
+import { Finance } from './pages/Finance';
 import { Rnp } from './pages/Rnp';
 import { RnpActions } from './pages/RnpActions';
 import { Plan } from './pages/Plan';
@@ -35,7 +36,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 // закрыт (api/_lib/sklad/archive.ts). Вернуть — false здесь и SKLAD_ENABLED=1 на сервере.
 const SKLAD_ARCHIVED = true;
 
-type Page = 'dashboard' | 'access' | 'sklad' | 'prices' | 'rnp' | 'actions' | 'plan' | 'fbo' | 'reviews' | 'chats' | 'ads' | 'competitors' | 'cards' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'access' | 'sklad' | 'prices' | 'rnp' | 'actions' | 'plan' | 'fbo' | 'reviews' | 'chats' | 'ads' | 'competitors' | 'cards' | 'finance' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -70,6 +71,8 @@ const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   { key: 'competitors', Icon: BinocularsIcon,      label: 'Конкуренты' },
   // 31.10.2026: агент ведёт закреплённые карточки — только владелец, галочки в «Доступах» нет.
   { key: 'cards',       Icon: PushPinIcon,         label: 'Ведение карточек' },
+  // 19.11.2026: платёжный календарь, инвесторы, кредиты — только владелец, галочки в «Доступах» нет.
+  { key: 'finance',     Icon: WalletIcon,          label: 'Финансы' },
 ];
 const NAV_CONFIG: { key: Page; Icon: any; label: string }[] = [
   // «Сборщики» — сеть агентов на ПК (ТЗ «Сеть агентов»): очередь, живой ход
@@ -95,6 +98,7 @@ const TITLES: Record<Page, string> = {
   ads: 'Реклама',
   competitors: 'Конкуренты',
   cards: 'Ведение карточек',
+  finance: 'Финансы · платёжный календарь',
   collectors: 'Сборщики · агенты на ПК',
   settings: 'Настройки',
 };
@@ -112,7 +116,7 @@ export function App() {
   // закрывает им остальное сам, здесь только меню.
   const [me, setMe] = useState<{ name: string; role: Role; sections: string[] } | null>(null);
   const restricted = !!me && me.sections.every(s => s === 'sklad');
-  const allowed = (k: Page) => k === 'actions' ? !restricted : k === 'access' || k === 'cards' ? me?.role === 'owner'
+  const allowed = (k: Page) => k === 'actions' ? !restricted : k === 'access' || k === 'cards' || k === 'finance' ? me?.role === 'owner'
     : !(SKLAD_ARCHIVED && k === 'sklad') && (!me || me.sections.includes(k));
 
   useEffect(() => {
@@ -234,7 +238,7 @@ export function App() {
             </div>
           </div>
         </div>
-        <div className={`content ${view === 'rnp' || view === 'actions' || view === 'plan' ? 'content-wide' : view === 'prices' || view === 'ads' || view === 'competitors' || view === 'cards' || view === 'sklad' || view === 'fbo' ? 'content-prices' : ''}`}>
+        <div className={`content ${view === 'rnp' || view === 'actions' || view === 'plan' || view === 'finance' ? 'content-wide' : view === 'prices' || view === 'ads' || view === 'competitors' || view === 'cards' || view === 'sklad' || view === 'fbo' ? 'content-prices' : ''}`}>
           <ErrorBoundary key={view ?? 'none'} name={view ? TITLES[view] : ''}>
           {view === 'dashboard' && <Dashboard onNav={navTo} can={k => allowed(k as Page)} />}
           {view === 'sklad' && <Sklad />}
@@ -248,6 +252,7 @@ export function App() {
           {view === 'ads' && <Ads />}
           {view === 'competitors' && <Competitors />}
           {view === 'cards' && <Cards onOpenAds={() => setPage('ads')} onOpenCompetitors={() => setPage('competitors')} />}
+          {view === 'finance' && <Finance />}
           {view === 'settings' && <Settings />}
           {view === 'collectors' && <AgentHosts />}
           {view === 'access' && <Access />}

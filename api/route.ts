@@ -506,6 +506,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ─── /api/finance — «Финансы»: платёжный календарь, инвесторы, кредиты. Только владелец (permissions.ts).
+  if (section === 'finance') {
+    const { handleFinance } = await import('./_lib/finance');
+    const u = authUser(req);
+    const r = await handleFinance(parts, req.method ?? 'GET', req.query, req.body, u.name || u.login || 'владелец');
+    return res.status(r.status).json(r.json);
+  }
+
   // ─── /api/cards — «Ведение карточек», только владелец (permissions.ts)
   //   GET  /api/cards              → закреплённые карточки с цифрами из РНП
   //   GET  /api/cards/catalog?mp=  → товары, которые можно закрепить

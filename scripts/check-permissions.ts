@@ -32,6 +32,12 @@ const allSections = user('manager', SECTIONS.filter(() => true));
 check('менеджер со всеми галочками не читает', ok(allSections, 'cards', [], 'GET'), false);
 check('менеджер со всеми галочками не закрепляет', ok(allSections, 'cards', ['pin'], 'POST'), false);
 check('закупщик не читает', ok(user('buyer', ['sklad']), 'cards', ['catalog'], 'GET'), false);
+// «Финансы» — только владелец (19.11.2026)
+check('финансы: владелец читает', ok(owner, 'finance', ['summary'], 'GET'), true);
+check('финансы: владелец пишет', ok(owner, 'finance', ['op'], 'POST'), true);
+check('финансы: менеджер со всеми галочками не читает', ok(allSections, 'finance', ['month'], 'GET'), false);
+check('финансы: менеджер со всеми галочками не пишет', ok(allSections, 'finance', ['op'], 'POST'), false);
+check('финансы: склад не читает', ok(user('warehouse', ['sklad']), 'finance', ['investors'], 'GET'), false);
 check('галочки раздела нет', (SECTIONS as readonly string[]).includes('cards'), false);
 
 console.log('Менеджер только с «Отзывами»');

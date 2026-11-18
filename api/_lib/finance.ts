@@ -346,6 +346,7 @@ export async function handleFinance(parts: string[], method: string, query: any,
   try {
     if (method === 'GET') {
       if (a === 'lists') return { status: 200, json: { ok: true, lists: lists() } };
+      if (a === 'ops') return { status: 200, json: { ok: true, ops: allOps(), settings: getSettings(), today } };
       if (a === 'meta') return { status: 200, json: { ok: true, ...meta() } };
       if (a === 'month') {
         const m = /^\d{4}-\d{2}$/.test(String(query?.m ?? '')) ? String(query.m) : today.slice(0, 7);

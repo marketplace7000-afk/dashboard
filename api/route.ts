@@ -169,6 +169,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return handleAgentApi(req, res, rest);
   }
 
+  // ─── /api/finance/* для агента финансов на сервере (19.11.2026) ───────────
+  // Свой ключ FIN_AGENT_KEY в заголовке x-fin-agent-key: агент читает раздел и
+  // отмечает строки/остаток. Больше ничего (инвесторы, кредиты, справочники — только владелец).
+  if (section === 'finance' && req.headers['x-fin-agent-key']) {
+    const expected = (process.env.FIN_AGENT_KEY || '').trim();
+    if (!expected || !secretEquals(String(req.headers['x-fin-agent-key']).trim(), expected)) return res.status(401).json({ error: 'fin_agent_unauthorized' });
+    const what = rest[0] ?? '';
+    if (req.method === 'POST' && what !== 'op' && what !== 'settings') return res.status(403).json({ error: 'forbidden', reason: 'агенту можно только отмечать строки и остаток' });
+    if (req.method === 'POST' && what === 'op' && rest[1] === 'delete') return res.status(403).json({ error: 'forbidden', reason: 'агент строки не удаляет' });
+    const { handleFinance } = await import('./_lib/finance');
+    const r = await handleFinance(parts, req.method ?? 'GET', req.query, req.body, 'Агент финансов');
+    return res.status(r.status).json(r.json);
+  }
+
   // Ingest витрин принимает ключ агента наравне с сессией (ТЗ, принцип VIII):
   // хост шлёт цены сюда же, куда их слал ручной сценарий.
   const agentIngestOk = (section === 'wb-showcase-ingest' || section === 'ozon-showcase-ingest' || section === 'wb-global-showcase-ingest')

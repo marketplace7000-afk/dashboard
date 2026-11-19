@@ -238,7 +238,7 @@ export function ProductDrawer({ d, p, onClose, onChanged, setToast, openCampaign
           <div><span className="muted">Цена · маржа</span><b>{rub(p.price)} · {pct(p.marginPct)}</b></div>
           <div><span className="muted">Позиция в поиске</span><b>{p.avgPos == null ? '–' : nf1.format(p.avgPos)}</b></div>
           {p.ad?.pos && (
-            <div title="Данные WB по рекламным кампаниям товара: медиана места за день, в среднем за период">
+            <div title="Данные WB по рекламным кампаниям товара: медиана места за день, середина за период">
               <span className="muted">Место в поиске: с рекламой · без неё</span>
               <b>{nf1.format(p.ad.pos.withAd)} · {nf1.format(p.ad.pos.noAd)}</b>
               <span className="muted ad2-small">{p.ad.pos.lift > 0 ? `реклама подняла на ${nf1.format(p.ad.pos.lift)} мест` : "реклама не подняла товар"}</span>

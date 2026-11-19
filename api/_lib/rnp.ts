@@ -11,7 +11,7 @@
  * Сбор (collectRnp) идёт из цепочки warm-extras раз в 2 часа и почти ничего не
  * спрашивает у площадок сверх обычного прогрева:
  *   WB   заказы и продажи      — кэш statistics supplier/orders|sales (30 дн)
- *        реклама по дням       — кэш adv/v3/fullstats (days[].apps[].nms[])
+ *        реклама по дням       — хранилище «Рекламы» (ad_stat_day ← /api/advert/v4/fullstats с 19.11.2026)
  *        остатки               — getWbStock() (снимок на сегодня)
  *        средняя позиция       — search-report/table/details за сутки (подписка «Джем»)
  *        СПП                   — поле spp тех же заказов

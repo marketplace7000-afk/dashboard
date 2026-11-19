@@ -31,6 +31,7 @@ function check(name: string, actual: unknown, expected: unknown): void {
 async function main() {
   console.log('Шлюз');
   check('fullstats → своё ведро 20 с', ruleFor('https://advert-api.wildberries.ru/adv/v3/fullstats?ids=1')?.bucket, 'wb-adv:fullstats');
+  check('fullstats v4 → то же ведро', ruleFor('https://advert-api.wildberries.ru/api/advert/v4/fullstats?advertIds=1')?.bucket, 'wb-adv:fullstats');
   check('bids/min не попадает в ведро bids', ruleFor('https://advert-api.wildberries.ru/api/advert/v1/bids/min')?.bucket, 'wb-adv:bids-min');
   check('чужие хосты без правила', ruleFor('https://api.anthropic.com/v1/messages'), null);
 

@@ -5,8 +5,8 @@
  * Бережём лимиты площадок:
  *   WB   кампании и ставки — GET /api/advert/v2/adverts (5/с, один-два запроса);
  *        дневные лимиты CPC — GET /api/advert/v0/daily-limits (5/мин, ≤100 id);
- *        статистика — НЕ запрашиваем: берём уже прогретый cron-ом adv/v3/fullstats
- *        (окна 7 и 30 дней) из кэша. Тот же ответ читают «Реклама» и РНП.
+ *        статистика — НЕ запрашиваем: берём уже прогретый cron-ом /api/advert/v4/fullstats
+ *        (с 19.11.2026, до того adv/v3/fullstats; окна 7 и 30 дней) из кэша. Тот же ответ читают «Реклама» и РНП.
  *   Ozon список кампаний — GET /api/client/campaign; товары и ставки —
  *        GET /api/client/campaign/{id}/v2/products по активным кампаниям «Оплата за клик».
  *        Лимит Performance API — 100 000 запросов в сутки, это капля.
@@ -174,19 +174,94 @@ async function syncWbCampaigns(): Promise<string> {
   return `WB: кампаний ${campaigns.length}, товаров ${items.length}, лимитов ${limits}${limitsNote}`;
 }
 
-function ingestWbFullstats(): string {
-  // Все прогретые окна (7 и 30 дней), от старых к свежим: свежие перезапишут дни.
-  const entries = cacheEntriesByPrefix<{ status: number; text: string }>(
-    makeUpstreamCachePrefix('wb:promotion', 'GET', 'adv/v3/fullstats', '', undefined),
-  );
-  let rows = 0;
-  for (const e of entries) {
-    if (!e?.data?.text || e.data.status >= 400) continue;
-    try { rows += saveStatDays('wb', parseWbFullstats(JSON.parse(e.data.text))); } catch (err) {
-      console.warn('[ads-sync] fullstats не разобран:', (err as Error).message);
+type V4Row = {
+  advertId?: number; nmId?: number; date?: string; placement?: string; conversionType?: string;
+  views?: number; clicks?: number; sum?: number; atbs?: number; orders?: number; shks?: number; sumPrice?: number; canceled?: number; avgPos?: number;
+};
+
+/**
+ * Разбор /api/advert/v4/fullstats (19.11.2026) в те же строки «кампания × товар × день».
+ * WB дробит строку по зоне показа (поиск/рекомендации) и типу конверсии (прямой
+ * заказ / другой вариант карточки / другой товар) — складываем всё, как было в v3:
+ * сверка 19.11 дала те же расход, клики, корзины, заказы и сумму заказов.
+ * Средняя позиция — только у «поиск + прямой»; 0 считаем «нет данных».
+ * `views3` — показы из v3 по ключу «кампания|день|товар»: v4 у кампаний «за клик»
+ * отдаёт показы 0, и пока v3 жив, подставляем их оттуда.
+ */
+export function parseWbFullstatsV4(json: unknown, views3?: Map<string, number>): StatDayRow[] {
+  const j: any = json;
+  const arr: V4Row[] = Array.isArray(j?.rows) ? j.rows : Array.isArray(j) ? j : [];
+  const acc = new Map<string, StatDayRow>();
+  for (const r of arr) {
+    if (typeof r?.advertId !== 'number' || !r.nmId) continue;
+    const date = String(r.date ?? '').slice(0, 10);
+    if (!date) continue;
+    const cid = String(r.advertId);
+    const key = `${cid}|${date}|${r.nmId}`;
+    const row = acc.get(key) ?? {
+      date, campaign_id: cid, sku: String(r.nmId),
+      views: 0, clicks: 0, spend: 0, carts: 0, orders: 0, revenue: 0, avg_pos: null, shks: 0, canceled: 0,
+    };
+    row.views += num(r.views);
+    row.clicks += num(r.clicks);
+    row.spend += num(r.sum);
+    row.carts += num(r.atbs);
+    row.orders += num(r.orders);
+    row.revenue += num(r.sumPrice);
+    row.shks = (row.shks ?? 0) + num(r.shks);
+    row.canceled = (row.canceled ?? 0) + num(r.canceled);
+    if (r.placement === 'search' && r.conversionType === 'direct' && num(r.avgPos) > 0) row.avg_pos = num(r.avgPos);
+    acc.set(key, row);
+  }
+  const out = [...acc.values()];
+  if (views3?.size) {
+    for (const row of out) {
+      if (row.views > 0) continue;
+      const v = views3.get(`${row.campaign_id}|${row.date}|${row.sku}`);
+      if (v) row.views = v;
     }
   }
-  return entries.length ? `WB статистика: окон ${entries.length}, строк ${rows}` : 'WB статистика: fullstats ещё не прогрет';
+  return out;
+}
+
+function ingestWbFullstats(): string {
+  // Все прогретые окна (7 и 30 дней), от старых к свежим: свежие перезапишут дни.
+  const v3 = cacheEntriesByPrefix<{ status: number; text: string }>(
+    makeUpstreamCachePrefix('wb:promotion', 'GET', 'adv/v3/fullstats', '', undefined),
+  );
+  const v4 = cacheEntriesByPrefix<{ status: number; text: string }>(
+    makeUpstreamCachePrefix('wb:promotion', 'GET', 'api/advert/v4/fullstats', '', undefined),
+  );
+  const ok = (e: { data?: { status: number; text: string } }) => !!e?.data?.text && e.data.status < 400;
+  let rows = 0;
+  if (!v4.length) {
+    // Переходный случай: v4 ещё не прогрет (первый проход после выкладки).
+    for (const e of v3) {
+      if (!ok(e)) continue;
+      try { rows += saveStatDays('wb', parseWbFullstats(JSON.parse(e.data.text))); } catch (err) {
+        console.warn('[ads-sync] fullstats v3 не разобран:', (err as Error).message);
+      }
+    }
+    return v3.length ? `WB статистика (v3): окон ${v3.length}, строк ${rows}` : 'WB статистика: fullstats ещё не прогрет';
+  }
+  // Основной путь — v4. Из v3 (сейчас там только кампании «за клик») берём лишь
+  // показы; строки v3 не пишем, чтобы старое окно не перетёрло свежие дни v4.
+  const views3 = new Map<string, number>();
+  for (const e of v3) {
+    if (!ok(e)) continue;
+    try {
+      for (const r of parseWbFullstats(JSON.parse(e.data.text))) {
+        if (r.views > 0) views3.set(`${r.campaign_id}|${r.date}|${r.sku}`, r.views);
+      }
+    } catch (err) { console.warn('[ads-sync] показы из fullstats v3 не разобраны:', (err as Error).message); }
+  }
+  for (const e of v4) {
+    if (!ok(e)) continue;
+    try { rows += saveStatDays('wb', parseWbFullstatsV4(JSON.parse(e.data.text), views3)); } catch (err) {
+      console.warn('[ads-sync] fullstats v4 не разобран:', (err as Error).message);
+    }
+  }
+  return `WB статистика (v4): окон ${v4.length}, строк ${rows}${views3.size ? `, показы cpc из v3: ${views3.size}` : ''}`;
 }
 
 // ─── Ozon ────────────────────────────────────────────────────────────────────

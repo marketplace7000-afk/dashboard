@@ -26,7 +26,8 @@ type Rule = { bucket: string; host: string; path?: RegExp; intervalMs: number };
 // Порядок важен: первое совпадение по пути выигрывает, правило без path — запасное для хоста.
 const RULES: Rule[] = [
   // ── WB Продвижение (advert-api) ── интервалы из 08-promotion.yaml, персональный ключ
-  { bucket: 'wb-adv:fullstats',  host: 'advert-api.wildberries.ru', path: /^\/adv\/v3\/fullstats/,                 intervalMs: 20_000 },
+  { bucket: 'wb-adv:fullstats',  host: 'advert-api.wildberries.ru', path: /^\/(adv\/v3|api\/advert\/v4)\/fullstats/, intervalMs: 20_000 }, // v3 и v4 — в одно ведро: лимит, скорее всего, общий
+  { bucket: 'wb-adv:positions', host: 'advert-api.wildberries.ru', path: /^\/api\/advert\/v0\/positions/,         intervalMs: 6_000 },
   { bucket: 'wb-adv:daily-lim',  host: 'advert-api.wildberries.ru', path: /^\/api\/advert\/v0\/daily-limits/,       intervalMs: 12_000 },
   { bucket: 'wb-adv:bids-reco',  host: 'advert-api.wildberries.ru', path: /^\/api\/advert\/v0\/bids\/recommendations/, intervalMs: 12_000 },
   { bucket: 'wb-adv:bids-min',   host: 'advert-api.wildberries.ru', path: /^\/api\/advert\/v1\/bids\/min/,          intervalMs: 3_000 },

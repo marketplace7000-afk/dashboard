@@ -562,36 +562,70 @@ async function cronPass(req: VercelRequest, res: VercelResponse) {
       const chunks: number[][] = [];
       for (let i = 0; i < ids100.length; i += 50) chunks.push(ids100.slice(i, i + 50)); // WB max 50/запрос
 
+      // 19.11.2026: статистика — новый плоский метод /api/advert/v4/fullstats
+      // (строка = кампания × товар × день × зона показа × тип конверсии). Старый
+      // /adv/v3/fullstats WB отключит позже. Сверка 19.11 за 12–18.11: расход, клики,
+      // корзины, заказы и средняя позиция совпали до копейки, НО у кампаний «за клик»
+      // (cpc) v4 отдаёт показы = 0. Пока v3 жив, догружаем им только cpc-кампании
+      // (один запрос на окно) — сборщик берёт оттуда показы. Когда WB выключит v3
+      // (404/410), догрузка сама прекратится, а показы cpc станут нулём.
+      let cpcIds: number[] = [];
+      try {
+        const { listCampaigns } = await import('./ads/store');
+        const all = new Set(ids100);
+        cpcIds = listCampaigns('wb').filter(c => c.payment === 'cpc' && all.has(Number(c.id))).map(c => Number(c.id)).sort((a, b) => a - b).slice(0, 50);
+      } catch (e) { noteSwallowed('wb-fullstats', 'список cpc-кампаний не прочитан', e); }
+      let v3Alive = true;
+
       let warmedOk = 0;
       let anyPartial = false;
       for (const back of [7, 30]) {
         const merged: any[] = [];
         let chunkFail = false;
         for (const ch of chunks) {
-          await sleep(65_000); // рекламный API ~1 req/min
-          const q = `?ids=${ch.join(',')}&beginDate=${iso(back)}&endDate=${iso(0)}`;
-          const r = await fetchWithRetry(`${adv.base}/adv/v3/fullstats${q}`, { method: 'GET', headers: adv.headers }, { maxRetries: 1 });
+          await sleep(65_000); // рекламный API: 3 запроса в минуту, держим запас
+          const q = `?advertIds=${ch.join(',')}&beginDate=${iso(back)}&endDate=${iso(0)}`;
+          const r = await fetchWithRetry(`${adv.base}/api/advert/v4/fullstats${q}`, { method: 'GET', headers: adv.headers }, { maxRetries: 1 });
           if (r.ok && r.status !== 204) {
-            try { const arr = JSON.parse(await r.text()); if (Array.isArray(arr)) merged.push(...arr); } catch (e) { noteSwallowed('wb-fullstats', 'чанк fullstats не разобран', e); }
+            try { const j = JSON.parse(await r.text()); if (Array.isArray(j?.rows)) merged.push(...j.rows); } catch (e) { noteSwallowed('wb-fullstats', 'чанк fullstats v4 не разобран', e); }
           } else if (!r.ok) { chunkFail = true; console.warn(`[wb-fullstats] back=${back} chunk → ${r.status}`); }
         }
         // console.warn (не log): под systemd обычный вывод буферизуется и не виден
         // в journalctl, а предупреждения идут в stderr сразу (03.08 гоняли логи впустую).
-        console.warn(`[wb-fullstats] back=${back} merged=${merged.length} chunkFail=${chunkFail}`);
+        console.warn(`[wb-fullstats] back=${back} rows=${merged.length} chunkFail=${chunkFail}`);
         // Кэшируем даже при частичном сбое: раньше один упавший по лимиту WB чанк
         // отбрасывал ВСЮ выгрузку окна, и WB-реклама почти никогда не прогревалась
         // (03.08: Ozon грелся, WB — нет). Неполные данные лучше пустоты — не хватит
         // нескольких кампаний, а не всех. Полноту дожмёт следующий цикл (см. ниже).
         if (merged.length > 0) {
-          const browserQs = `?ids=${ids100.join(',')}&beginDate=${iso(back)}&endDate=${iso(0)}`;
-          const key = makeUpstreamCacheKey('wb:promotion', 'GET', 'adv/v3/fullstats', browserQs, undefined);
-          await cacheSet(key, { status: 200, ct: 'application/json', text: JSON.stringify(merged) }, TTL_3H);
+          const qs = `?advertIds=${ids100.join(',')}&beginDate=${iso(back)}&endDate=${iso(0)}`;
+          const key = makeUpstreamCacheKey('wb:promotion', 'GET', 'api/advert/v4/fullstats', qs, undefined);
+          await cacheSet(key, { status: 200, ct: 'application/json', text: JSON.stringify({ rows: merged }) }, TTL_3H);
           warmedOk++;
           if (chunkFail) anyPartial = true;
           const spend = merged.reduce((s: number, it: any) => s + (Number(it?.sum) || 0), 0);
           console.warn(`[wb-fullstats] warmed back=${back} spend=${Math.round(spend)}${chunkFail ? ' (частично)' : ''}`);
         } else if (chunkFail) {
           anyPartial = true;
+        }
+
+        // Показы cpc-кампаний — из v3, пока он жив (см. выше). Сбой тут не делает
+        // прогрев «частичным»: без него теряются только показы cpc, не расход.
+        if (cpcIds.length && v3Alive) {
+          await sleep(65_000);
+          const q3 = `?ids=${cpcIds.join(',')}&beginDate=${iso(back)}&endDate=${iso(0)}`;
+          const r3 = await fetchWithRetry(`${adv.base}/adv/v3/fullstats${q3}`, { method: 'GET', headers: adv.headers }, { maxRetries: 1 });
+          if (r3.status === 404 || r3.status === 410) {
+            v3Alive = false;
+            console.warn(`[wb-fullstats] v3 отключён WB (${r3.status}) — показы cpc-кампаний больше не догружаем`);
+          } else if (r3.ok && r3.status !== 204) {
+            const t3 = await r3.text();
+            const key3 = makeUpstreamCacheKey('wb:promotion', 'GET', 'adv/v3/fullstats', q3, undefined);
+            await cacheSet(key3, { status: 200, ct: 'application/json', text: t3 }, TTL_3H);
+            console.warn(`[wb-fullstats] back=${back} показы cpc из v3: кампаний ${cpcIds.length}`);
+          } else if (!r3.ok) {
+            console.warn(`[wb-fullstats] back=${back} показы cpc (v3) → ${r3.status}`);
+          }
         }
       }
       // Отметку «свежо» ставим ТОЛЬКО при полном прогреве: если данные частичны,

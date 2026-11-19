@@ -13,7 +13,7 @@ import { PAYMENT, StatusChip, bidTypeLabel, useKept, type Kept, type Pending } f
  * менеджер сам выбирает колонки, выбор запоминается в браузере отдельно для WB и Ozon.
  */
 type ColKey = 'spend' | 'views' | 'clicks' | 'ctr' | 'cpc' | 'cpm' | 'carts' | 'cartRate' | 'orders' | 'cartToOrder' | 'cr'
-  | 'shks' | 'canceled' | 'cpo' | 'revenue' | 'drr' | 'avgPos';
+  | 'shks' | 'canceled' | 'cpo' | 'revenue' | 'drr' | 'avgPos' | 'posAd' | 'posNoAd' | 'posLift';
 type Col = { key: ColKey; label: string; hint: string; wbOnly?: boolean; val: (s: Ads2Stat) => number | null; fmt: (s: Ads2Stat) => string; bad?: (s: Ads2Stat) => boolean };
 const COLS: Col[] = [
   { key: 'spend', label: 'Расход', hint: 'Затраты на рекламу за период', val: s => s.spend, fmt: s => rub(s.spend) },
@@ -33,14 +33,31 @@ const COLS: Col[] = [
   { key: 'revenue', label: 'Сумма заказов', hint: 'Сумма заказов из рекламы', val: s => s.revenue, fmt: s => rub(s.revenue) },
   { key: 'drr', label: 'ДРР', hint: 'Расход ÷ сумма заказов из рекламы', val: s => s.drr, fmt: s => pct(s.drr), bad: s => s.drr != null && s.drr > 10 },
   { key: 'avgPos', label: 'Позиция', hint: 'Средняя позиция в выдаче (WB, по показам)', val: s => s.avgPos, fmt: s => (s.avgPos == null ? '–' : nf1.format(s.avgPos)) },
+  { key: 'posAd', label: 'Место с рекламой', hint: 'Место в поиске WB с рекламой: медиана за день, в среднем за период', wbOnly: true, val: s => s.pos?.withAd ?? null, fmt: s => (s.pos ? nf1.format(s.pos.withAd) : '–') },
+  { key: 'posNoAd', label: 'Без рекламы', hint: 'Какое место было бы в поиске WB без рекламы', wbOnly: true, val: s => s.pos?.noAd ?? null, fmt: s => (s.pos ? nf1.format(s.pos.noAd) : '–') },
+  { key: 'posLift', label: 'Реклама подняла', hint: 'На сколько мест реклама подняла товар в поиске WB: место без рекламы минус место с рекламой', wbOnly: true, val: s => s.pos?.lift ?? null, fmt: s => (s.pos ? `${s.pos.lift > 0 ? '+' : ''}${nf1.format(s.pos.lift)}` : '–') },
 ];
-const DEFAULT_COLS: ColKey[] = ['spend', 'views', 'clicks', 'ctr', 'cpc', 'carts', 'orders', 'cr', 'cpo', 'drr'];
+const DEFAULT_COLS: ColKey[] = ['spend', 'views', 'clicks', 'ctr', 'cpc', 'carts', 'orders', 'cr', 'cpo', 'drr', 'posNoAd', 'posLift'];
+/** Колонки, добавленные позже: один раз дописываем их к сохранённому выбору, чтобы менеджер их увидел. */
+const ADDED_COLS: { tag: string; keys: ColKey[] }[] = [{ tag: 'pos-2026-11-19', keys: ['posNoAd', 'posLift'] }];
 const colsFor = (mp: Ads2Mp) => COLS.filter(c => mp === 'wb' || !c.wbOnly);
 
 function useCols(mp: Ads2Mp) {
   const ls = `ads2:cols:${mp}`;
   const [keys, setKeys] = useState<ColKey[]>(() => {
-    try { const v = JSON.parse(localStorage.getItem(ls) ?? ''); if (Array.isArray(v) && v.length) return v; } catch { /* по умолчанию */ }
+    try {
+      const v = JSON.parse(localStorage.getItem(ls) ?? '');
+      if (Array.isArray(v) && v.length) {
+        let k = v as ColKey[];
+        for (const a of ADDED_COLS) {
+          if (localStorage.getItem(`${ls}:${a.tag}`)) continue;
+          k = [...k, ...a.keys.filter(x => !k.includes(x))];
+          localStorage.setItem(`${ls}:${a.tag}`, '1');
+          localStorage.setItem(ls, JSON.stringify(k));
+        }
+        return k;
+      }
+    } catch { /* по умолчанию */ }
     return DEFAULT_COLS;
   });
   const save = (k: ColKey[]) => { setKeys(k); try { localStorage.setItem(ls, JSON.stringify(k)); } catch { /* не критично */ } };

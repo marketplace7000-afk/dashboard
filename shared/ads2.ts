@@ -28,6 +28,8 @@ export type Ads2Stat = {
   cpm: number | null; cartRate: number | null; cartToOrder: number | null; cr: number | null;
   /** WB: заказанные штуки и отмены; у Ozon нет — null. */
   shks: number | null; canceled: number | null;
+  /** 19.11.2026, WB: место в поиске за период — с рекламой, без неё и на сколько мест реклама подняла (среднее дневных медиан). */
+  pos?: { withAd: number; noAd: number; lift: number; days: number } | null;
 };
 
 export type Ads2CampaignItem = {

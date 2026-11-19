@@ -324,7 +324,12 @@ function OpForm({ op, meta, onClose, onSaved }: { op: Partial<FinOp>; meta: Meta
           <input className="input" list="fin-acc" value={f.account} onChange={e => setF({ ...f, account: e.target.value })} />
           <datalist id="fin-acc">{meta.accounts.map(a => <option key={a} value={a} />)}</datalist>
         </Field>
-        <Field label="Ответственный"><input className="input" value={f.resp} onChange={e => setF({ ...f, resp: e.target.value })} /></Field>
+        <Field label="Ответственный">
+          <select className="input" value={f.resp} onChange={e => setF({ ...f, resp: e.target.value })}>
+            <option value="">— не выбран —</option>
+            {[...RESP_PEOPLE, ...(f.resp && !RESP_PEOPLE.includes(f.resp) ? [f.resp] : [])].map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </Field>
         <Field label="Комментарий" wide><textarea className="input" rows={2} value={f.comment} onChange={e => setF({ ...f, comment: e.target.value })} /></Field>
       </div>
       {op.key && <p className="muted fin-note">Эту строку поставил агент ({op.source}). Сумму и дату можно поправить — агент её не перезапишет.</p>}
@@ -621,6 +626,9 @@ function ListsTab({ onChange }: { onChange: () => void }) {
     </div>
   );
 }
+
+/** Кто отвечает за операцию — выбор в форме (19.11, просьба владельца). Старое значение не из списка сохраняется. */
+const RESP_PEOPLE = ['Александр', 'Дмитрий', 'Бухгалтер'];
 
 // ═══ мелочи ════════════════════════════════════════════════════════════════
 function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {

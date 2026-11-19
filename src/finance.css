@@ -299,3 +299,95 @@
 }
 .fin-table td:first-child { white-space: nowrap; }
 @media (max-width: 1100px) { .fin-deal-act { display: flex; flex-wrap: wrap; } }
+
+/* 19.11 поздно: блоки отделены от белого фона — серо-голубой фон карточек, белые строки внутри */
+.sa.fin { --fin-panel: #eef1f5; --fin-panel-b: #d9dfe7; --fin-head: #e2e7ee; --fin-row: #f8f9fb; }
+
+/* инвесторы */
+.sa.fin .card.fin-person, .sa.fin .card.fin-loan { background: var(--fin-panel); border: 1px solid var(--fin-panel-b); box-shadow: none; }
+.fin-person .fin-deals { gap: 10px; }
+.fin-person .fin-deal { background: #fff; border: 1px solid var(--fin-panel-b); border-top: 1px solid var(--fin-panel-b); border-radius: 12px; padding: 16px 40px 16px 20px; }
+.fin-person .fin-deal.late { margin: 0; background: #fff7e6; border-color: #f1d9a6; padding: 16px 40px 16px 20px; }
+.fin-person .fin-deal.closed { background: #f7f8fa; }
+.fin-person-h { margin-bottom: 14px; }
+
+/* выплаты инвесторам: полоса сверху */
+.fin-pay { display: flex; flex-direction: column; gap: 14px; }
+.fin-pay-h { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.fin-legend { display: inline-flex; align-items: center; gap: 8px; font-size: var(--sa-cap); color: var(--muted); }
+.fin-legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; margin-left: 8px; }
+.fin-legend i.int, .fin-pay-bar i.int { background: var(--accent); }
+.fin-legend i.body, .fin-pay-bar i.body { background: #e3a008; }
+.fin-pay-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.fin-pay-months { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.fin-pay-m { all: unset; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px; border-radius: 10px; background: var(--fin-row); border: 1px solid var(--border); min-width: 0; text-align: center; }
+.fin-pay-m:hover { background: var(--accent-soft); }
+.fin-pay-m.on { background: var(--accent-soft); border-color: var(--accent); }
+.fin-pay-m:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fin-pay-m b { font-size: var(--sa-cap); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fin-pay-m .muted { font-size: var(--sa-small); }
+.fin-pay-bar { display: flex; flex-direction: column-reverse; justify-content: flex-start; width: 34px; height: 80px; background: var(--bg-3); border-radius: 6px; overflow: hidden; }
+.fin-pay-bar i { display: block; width: 100%; }
+.fin-pay-list { background: var(--fin-row); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; min-width: 0; }
+.fin-pay-lh { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; margin-bottom: 6px; font-size: var(--sa-body); }
+.fin-pay-lh .fin-link { font-size: var(--sa-cap); }
+.fin-pay-list ul { list-style: none; margin: 0; padding: 0; }
+.fin-pay-list li { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--border); font-size: var(--sa-cap); }
+.fin-pay-list li:first-child { border-top: 0; }
+.fin-pay-list li .d { font-variant-numeric: tabular-nums; color: var(--muted); }
+.fin-pay-list li .w { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.fin-pay-list li small { font-size: var(--sa-small); color: var(--muted); }
+.fin-pay-list li b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fin-pay-list li.late .d, .fin-pay-list li.late small { color: var(--bad); }
+.fin-pay-list .fin-note { margin-top: 6px; }
+
+/* кредиты */
+.sa.fin .fin-col > .card.fin-loan { padding: 22px 24px; }
+.fin-loan .fin-loan-grid > div { background: #fff; border: 1px solid var(--fin-panel-b); border-radius: 12px; padding: 12px 16px; gap: 6px; }
+.fin-loan .fin-person-h .muted { font-size: var(--sa-cap); }
+.fin-loan .fin-progress { background: #d5dbe4; margin-bottom: 4px; }
+.fin-loan-info { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 14px 0; font-size: var(--sa-body); line-height: 1.45; }
+.fin-loan-info dt { color: var(--muted); font-size: var(--sa-cap); padding-top: 2px; }
+.fin-loan-info dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.fin-loan-info dd.muted { font-size: var(--sa-cap); }
+.sa.fin .fin-loan-sch { background: #fff; border: 1px solid var(--fin-panel-b); }
+.fin-loan .fin-scroll { background: #fff; border-radius: 12px; margin-top: 12px; padding: 4px 12px; }
+
+/* календарь: шапка дня темнее, у операций свой нейтральный фон */
+.fin-day { border-color: var(--fin-panel-b); overflow: hidden; }
+.fin-day > header { background: var(--fin-head); border-radius: 0; }
+.fin-day.we > header { background: #dde3eb; }
+.fin-op { background: var(--fin-row); border-top: 1px solid #e6eaf0; }
+.fin-op:hover { background: #f0f3f7; }
+.sa.fin .fin-op .btn, .sa.fin .fin-day > header .btn { background: #fff; border: 1px solid var(--fin-panel-b); }
+.fin-empty { background: var(--fin-row); }
+
+/* справочники: строки плашками, кнопки с фоном */
+.fin-lists { gap: 8px 24px; }
+.fin-lists li { background: var(--fin-row); border: 1px solid var(--border); border-bottom: 1px solid var(--border); border-radius: 10px; padding: 10px 12px 10px 16px; }
+.sa.fin .fin-lists li .btn { opacity: 1; background: #fff; border: 1px solid var(--fin-panel-b); }
+.sa.fin .fin-lists li .btn:hover { background: var(--accent-soft); }
+
+@media (max-width: 900px) {
+  .fin-pay-grid { grid-template-columns: 1fr; }
+  .fin-person .fin-deal, .fin-person .fin-deal.late { padding: 14px; }
+  .fin-loan-info { grid-template-columns: 1fr; gap: 2px; }
+  .fin-loan-info dd { margin-bottom: 8px; }
+}
+@media (max-width: 640px) {
+  .fin-pay-months { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fin-pay-bar { height: 56px; }
+  .fin-lists li { padding: 10px 12px; }
+  .sa.fin .fin-col > .card.fin-loan { padding: 16px; }
+}
+@media (max-width: 640px) { .fin-seg { flex-wrap: wrap; } }
+/* полоса выплат: столбики на всю высоту блока, без пустоты под ними */
+.fin-pay-grid { align-items: stretch; }
+.fin-pay-m { justify-content: flex-end; }
+.fin-pay-bar { flex: 1 1 auto; min-height: 80px; height: auto; }
+@media (max-width: 900px) { .fin-pay-bar { flex: 0 0 auto; height: 90px; } }
+@media (max-width: 640px) { .fin-pay-bar { height: 56px; } }
+.fin-lists { grid-template-columns: repeat(auto-fill, minmax(520px, 1fr)); }
+@media (max-width: 900px) { .fin-lists { grid-template-columns: 1fr; } }
+.fin-pay-list li .w { overflow-wrap: break-word; }
+@media (max-width: 640px) { .fin-pay-list { padding: 10px 12px; } .fin-pay-list li { grid-template-columns: 48px minmax(0, 1fr) auto; gap: 8px; } }

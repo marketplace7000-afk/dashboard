@@ -66,7 +66,7 @@ export function Finance() {
       {meta.err && <div className="fin-alert">Не удалось загрузить раздел: {meta.err}</div>}
       {meta.data && tab === 'summary' && <SummaryTab onOpenMonth={openMonth} meta={meta.data} onMetaChange={meta.reload} />}
       {meta.data && tab === 'calendar' && <CalendarTab month={month} setMonth={setMonth} meta={meta.data} />}
-      {meta.data && tab === 'investors' && <InvestorsTab meta={meta.data} />}
+      {meta.data && tab === 'investors' && <InvestorsTab meta={meta.data} onOpenMonth={openMonth} />}
       {meta.data && tab === 'loans' && <LoansTab meta={meta.data} onOpenMonth={openMonth} />}
       {meta.data && tab === 'lists' && <ListsTab onChange={meta.reload} />}
     </div>
@@ -341,17 +341,25 @@ function OpForm({ op, meta, onClose, onSaved }: { op: Partial<FinOp>; meta: Meta
 
 // ═══ Инвесторы ═════════════════════════════════════════════════════════════
 type DealDialog = { kind: 'new' } | { kind: 'edit'; d: DealCalc } | { kind: 'pay'; d: DealCalc } | { kind: 'return'; d: DealCalc } | { kind: 'prolong'; d: DealCalc };
-function InvestorsTab({ meta }: { meta: Meta }) {
+type InvSort = 'owed' | 'date' | 'new' | 'abc';
+const INV_SORTS: Array<[InvSort, string]> = [['owed', 'По сумме'], ['date', 'По дате возврата'], ['new', 'Новые сверху'], ['abc', 'А–Я']];
+function InvestorsTab({ meta, onOpenMonth }: { meta: Meta; onOpenMonth: (m: string) => void }) {
   const { data, err, reload } = useLoad<{ deals: DealCalc[]; today: string }>('/api/finance/investors');
+  const opsLoad = useLoad<{ ops: FinOp[]; today: string }>('/api/finance/ops');
+  const [sort, setSortRaw] = useState<InvSort>(() => { try { return (localStorage.getItem('fin.invSort') as InvSort) || 'owed'; } catch { return 'owed'; } });
+  const setSort = (v: InvSort) => { setSortRaw(v); try { localStorage.setItem('fin.invSort', v); } catch { /* не запомнится */ } };
   const [closed, setClosed] = useState(false);
   const [dlg, setDlg] = useState<DealDialog | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const groups = useMemo(() => {
     const m = new Map<string, DealCalc[]>();
     for (const d of data?.deals ?? []) if (closed || d.status === 'Действует') { if (!m.has(d.person)) m.set(d.person, []); m.get(d.person)!.push(d); }
-    return [...m.entries()].map(([p, list]) => ({ p, list, owed: list.reduce((s, d) => s + d.owed, 0), next: list.filter(d => d.status === 'Действует').map(d => d.end).sort()[0] ?? null }))
-      .sort((a, b) => b.owed - a.owed);
-  }, [data, closed]);
+    const cmpStr = (a: string | null, b: string | null) => (a === b ? 0 : a === null ? 1 : b === null ? -1 : a < b ? -1 : 1);
+    const dealOrder = (a: DealCalc, b: DealCalc) => sort === 'date' ? cmpStr(a.end, b.end) : sort === 'new' ? cmpStr(b.start, a.start) : sort === 'owed' ? b.owed - a.owed : cmpStr(a.start, b.start);
+    const gs = [...m.entries()].map(([p, list]) => ({ p, list: [...list].sort(dealOrder), owed: list.reduce((s, d) => s + d.owed, 0),
+      next: list.filter(d => d.status === 'Действует').map(d => d.end).sort()[0] ?? null, last: list.map(d => d.start).sort().reverse()[0] ?? null }));
+    return gs.sort((a, b) => sort === 'owed' ? b.owed - a.owed : sort === 'date' ? cmpStr(a.next, b.next) : sort === 'new' ? cmpStr(b.last, a.last) : a.p.localeCompare(b.p, 'ru'));
+  }, [data, closed, sort]);
   if (err) return <div className="fin-alert">Инвесторы не загрузились: {err}</div>;
   if (!data) return <div className="card muted">Загружаю инвесторов…</div>;
   const act = data.deals.filter(d => d.status === 'Действует');
@@ -365,11 +373,11 @@ function InvestorsTab({ meta }: { meta: Meta }) {
         <div className="fin-kpi"><span className="l">Проценты к выплате</span><b>{rub(tot.int)}</b><span className="n">ежемесячно {rub(tot.monthly)}</span></div>
         <div className="fin-kpi"><span className="l">Возвраты за 60 дней</span><b className={soon.length ? 'warn' : ''}>{rub(soon.reduce((s, d) => s + d.owed, 0))}</b><span className="n">{soon.length} вкладов</span></div>
       </div>
+      {opsLoad.data && <InvPayouts ops={opsLoad.data.ops} today={data.today} onOpenMonth={onOpenMonth} />}
       <div className="fin-bar">
         <button className="btn btn-primary" onClick={() => setDlg({ kind: 'new' })}><PlusIcon /> Новый вклад</button>
+        <div className="fin-seg" role="group" aria-label="Порядок инвесторов">{INV_SORTS.map(([k, t]) => <button key={k} className={sort === k ? 'on' : ''} onClick={() => setSort(k)}>{t}</button>)}</div>
         <label className="fin-check"><input type="checkbox" checked={closed} onChange={e => setClosed(e.target.checked)} /> Показывать закрытые</label>
-        <span className="fin-spacer" />
-        <span className="muted">Выплаты и возвраты агент сам ставит в календарь</span>
       </div>
       {groups.map(g => (
         <div key={g.p} className="card fin-person">
@@ -403,7 +411,7 @@ function InvestorsTab({ meta }: { meta: Meta }) {
           })}</div>
         </div>
       ))}
-      {dlg && <DealForm dlg={dlg} meta={meta} today={data.today} onClose={() => setDlg(null)} onSaved={() => { setDlg(null); void reload(); }} />}
+      {dlg && <DealForm dlg={dlg} meta={meta} today={data.today} onClose={() => setDlg(null)} onSaved={() => { setDlg(null); void reload(); void opsLoad.reload(); }} />}
     </div>
   );
 }
@@ -458,6 +466,57 @@ function DealForm({ dlg, meta, today, onClose, onSaved }: { dlg: DealDialog; met
   );
 }
 
+// ─── полоса «Выплаты инвесторам» (19.11): 6 месяцев столбиками + список ближайших ───
+const PAY_DONE = new Set(['Исполнено', 'Отменено', 'Перенесено']);
+const shortRub = (n: number) => (n >= 1e6 ? `${(n / 1e6).toLocaleString('ru-RU', { maximumFractionDigits: n >= 1e7 ? 1 : 2 })} млн` : n >= 1000 ? `${Math.round(n / 1000)} тыс` : rub(n));
+const capMonth = (m: string) => { const t = MONTHS[Number(m.slice(5, 7)) - 1]; return t[0].toUpperCase() + t.slice(1); };
+function InvPayouts({ ops, today, onOpenMonth }: { ops: FinOp[]; today: string; onOpenMonth: (m: string) => void }) {
+  const [sel, setSel] = useState<string | null>(null);
+  const pays = useMemo(() => ops
+    .filter(o => o.type === 'out' && o.cat.startsWith('Инвестор') && !PAY_DONE.has(o.status))
+    .map(o => ({ ...o, when: o.date < today ? today : o.date, late: o.date < today, body: o.cat.includes('тела'), who: o.descr.split(' · ')[0] || o.descr }))
+    .sort((a, b) => (a.when < b.when ? -1 : a.when > b.when ? 1 : b.plan - a.plan)), [ops, today]);
+  const months = Array.from({ length: 6 }, (_, i) => shiftMonth(today.slice(0, 7), i));
+  const per = months.map(m => {
+    const list = pays.filter(p => p.when.slice(0, 7) === m);
+    return { m, list, int: list.filter(p => !p.body).reduce((s, p) => s + p.plan, 0), body: list.filter(p => p.body).reduce((s, p) => s + p.plan, 0) };
+  });
+  const max = Math.max(1, ...per.map(p => p.int + p.body));
+  const cur = sel ? per.find(p => p.m === sel) : null;
+  const shown = cur ? cur.list : pays.slice(0, 5);
+  return (
+    <div className="card fin-pay">
+      <div className="fin-pay-h">
+        <h2>Выплаты инвесторам</h2>
+        <span className="fin-legend"><i className="int" /> проценты <i className="body" /> возврат вклада</span>
+      </div>
+      <div className="fin-pay-grid">
+        <div className="fin-pay-months">{per.map(p => (
+          <button key={p.m} className={`fin-pay-m ${sel === p.m ? 'on' : ''}`} onClick={() => setSel(sel === p.m ? null : p.m)}
+            title={`${capMonth(p.m)}: проценты ${rub(p.int)}, возврат вкладов ${rub(p.body)}`}>
+            <span className="fin-pay-bar"><i className="int" style={{ height: `${(p.int / max) * 100}%` }} /><i className="body" style={{ height: `${(p.body / max) * 100}%` }} /></span>
+            <b>{p.int + p.body ? shortRub(p.int + p.body) : '—'}</b>
+            <span className="muted">{capMonth(p.m)}</span>
+          </button>))}
+        </div>
+        <div className="fin-pay-list">
+          <div className="fin-pay-lh">
+            <b>{cur ? `${capMonth(cur.m)} · ${rub(cur.int + cur.body)}` : 'Ближайшие выплаты'}</b>
+            {cur && <button className="fin-link" onClick={() => onOpenMonth(cur.m)}>открыть в календаре</button>}
+          </div>
+          {shown.length ? <ul>{shown.map(p => (
+            <li key={p.id} className={p.late ? 'late' : ''}>
+              <span className="d">{ddmm(p.when)}</span>
+              <span className="w">{p.who}<small>{p.body ? 'возврат вклада' : 'проценты'}{p.late ? ` · не выплачено с ${ddmm(p.date)}` : ''}</small></span>
+              <b className={p.body ? 'warn' : ''}>{rub(p.plan)}</b>
+            </li>))}</ul> : <div className="muted">Выплат нет</div>}
+          {!cur && <div className="muted fin-note">Нажмите на месяц, чтобы увидеть все его выплаты.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ═══ Кредиты ═══════════════════════════════════════════════════════════════
 function LoansTab({ meta, onOpenMonth }: { meta: Meta; onOpenMonth: (m: string) => void }) {
   const { data, err, reload } = useLoad<{ loans: LoanCalc[]; today: string }>('/api/finance/loans');
@@ -490,9 +549,12 @@ function LoansTab({ meta, onOpenMonth }: { meta: Meta; onOpenMonth: (m: string) 
               <div><span className="l">Последний платёж</span><b>{ddmmyy(l.schedule[l.schedule.length - 1]?.date ?? l.lastDate)}</b></div>
             </div>
             {l.paidCount > 0 && <div className="fin-progress" title={`В календаре исполнено ${l.paidCount} из ${total}`}><i style={{ width: `${pct}%` }} /></div>}
-            <div className="fin-progress-l"><span>{l.paidCount > 0 ? `в календаре исполнено ${l.paidCount} из ${total} · ${rub(l.paidSum)}` : `в календаре ${total} платежей, первый — ${ddmmyy(l.next?.date)}`}</span><span className="muted">{l.how}</span></div>
-            {l.comment && <div className="muted fin-note">{l.comment}</div>}
-            <button className="fin-link" onClick={() => setOpen(open === l.id ? null : l.id)}>{open === l.id ? 'Скрыть график' : 'Показать график'}</button>
+            <dl className="fin-loan-info">
+              <dt>В календаре</dt><dd>{l.paidCount > 0 ? `исполнено ${l.paidCount} из ${total} · ${rub(l.paidSum)}` : `${total} платежей, первый — ${ddmmyy(l.next?.date)}`}</dd>
+              {l.how && <><dt>Как платим</dt><dd>{l.how}</dd></>}
+              {l.comment && <><dt>Заметка</dt><dd className="muted">{l.comment}</dd></>}
+            </dl>
+            <button className="btn btn-sm fin-loan-sch" onClick={() => setOpen(open === l.id ? null : l.id)}>{open === l.id ? <CaretUpIcon /> : <CaretDownIcon />} {open === l.id ? 'Скрыть график' : 'Показать график'}</button>
             {open === l.id && <div className="fin-scroll"><table className="fin-table">
               <thead><tr><th>Дата</th><th>Платёж</th><th className="r">Сумма</th><th>Статус</th></tr></thead>
               <tbody>{l.schedule.map(o => <tr key={o.id} className={o.status === 'Исполнено' ? 'closed' : ''}><td>{ddmmyy(o.date)}, {wd(o.date)}</td><td>{o.descr}</td><td className="r">{rub(o.status === 'Исполнено' && o.fact !== null ? o.fact : o.plan)}</td><td><span className={`fin-pill ${STATUS_CLASS[o.status]}`}>{o.status}</span></td></tr>)}</tbody>

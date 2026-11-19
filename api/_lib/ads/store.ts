@@ -358,7 +358,7 @@ export function savePosDays(mp: AdMp, rows: PosDayRow[]): number {
   return rows.length;
 }
 
-/** Место в поиске за период: среднее дневных медиан с рекламой и без неё. */
+/** Место в поиске за период: медиана дневных медиан с рекламой и без неё. */
 export type PosAgg = { withAd: number; noAd: number; lift: number; days: number };
 
 /**
@@ -371,17 +371,20 @@ export function posStats(mp: AdMp, from: string, to: string): { byCampSku: Map<s
   if (!d) return out;
   const rows = d.prepare('SELECT campaign_id, sku, pos, pos_noboost FROM ad_pos_day WHERE mp = ? AND date >= ? AND date <= ? AND pos > 0 AND pos_noboost > 0')
     .all(mp, from, to) as { campaign_id: string; sku: string; pos: number; pos_noboost: number }[];
-  const acc = new Map<string, { s: number; n: number; c: number }>();
+  // Медиана, а не среднее: один день «без рекламы — 35 000-е место» не должен
+  // перекашивать картину недели (видно на живых данных 19.11).
+  const acc = new Map<string, { s: number[]; n: number[] }>();
   const put = (k: string, r: { pos: number; pos_noboost: number }) => {
-    const a = acc.get(k) ?? { s: 0, n: 0, c: 0 };
-    a.s += r.pos; a.n += r.pos_noboost; a.c++;
+    const a = acc.get(k) ?? { s: [], n: [] };
+    a.s.push(r.pos); a.n.push(r.pos_noboost);
     acc.set(k, a);
   };
   for (const r of rows) { put(`cs:${r.campaign_id}|${r.sku}`, r); put(`c:${r.campaign_id}`, r); put(`s:${r.sku}`, r); }
   const r1 = (v: number) => Math.round(v * 10) / 10;
+  const med = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
   for (const [k, a] of acc) {
-    const withAd = r1(a.s / a.c), noAd = r1(a.n / a.c);
-    const v: PosAgg = { withAd, noAd, lift: r1(noAd - withAd), days: a.c };
+    const withAd = r1(med(a.s)), noAd = r1(med(a.n));
+    const v: PosAgg = { withAd, noAd, lift: r1(noAd - withAd), days: a.s.length };
     if (k.startsWith('cs:')) out.byCampSku.set(k.slice(3), v);
     else if (k.startsWith('c:')) out.byCamp.set(k.slice(2), v);
     else out.bySku.set(k.slice(2), v);

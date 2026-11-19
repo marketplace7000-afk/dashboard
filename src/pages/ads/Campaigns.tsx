@@ -33,7 +33,7 @@ const COLS: Col[] = [
   { key: 'revenue', label: 'Сумма заказов', hint: 'Сумма заказов из рекламы', val: s => s.revenue, fmt: s => rub(s.revenue) },
   { key: 'drr', label: 'ДРР', hint: 'Расход ÷ сумма заказов из рекламы', val: s => s.drr, fmt: s => pct(s.drr), bad: s => s.drr != null && s.drr > 10 },
   { key: 'avgPos', label: 'Позиция', hint: 'Средняя позиция в выдаче (WB, по показам)', val: s => s.avgPos, fmt: s => (s.avgPos == null ? '–' : nf1.format(s.avgPos)) },
-  { key: 'posAd', label: 'Место с рекламой', hint: 'Место в поиске WB с рекламой: медиана за день, в среднем за период', wbOnly: true, val: s => s.pos?.withAd ?? null, fmt: s => (s.pos ? nf1.format(s.pos.withAd) : '–') },
+  { key: 'posAd', label: 'Место с рекламой', hint: 'Место в поиске WB с рекламой: медиана за день, середина за период', wbOnly: true, val: s => s.pos?.withAd ?? null, fmt: s => (s.pos ? nf1.format(s.pos.withAd) : '–') },
   { key: 'posNoAd', label: 'Без рекламы', hint: 'Какое место было бы в поиске WB без рекламы', wbOnly: true, val: s => s.pos?.noAd ?? null, fmt: s => (s.pos ? nf1.format(s.pos.noAd) : '–') },
   { key: 'posLift', label: 'Реклама подняла', hint: 'На сколько мест реклама подняла товар в поиске WB: место без рекламы минус место с рекламой', wbOnly: true, val: s => s.pos?.lift ?? null, fmt: s => (s.pos ? `${s.pos.lift > 0 ? '+' : ''}${nf1.format(s.pos.lift)}` : '–') },
 ];

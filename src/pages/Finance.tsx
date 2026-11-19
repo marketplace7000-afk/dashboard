@@ -479,10 +479,10 @@ function LoansTab({ meta, onOpenMonth }: { meta: Meta; onOpenMonth: (m: string) 
             </div>
             <div className="fin-loan-grid">
               <div><span className="l">Сумма</span><b>{rub(l.amount)}</b>{l.issued && <span className="muted">от {ddmmyy(l.issued)}</span>}</div>
-              <div><span className="l">Цена</span><span>{l.price || '–'}</span></div>
-              <div><span className="l">Ближайший платёж</span>{l.next ? <><b>{rub(l.next.plan)}</b><button className="fin-link" onClick={() => onOpenMonth(l.next!.date.slice(0, 7))}>{ddmmyy(l.next.date)}</button></> : <span>–</span>}</div>
+              <div><span className="l">Цена</span><b>{l.price || '–'}</b></div>
+              <div><span className="l">Ближайший платёж</span>{l.next ? <><b>{rub(l.next.plan)}</b><button className="fin-link" onClick={() => onOpenMonth(l.next!.date.slice(0, 7))}>{ddmmyy(l.next.date)}</button></> : <b>–</b>}</div>
               <div><span className="l">Впереди по графику</span><b>{rub(l.leftSum)}</b><span className="muted">{l.leftCount} платежей</span></div>
-              <div><span className="l">Последний платёж</span><span>{ddmmyy(l.schedule[l.schedule.length - 1]?.date ?? l.lastDate)}</span></div>
+              <div><span className="l">Последний платёж</span><b>{ddmmyy(l.schedule[l.schedule.length - 1]?.date ?? l.lastDate)}</b></div>
             </div>
             {l.paidCount > 0 && <div className="fin-progress" title={`В календаре исполнено ${l.paidCount} из ${total}`}><i style={{ width: `${pct}%` }} /></div>}
             <div className="fin-progress-l"><span>{l.paidCount > 0 ? `в календаре исполнено ${l.paidCount} из ${total} · ${rub(l.paidSum)}` : `в календаре ${total} платежей, первый — ${ddmmyy(l.next?.date)}`}</span><span className="muted">{l.how}</span></div>

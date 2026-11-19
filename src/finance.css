@@ -192,3 +192,110 @@
 .fin-lists li .btn { opacity: .5; }
 .fin-lists li:hover .btn, .fin-lists li .btn:focus-visible, .fin-lists li .btn-primary { opacity: 1; }
 @media (max-width: 900px) { .fin-lists { grid-template-columns: 1fr; } .fin-lists li .btn { opacity: 1; } }
+
+/* 19.11 вечер: крупнее во всём разделе (просьба владельца) — шкала на ступень выше, блоки ближе к центру */
+.sa.fin { --sa-small: 18px; --sa-cap: 20px; --sa-body: 22px; --sa-em: 24px; --sa-h2: 28px; }
+.sa.fin .btn-sm { font-size: 19px; padding: 8px 14px; border-radius: 9px; }
+.sa.fin .btn { font-size: 20px; }
+.fin-tabs button { padding: 10px 20px; }
+.fin-seg button { padding: 9px 16px; }
+.fin-search { font-size: var(--sa-body); padding: 10px 14px; }
+.fin-check input { width: 22px; height: 22px; }
+.fin-kpi { padding: 16px 20px; }
+.fin-kpi b { font-size: 30px; }
+.fin-kpi.main b { font-size: 36px; }
+.fin-pill { padding: 5px 14px; }
+
+/* сводка: таблица по месяцам */
+.fin-table { font-size: var(--sa-body); }
+.fin-table th { font-size: var(--sa-cap); padding: 12px 14px; }
+.fin-table td { padding: 14px; }
+
+/* календарь: строки в 1,5 раза выше, сумма и статус ближе к центру, справа свободное поле */
+.fin-day > header { grid-template-columns: minmax(200px, 260px) minmax(0, 1fr) auto auto; padding: 14px 56px 14px 20px; gap: 18px; }
+.fin-date b { font-size: 32px; }
+.fin-add { padding: 10px 16px !important; font-size: 26px !important; }
+.fin-op { grid-template-columns: 14px minmax(0, 3fr) minmax(190px, 1.2fr) minmax(200px, 1fr) auto; gap: 18px; padding: 16px 56px 16px 20px; }
+.fin-dot { width: 12px; height: 12px; }
+.fin-what { gap: 4px; }
+.fin-com { font-size: var(--sa-cap); }
+.fin-sum { font-size: var(--sa-em); }
+.fin-st { justify-self: start; }
+.fin-tools { gap: 10px; opacity: 1; }
+.sa.fin .fin-tools .btn:not(:hover) { color: var(--muted); }
+.sa.fin .fin-tools .btn { font-size: 26px; padding: 10px 15px; line-height: 1; }
+.fin-menu button { padding: 12px 16px; }
+.fin-empty { padding: 14px 20px; }
+
+/* инвесторы: «осталось» по центру своей колонки, кнопки левее, справа поле */
+.fin-person-h { font-size: var(--sa-em); gap: 16px; }
+.fin-deal { grid-template-columns: minmax(170px, 1fr) minmax(300px, 1.6fr) minmax(170px, 0.9fr) auto; gap: 10px 24px; padding: 16px 48px 16px 0; }
+.fin-deal.late { padding: 16px 48px 16px 12px; }
+.fin-deal-name .muted, .fin-deal-owed .muted { font-size: var(--sa-cap); }
+.fin-deal-terms { font-size: var(--sa-body); gap: 4px; }
+.fin-deal-owed { align-items: center; text-align: center; }
+.fin-deal-owed b { font-size: 26px; }
+.fin-deal-act { display: grid; grid-template-columns: auto auto; gap: 8px; max-width: none; justify-content: start; }
+.fin-deal-act .btn { justify-content: center; }
+.fin-deal-moves, .fin-moves td { font-size: var(--sa-body); }
+
+/* кредиты: все подписи одного размера, все значения одного размера */
+.fin-loan-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 18px; margin: 10px 0 18px; }
+.fin-loan-grid > div { gap: 4px; }
+.fin-loan-grid .l { font-size: var(--sa-cap); }
+.fin-loan-grid b { font-size: var(--sa-em); font-weight: 600; overflow-wrap: anywhere; }
+.fin-loan-grid .muted, .fin-loan-grid .fin-link { font-size: var(--sa-cap); }
+.fin-progress { height: 12px; }
+.fin-progress-l { font-size: var(--sa-body); }
+.fin-loan > .fin-link { font-size: var(--sa-body); }
+
+/* справочники */
+.fin-lists-add .input { padding: 12px 14px; }
+.fin-lists { grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 0 40px; }
+.fin-lists li { padding: 14px 8px; gap: 14px; font-size: var(--sa-body); }
+.fin-lists li .input { font-size: var(--sa-body); padding: 9px 12px; }
+.fin-lists-name { font-size: var(--sa-em); }
+.fin-lists li .muted { font-size: var(--sa-cap); }
+.sa.fin .fin-lists li .btn { font-size: 24px; padding: 9px 13px; line-height: 1; opacity: .6; }
+.fin-lists-group .fin-h3 { margin-top: 24px; }
+
+/* окна */
+.fin-field > span { font-size: var(--sa-cap); }
+.fin-field .input { padding: 12px 14px; }
+.fin-modal p { font-size: var(--sa-body); }
+
+/* планшет и телефон: шкала чуть меньше, но крупнее остальных разделов; кнопки под палец */
+@media (max-width: 1100px) {
+  .fin-deal { grid-template-columns: 1fr auto; padding-right: 0; }
+  .fin-deal-owed { align-items: flex-end; text-align: right; }
+}
+@media (max-width: 900px) {
+  .fin-day > header { grid-template-columns: minmax(0, 1fr) auto auto; padding: 12px 14px; gap: 10px 12px; }
+  .fin-daysum { grid-column: 1 / -1; order: 3; }
+  .fin-end { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; }
+  .fin-op { grid-template-columns: 12px minmax(0, 1fr) auto; gap: 10px 12px; padding: 14px; }
+  .fin-st { grid-column: 2; }
+  .fin-tools { grid-column: 3; opacity: 1; }
+  .fin-tools .btn, .fin-add { min-width: 48px; min-height: 48px; }
+  .fin-lists { grid-template-columns: 1fr; }
+  .sa.fin .fin-lists li .btn { opacity: 1; min-width: 48px; min-height: 48px; }
+}
+@media (max-width: 640px) {
+  .sa.fin { --sa-small: 16px; --sa-cap: 17px; --sa-body: 19px; --sa-em: 21px; --sa-h2: 23px; }
+  .fin-tabs button { padding: 10px 14px; }
+  .fin-date b { font-size: 28px; }
+  .fin-kpi b { font-size: 26px; }
+  .fin-kpi.main b { font-size: 30px; }
+  .fin-deal { grid-template-columns: 1fr; }
+  .fin-deal-owed { align-items: flex-start; text-align: left; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+  .sa.fin .fin-deal-act .btn { flex: 1 1 auto; min-height: 48px; }
+  .fin-lists li { flex-wrap: wrap; padding: 12px 0; }
+  .fin-lists-name { flex-basis: 100%; }
+  .fin-lists li .muted { flex: 1 1 auto; }
+  .fin-lists-add .btn, .fin-lists-add .fin-seg { flex: 1 1 100%; }
+  .fin-lists-add .fin-seg button { flex: 1; text-align: center; }
+  .fin-table td, .fin-table th { padding: 10px; }
+  .sa.fin .fin-actions .btn { flex: 1; min-height: 48px; }
+}
+.fin-table td:first-child { white-space: nowrap; }
+@media (max-width: 1100px) { .fin-deal-act { display: flex; flex-wrap: wrap; } }

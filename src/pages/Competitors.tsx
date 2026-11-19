@@ -122,10 +122,14 @@ function AdTag({ l, mp }: { l: Ads2WatchLink; mp: Ads2Mp }) {
 function PosCell({ l, mp, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; posQuery?: Ads2WatchProduct['posQuery'] }) {
   if (mp === 'wb') {
     const a = l.adPos;
-    return <td className="ad2-num" title={l.avgPos != null ? 'Средняя позиция в поиске WB' : 'WB не отдал позицию: конкурента нет в открытом «Сравнении карточек»'}>
-      {num(l.avgPos)}
-      {a && <div className="cmp-sub muted" title={`Наше место в поиске за 7 дней по рекламным кампаниям (данные WB): с рекламой ${num(a.withAd)}, без рекламы ${num(a.noAd)}${a.lift > 0 ? `, реклама подняла на ${num(a.lift)}` : ""}`}>
-        с рекламой {num(a.withAd)} · без {num(a.noAd)}</div>}
+    // Подписи периодов (19.11, владелец: три числа путали): крупное — среднее WB за 30 (или 7) дней по всем запросам,
+    // ниже у нашей карточки — место по рекламной кампании за последние 7 дней: с рекламой и без неё.
+    const per = l.ordersDays ?? 30;
+    return <td className="ad2-num">
+      <span title={l.avgPos != null ? `Средняя позиция в поиске WB за ${per} дней по всем запросам — по ней сравниваем с конкурентами` : 'WB не отдал позицию: конкурента нет в открытом «Сравнении карточек»'}>
+        {num(l.avgPos)}{l.avgPos != null && <span className="cmp-per"> ср. {per} дн</span>}</span>
+      {a && <div className="cmp-adpos" title={`Место в поиске за последние 7 дней по нашей рекламной кампании (данные WB, середина по дням): с рекламой ${num(a.withAd)}, без рекламы было бы ${num(a.noAd)}${a.lift > 0 ? ` — реклама поднимает на ${num(a.lift)} мест` : ''}`}>
+        <span className="cmp-per">7 дн:</span> <b>{num(a.withAd)}</b> <span className="cmp-per">без рекл.</span> <b className="bad">{num(a.noAd)}</b></div>}
       <AdTag l={l} mp={mp} />
     </td>;
   }

@@ -5,7 +5,7 @@
  * Хост присылает сырые ответы кабинета; здесь храним снимок (ads.sqlite,
  * последние 30 на площадку) и разбираем последний для вкладки «Конкуренты».
  */
-import { adsDb, listFlags, type AdMp } from './store';
+import { adsDb, listFlags, posStats, type AdMp } from './store';
 import { DEFAULT_AGENT_SETTINGS } from '../../../shared/agents';
 import type { Ads2CompRefresh, Ads2Competitors, Ads2OzMarketItem, Ads2WatchLink, Ads2WatchProduct, Ads2WbPosItem } from '../../../shared/ads2';
 import { ozRow } from '../../../shared/ozCompare';
@@ -606,6 +606,9 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
   for (const k of [...keys]) { const id = byKey.get(k)?.id || fromSnap.get(k)?.id; if (id && archived.has(String(id))) keys.delete(k); }
   const arch = getArchived(mp);
   const ozPos = mp === 'ozon' ? latestSearchPos() : new Map();
+  // WB: наше место с рекламой и без за 7 дней — из уже собранных позиций рекламы (ad_pos_day), без новых запросов к WB.
+  const mskDay = (ms: number) => new Date(ms + 3 * 3_600_000).toISOString().slice(0, 10);
+  const adPos = mp === 'wb' ? posStats('wb', mskDay(Date.now() - 6 * 86_400_000), mskDay(Date.now())).bySku : new Map();
   const watch: Ads2WatchProduct[] = [...keys].map(key => {
     const cat = byKey.get(key)?.id ? byKey.get(key) : fromSnap.get(key) ?? byKey.get(key);
     const ourId = cat?.id ?? '';
@@ -615,6 +618,7 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     if (our?.hidden && !byKey.get(key)?.active) { our.hidden = false; our.hiddenSince = null; }
     // Порядок — как привязаны (15.10, просьба владельца): «Подтвердить» и «Не наш» строку не двигают.
     const ls = (links[key] ?? []).map(toLink);
+    if (our && mp === 'wb') our.adPos = adPos.get(ourId) ?? null;
     // Ozon: позиция в поиске по главному запросу из «Видимости в поиске» (только у закреплённых карточек).
     let posQuery: Ads2WatchProduct['posQuery'] = null;
     const ap = mp === 'ozon' ? ozPos.get(key) : undefined;

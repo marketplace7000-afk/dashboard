@@ -108,7 +108,14 @@ type OzPer = 7 | 28;
 /** Место в поиске (07.11.2026 вместо «К нашей»): WB — средняя позиция из «Сравнения карточек» / «Поисковых запросов»,
  *  Ozon — место по главному запросу из «Видимости в поиске» (снимок есть только у закреплённых карточек). */
 function PosCell({ l, mp, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; posQuery?: Ads2WatchProduct['posQuery'] }) {
-  if (mp === 'wb') return <td className="ad2-num" title={l.avgPos != null ? 'Средняя позиция в поиске WB' : 'WB не отдал позицию: конкурента нет в открытом «Сравнении карточек»'}>{num(l.avgPos)}</td>;
+  if (mp === 'wb') {
+    const a = l.adPos;
+    return <td className="ad2-num" title={l.avgPos != null ? 'Средняя позиция в поиске WB' : 'WB не отдал позицию: конкурента нет в открытом «Сравнении карточек»'}>
+      {num(l.avgPos)}
+      {a && <div className="cmp-sub muted" title={`Наше место в поиске за 7 дней по рекламным кампаниям (данные WB): с рекламой ${num(a.withAd)}, без рекламы ${num(a.noAd)}${a.lift > 0 ? `, реклама подняла на ${num(a.lift)}` : ""}`}>
+        с рекламой {num(a.withAd)} · без {num(a.noAd)}</div>}
+    </td>;
+  }
   if (!posQuery) return <td className="ad2-num"><span className="muted" title="Позиция Ozon появится после ближайшего прохода агента">–</span></td>;
   const tip = `по запросу «${posQuery.query}»${posQuery.region ? `, ${posQuery.region}` : ''}, снято ${whenRel(posQuery.at)}`;
   return <td className="ad2-num" title={tip}>{l.searchPos != null ? num(l.searchPos) : <span className="muted">{posQuery.depth ? `дальше ${posQuery.depth}` : 'нет'}</span>}</td>;

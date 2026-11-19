@@ -765,3 +765,28 @@ export async function handlePlan(req: any, res: any, sub: string, user: PlanUser
     return res.status(500).json({ ok: false, error: String((e as Error)?.message ?? e).slice(0, 200) });
   }
 }
+
+/**
+ * Для «Закупок» (19.11.2026): статус товара в «Плане» (Новинка / Рабочий / Вывод) и план месяца в штуках
+ * по артикулу, сумма WB + Ozon. Архивные с этого месяца не берём.
+ */
+export function planForPurchase(month: string): Map<string, { status: string; qty: number; isNew: boolean }> {
+  const out = new Map<string, { status: string; qty: number; isNew: boolean }>();
+  const d = getDb();
+  const st = new Map<string, string>();
+  for (const r of d.prepare('SELECT mp, article, status, archived_from FROM plan_article').all() as any[]) {
+    if (r.archived_from && String(r.archived_from) <= month) continue;
+    const a = String(r.article).toUpperCase();
+    const rank = (x: string) => x === 'Новинка' ? 2 : x === 'Вывод' ? 0 : 1;
+    if (!st.has(a) || rank(String(r.status)) > rank(st.get(a)!)) st.set(a, String(r.status));
+  }
+  for (const l of d.prepare('SELECT mp, article, qty, is_new FROM plan_line WHERE month = ?').all(month) as any[]) {
+    const a = String(l.article).toUpperCase();
+    const cur = out.get(a) ?? { status: st.get(a) ?? 'Рабочий', qty: 0, isNew: false };
+    cur.qty += Number(l.qty) || 0;
+    cur.isNew ||= !!l.is_new || cur.status === 'Новинка';
+    out.set(a, cur);
+  }
+  for (const [a, s] of st) if (!out.has(a)) out.set(a, { status: s, qty: 0, isNew: s === 'Новинка' });
+  return out;
+}

@@ -1820,11 +1820,11 @@ code {
 .cmp-sub.good { color: var(--good); }
 .cmp-sub.bad { color: var(--bad); }
 .cmp-sub.warn { color: var(--warn); font-weight: 500; }
-.cmp-per { color: var(--muted); font-size: 15px; font-weight: 400; white-space: nowrap; }
-.cmp-adpos { margin-top: 4px; font-size: 15px; white-space: nowrap; }
+.cmp-per { color: var(--muted); font-size: 16px; font-weight: 400; white-space: nowrap; }
+.cmp-adpos { margin-top: 4px; font-size: 17px; white-space: nowrap; }
 .cmp-adpos b { font-weight: 700; }
 .cmp-adpos b.bad { color: var(--bad); }
-.cmp-adtag { display: block; width: fit-content; margin: 4px auto 0; padding: 1px 8px; border-radius: 999px; font-size: 15px; font-weight: 600; white-space: nowrap; color: var(--muted); border: 1px solid var(--border); }
+.cmp-adtag { display: block; width: fit-content; margin: 4px auto 0; padding: 1px 8px; border-radius: 999px; font-size: 16px; font-weight: 600; white-space: nowrap; color: var(--muted); border: 1px solid var(--border); }
 .cmp-adtag.on { color: var(--accent); border-color: var(--accent); }
 .cmp-gone { color: var(--bad); font-weight: 600; }
 .cmp-gone-card { border: 1px solid var(--bad); background: rgba(220,38,38,.06); display: grid; gap: 8px; }

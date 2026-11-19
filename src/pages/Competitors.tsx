@@ -127,9 +127,9 @@ function PosCell({ l, mp, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; posQuery?:
     const per = l.ordersDays ?? 30;
     return <td className="ad2-num">
       <span title={l.avgPos != null ? `Средняя позиция в поиске WB за ${per} дней по всем запросам — по ней сравниваем с конкурентами` : 'WB не отдал позицию: конкурента нет в открытом «Сравнении карточек»'}>
-        {num(l.avgPos)}{l.avgPos != null && <span className="cmp-per"> ср. {per} дн</span>}</span>
+        {num(l.avgPos)}{l.avgPos != null && <span className="cmp-per"> среднее за {per} дн.</span>}</span>
       {a && <div className="cmp-adpos" title={`Место в поиске за последние 7 дней по нашей рекламной кампании (данные WB, середина по дням): с рекламой ${num(a.withAd)}, без рекламы было бы ${num(a.noAd)}${a.lift > 0 ? ` — реклама поднимает на ${num(a.lift)} мест` : ''}`}>
-        <span className="cmp-per">7 дн:</span> <b>{num(a.withAd)}</b> <span className="cmp-per">без рекл.</span> <b className="bad">{num(a.noAd)}</b></div>}
+        <span className="cmp-per">за 7 дн.: с рекламой</span> <b>{num(a.withAd)}</b> <span className="cmp-per">· без рекламы</span> <b className="bad">{num(a.noAd)}</b></div>}
       <AdTag l={l} mp={mp} />
     </td>;
   }

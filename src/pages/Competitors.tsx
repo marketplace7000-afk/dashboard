@@ -107,6 +107,18 @@ type OzPer = 7 | 28;
 
 /** Место в поиске (07.11.2026 вместо «К нашей»): WB — средняя позиция из «Сравнения карточек» / «Поисковых запросов»,
  *  Ozon — место по главному запросу из «Видимости в поиске» (снимок есть только у закреплённых карточек). */
+/** Пометка «реклама» у места в поиске (19.11.2026): наша карточка — по активным кампаниям сейчас,
+ *  конкурент — по аналитике площадки (WB — «в рекламе» из сравнения/поисковых запросов, Ozon — дни с трафаретами за неделю). */
+function AdTag({ l, mp }: { l: Ads2WatchLink; mp: Ads2Mp }) {
+  if (l.adNow) {
+    return l.adNow.length
+      ? <div className="cmp-adtag on" title={`Сейчас идёт реклама: ${l.adNow.join(', ')}`}>реклама вкл</div>
+      : <div className="cmp-adtag" title="Активных рекламных кампаний с этой карточкой сейчас нет">реклама выкл</div>;
+  }
+  if (l.inAds !== true) return null;
+  return <div className="cmp-adtag on" title={mp === 'wb' ? 'По аналитике WB конкурент сейчас участвует в рекламе' : 'По аналитике Ozon у конкурента за неделю были дни в рекламе (трафареты)'}>в рекламе</div>;
+}
+
 function PosCell({ l, mp, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; posQuery?: Ads2WatchProduct['posQuery'] }) {
   if (mp === 'wb') {
     const a = l.adPos;
@@ -114,11 +126,12 @@ function PosCell({ l, mp, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; posQuery?:
       {num(l.avgPos)}
       {a && <div className="cmp-sub muted" title={`Наше место в поиске за 7 дней по рекламным кампаниям (данные WB): с рекламой ${num(a.withAd)}, без рекламы ${num(a.noAd)}${a.lift > 0 ? `, реклама подняла на ${num(a.lift)}` : ""}`}>
         с рекламой {num(a.withAd)} · без {num(a.noAd)}</div>}
+      <AdTag l={l} mp={mp} />
     </td>;
   }
-  if (!posQuery) return <td className="ad2-num"><span className="muted" title="Позиция Ozon появится после ближайшего прохода агента">–</span></td>;
+  if (!posQuery) return <td className="ad2-num"><span className="muted" title="Позиция Ozon появится после ближайшего прохода агента">–</span><AdTag l={l} mp={mp} /></td>;
   const tip = `по запросу «${posQuery.query}»${posQuery.region ? `, ${posQuery.region}` : ''}, снято ${whenRel(posQuery.at)}`;
-  return <td className="ad2-num" title={tip}>{l.searchPos != null ? num(l.searchPos) : <span className="muted">{posQuery.depth ? `дальше ${posQuery.depth}` : 'нет'}</span>}</td>;
+  return <td className="ad2-num"><span title={tip}>{l.searchPos != null ? num(l.searchPos) : <span className="muted">{posQuery.depth ? `дальше ${posQuery.depth}` : 'нет'}</span>}</span><AdTag l={l} mp={mp} /></td>;
 }
 
 function CmpCells({ l, mp, our, passAt, per = 7, posQuery }: { l: Ads2WatchLink; mp: Ads2Mp; our: Ads2WatchLink | null; passAt: number | null; per?: OzPer; posQuery?: Ads2WatchProduct['posQuery'] }) {

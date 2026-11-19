@@ -5,7 +5,7 @@
  * Хост присылает сырые ответы кабинета; здесь храним снимок (ads.sqlite,
  * последние 30 на площадку) и разбираем последний для вкладки «Конкуренты».
  */
-import { adsDb, listFlags, posStats, type AdMp } from './store';
+import { adsDb, listFlags, posStats, listCampaigns, listItems, type AdMp } from './store';
 import { DEFAULT_AGENT_SETTINGS } from '../../../shared/agents';
 import type { Ads2CompRefresh, Ads2Competitors, Ads2OzMarketItem, Ads2WatchLink, Ads2WatchProduct, Ads2WbPosItem } from '../../../shared/ads2';
 import { ozRow } from '../../../shared/ozCompare';
@@ -609,6 +609,11 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
   // WB: наше место с рекламой и без за 7 дней — из уже собранных позиций рекламы (ad_pos_day), без новых запросов к WB.
   const mskDay = (ms: number) => new Date(ms + 3 * 3_600_000).toISOString().slice(0, 10);
   const adPos = mp === 'wb' ? posStats('wb', mskDay(Date.now() - 6 * 86_400_000), mskDay(Date.now())).bySku : new Map();
+  // Идёт ли сейчас реклама нашей карточки — по активным кампаниям из синхронизации рекламы (раз в ~2 ч).
+  const camps = listCampaigns(mp);
+  const live = new Map(camps.filter(c => (mp === 'wb' ? c.status_code === 9 : c.status === 'active')).map(c => [c.id, c.name || `№${c.id}`]));
+  const adNow = new Map<string, string[]>();
+  for (const it of listItems(mp)) { const n = live.get(it.campaign_id); if (n) adNow.set(it.sku, [...(adNow.get(it.sku) ?? []), n]); }
   const watch: Ads2WatchProduct[] = [...keys].map(key => {
     const cat = byKey.get(key)?.id ? byKey.get(key) : fromSnap.get(key) ?? byKey.get(key);
     const ourId = cat?.id ?? '';
@@ -619,6 +624,7 @@ export function buildWatch(mp: AdMp, data: any): { watch: Ads2WatchProduct[]; ca
     // Порядок — как привязаны (15.10, просьба владельца): «Подтвердить» и «Не наш» строку не двигают.
     const ls = (links[key] ?? []).map(toLink);
     if (our && mp === 'wb') our.adPos = adPos.get(ourId) ?? null;
+    if (our && camps.length) { our.adNow = adNow.get(ourId) ?? []; our.inAds = our.adNow.length > 0; }
     // Ozon: позиция в поиске по главному запросу из «Видимости в поиске» (только у закреплённых карточек).
     let posQuery: Ads2WatchProduct['posQuery'] = null;
     const ap = mp === 'ozon' ? ozPos.get(key) : undefined;

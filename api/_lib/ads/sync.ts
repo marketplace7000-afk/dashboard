@@ -18,6 +18,7 @@ import { wbUpstream } from '../../_proxy';
 import { getOzonPerfToken, PERF_HOST } from '../ozonPerfAuth';
 import {
   saveCampaigns, upsertDailyLimits, saveStatDays, adsMetaSet, adsMetaGet,
+  listCampaigns, campaignStats, savePosDays, posHasDay, type PosDayRow,
   type CampaignRow, type CampaignItemRow, type StatDayRow,
 } from './store';
 
@@ -264,6 +265,58 @@ function ingestWbFullstats(): string {
   return `WB статистика (v4): окон ${v4.length}, строк ${rows}${views3.size ? `, показы cpc из v3: ${views3.size}` : ''}`;
 }
 
+/**
+ * Разбор /api/advert/v0/positions (19.11.2026): медиана места карточки в поиске
+ * за день с бустом рекламы (posMedian) и без него (posNoboostMedian).
+ */
+export function parseWbPositions(json: unknown): PosDayRow[] {
+  const j: any = json;
+  const arr: any[] = Array.isArray(j?.rows) ? j.rows : [];
+  const out: PosDayRow[] = [];
+  for (const r of arr) {
+    const date = String(r?.date ?? '').slice(0, 10);
+    if (typeof r?.advertId !== 'number' || !r?.nmId || !date) continue;
+    out.push({ date, campaign_id: String(r.advertId), sku: String(r.nmId), pos: num(r.posMedian), pos_noboost: num(r.posNoboostMedian), ranges: Array.isArray(r.ranges) ? r.ranges : null });
+  }
+  return out;
+}
+
+/** Не чаще раза в ~2 часа: позиции считаются по дням, чаще смысла нет. */
+const WB_POS_EVERY_MS = 110 * 60_000;
+
+/**
+ * Позиции в поиске WB по рекламным кампаниям → ad_pos_day. Лимит метода —
+ * 10 запросов в минуту, до 50 кампаний за запрос; у нас 1–2 запроса за проход.
+ * Окно — 7 дней; если позиций за прошлый месяц ещё нет — 31 день (первый сбор).
+ */
+async function syncWbPositions(): Promise<string> {
+  const last = Number(adsMetaGet('wb_pos_at') ?? 0);
+  if (Date.now() - last < WB_POS_EVERY_MS) return 'WB позиции: свежие';
+  const up = wbUpstream('promotion');
+  if (!up.headers.Authorization) return 'WB позиции: нет ключа Продвижения';
+  const MSK = 3 * 3_600_000;
+  const day = (back: number) => new Date(Date.now() + MSK - back * 86_400_000).toISOString().slice(0, 10);
+  // Кампании: идущие и на паузе + все, у кого была статистика за 31 день.
+  const ids = new Set<string>(listCampaigns('wb').filter(c => c.status_code === 9 || c.status_code === 11).map(c => c.id));
+  for (const s of campaignStats('wb', day(30), day(0))) if (s.views > 0 || s.clicks > 0) ids.add(s.campaign_id);
+  const list = [...ids].filter(id => /^\d+$/.test(id)).sort();
+  if (!list.length) return 'WB позиции: кампаний нет';
+  const back = posHasDay('wb', day(25)) ? 7 : 30;
+  let rows = 0, fails = 0;
+  for (let i = 0; i < list.length; i += 50) {
+    const q = `?advertIds=${list.slice(i, i + 50).join(',')}&beginDate=${day(back)}&endDate=${day(0)}`;
+    const r = await fetchWithRetry(`${up.base}/api/advert/v0/positions${q}`, { method: 'GET', headers: up.headers }, { maxRetries: 1 });
+    if (!r.ok) { fails++; console.warn(`[ads-sync] позиции WB → ${r.status}`); continue; }
+    if (r.status === 204) continue;
+    try { rows += savePosDays('wb', parseWbPositions(JSON.parse(await r.text()))); } catch (e) {
+      fails++; console.warn('[ads-sync] позиции WB не разобраны:', (e as Error).message);
+    }
+  }
+  // Отметку свежести ставим только без сбоев — иначе следующий проход повторит.
+  if (!fails) adsMetaSet('wb_pos_at', String(Date.now()));
+  return `WB позиции: кампаний ${list.length}, окно ${back + 1} дн, строк ${rows}${fails ? `, сбоев ${fails}` : ''}`;
+}
+
 // ─── Ozon ────────────────────────────────────────────────────────────────────
 
 const OZ_LIVE = new Set(['CAMPAIGN_STATE_RUNNING', 'CAMPAIGN_STATE_STOPPED', 'CAMPAIGN_STATE_INACTIVE', 'CAMPAIGN_STATE_PLANNED']);
@@ -420,7 +473,7 @@ export function syncAds(): Promise<string[]> {
   running = (async () => {
     const out: string[] = [];
     for (const [name, step] of [
-      ['wb', syncWbCampaigns], ['wb-stats', async () => ingestWbFullstats()], ['ozon', syncOzonCampaigns],
+      ['wb', syncWbCampaigns], ['wb-stats', async () => ingestWbFullstats()], ['wb-pos', syncWbPositions], ['ozon', syncOzonCampaigns],
     ] as [string, () => Promise<string>][]) {
       try { out.push(await step()); } catch (e) { out.push(`${name}: сбой — ${(e as Error).message}`); }
     }

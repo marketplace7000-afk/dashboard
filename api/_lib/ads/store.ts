@@ -93,6 +93,13 @@ export function adsDb(): any | null {
         PRIMARY KEY (mp, sku)
       );
       CREATE TABLE IF NOT EXISTS ad_meta (key TEXT PRIMARY KEY, value TEXT);
+      -- 19.11.2026: позиции в поиске WB (/api/advert/v0/positions) — медиана места
+      -- за день с рекламой (буст) и без неё, плюс распределение по диапазонам мест.
+      CREATE TABLE IF NOT EXISTS ad_pos_day (
+        mp TEXT NOT NULL, date TEXT NOT NULL, campaign_id TEXT NOT NULL, sku TEXT NOT NULL,
+        pos REAL, pos_noboost REAL, ranges TEXT,
+        PRIMARY KEY (mp, date, campaign_id, sku)
+      ) WITHOUT ROWID;
     `);
     // 14.10: архив товара (карточки под самовыкуп, дубли) — скрыт со всех экранов «Рекламы».
     const flagCols = (db.prepare('PRAGMA table_info(ad_product_flag)').all() as any[]).map(c => c.name);
@@ -333,7 +340,63 @@ export function saveStatDays(mp: AdMp, rows: StatDayRow[]): number {
   return rows.length;
 }
 
-export function statSummary(): { mp: string; days: number; from: string | null; to: string | null; rows: number; spend: number }[] {
+export type PosDayRow = { date: string; campaign_id: string; sku: string; pos: number; pos_noboost: number; ranges: unknown };
+
+/** Записать позиции в поиске (WB). Строка «кампания × товар × день» перезаписывается свежей. */
+export function savePosDays(mp: AdMp, rows: PosDayRow[]): number {
+  const d = adsDb();
+  if (!d || !rows.length) return 0;
+  const ins = d.prepare('INSERT OR REPLACE INTO ad_pos_day (mp, date, campaign_id, sku, pos, pos_noboost, ranges) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  d.exec('BEGIN');
+  try {
+    for (const r of rows) ins.run(mp, r.date, r.campaign_id, r.sku, r.pos, r.pos_noboost, JSON.stringify(r.ranges ?? null));
+    d.exec('COMMIT');
+  } catch (e) {
+    d.exec('ROLLBACK');
+    throw e;
+  }
+  return rows.length;
+}
+
+/** Место в поиске за период: среднее дневных медиан с рекламой и без неё. */
+export type PosAgg = { withAd: number; noAd: number; lift: number; days: number };
+
+/**
+ * Позиции за период в трёх срезах: «кампания|товар», кампания, товар.
+ * Дни, где WB не нашёл товар в выдаче (место 0), не учитываем.
+ */
+export function posStats(mp: AdMp, from: string, to: string): { byCampSku: Map<string, PosAgg>; byCamp: Map<string, PosAgg>; bySku: Map<string, PosAgg> } {
+  const out = { byCampSku: new Map<string, PosAgg>(), byCamp: new Map<string, PosAgg>(), bySku: new Map<string, PosAgg>() };
+  const d = adsDb();
+  if (!d) return out;
+  const rows = d.prepare('SELECT campaign_id, sku, pos, pos_noboost FROM ad_pos_day WHERE mp = ? AND date >= ? AND date <= ? AND pos > 0 AND pos_noboost > 0')
+    .all(mp, from, to) as { campaign_id: string; sku: string; pos: number; pos_noboost: number }[];
+  const acc = new Map<string, { s: number; n: number; c: number }>();
+  const put = (k: string, r: { pos: number; pos_noboost: number }) => {
+    const a = acc.get(k) ?? { s: 0, n: 0, c: 0 };
+    a.s += r.pos; a.n += r.pos_noboost; a.c++;
+    acc.set(k, a);
+  };
+  for (const r of rows) { put(`cs:${r.campaign_id}|${r.sku}`, r); put(`c:${r.campaign_id}`, r); put(`s:${r.sku}`, r); }
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  for (const [k, a] of acc) {
+    const withAd = r1(a.s / a.c), noAd = r1(a.n / a.c);
+    const v: PosAgg = { withAd, noAd, lift: r1(noAd - withAd), days: a.c };
+    if (k.startsWith('cs:')) out.byCampSku.set(k.slice(3), v);
+    else if (k.startsWith('c:')) out.byCamp.set(k.slice(2), v);
+    else out.bySku.set(k.slice(2), v);
+  }
+  return out;
+}
+
+/** Есть ли уже позиции за день (для выбора окна догрузки). */
+export function posHasDay(mp: AdMp, date: string): boolean {
+  const d = adsDb();
+  if (!d) return false;
+  return !!d.prepare('SELECT 1 FROM ad_pos_day WHERE mp = ? AND date = ? LIMIT 1').get(mp, date);
+}
+
+export function statSummary():{ mp: string; days: number; from: string | null; to: string | null; rows: number; spend: number }[] {
   const d = adsDb();
   if (!d) return [];
   return d.prepare(`SELECT mp, COUNT(DISTINCT date) AS days, MIN(date) AS "from", MAX(date) AS "to", COUNT(*) AS rows, ROUND(SUM(spend), 2) AS spend

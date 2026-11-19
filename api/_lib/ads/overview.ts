@@ -12,7 +12,7 @@
  */
 import { getRnp } from '../rnp';
 import { mskDate } from '../mskDate';
-import { listCampaigns, listItems, campaignStats, listFlags, statSummary, type CampaignStat } from './store';
+import { listCampaigns, listItems, campaignStats, listFlags, statSummary, posStats, type CampaignStat, type PosAgg } from './store';
 import { lastAdsSync } from './sync';
 import { productEcon, zeroOrdersChance, clicksForSignal, BASE_CR, P0_MAX, ANOMALY_X } from './econ';
 import { marginThresholds } from '../repricer';
@@ -146,6 +146,9 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14, span?: { from?: stri
 
   // ── Кампании ──────────────────────────────────────────────────────────────
   const statsBySku = campaignStats(mp, from, to, true);
+  // Позиции в поиске WB (с рекламой и без) — отдельной таблицей, пристёгиваем к статистике.
+  const pos = mp === 'wb' ? posStats(mp, from, to) : null;
+  const withPos = (s: Ads2Stat | null, p: PosAgg | undefined): Ads2Stat | null => (s && p ? { ...s, pos: p } : s);
   const byCampSku = new Map(statsBySku.map(s => [`${s.campaign_id}|${s.sku}`, s]));
   const byCamp = new Map<string, CampaignStat>();
   for (const s of statsBySku) byCamp.set(s.campaign_id, addStat(byCamp.get(s.campaign_id), s));
@@ -177,10 +180,10 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14, span?: { from?: stri
           bid: it.bid_raw == null ? null : Math.round(Number(it.bid_raw) / 10_000) / 100,
           targetCir: it.target_cir ?? null,
           noAds: !!flags.get(it.sku)?.no_ads,
-          stat: toStat(byCampSku.get(`${c.id}|${it.sku}`) ?? null),
+          stat: withPos(toStat(byCampSku.get(`${c.id}|${it.sku}`) ?? null), pos?.byCampSku.get(`${c.id}|${it.sku}`)),
         };
       }),
-      stat: toStat(byCamp.get(c.id) ?? null),
+      stat: withPos(toStat(byCamp.get(c.id) ?? null), pos?.byCamp.get(c.id)),
     };
   });
 
@@ -236,7 +239,7 @@ export async function getAdsOverview(mp: Ads2Mp, days = 14, span?: { from?: stri
       pdpToCart: cardViews && carts != null ? pct(carts, cardViews) : null,
       cartToOrder: carts ? pct(orders, carts) : null,
       avgPos: posW ? r2(posS! / posW) : null,
-      ad: adSku ? toStat(adBySku.get(adSku) ?? null) : null,
+      ad: adSku ? withPos(toStat(adBySku.get(adSku) ?? null), pos?.bySku.get(adSku)) : null,
       price: pv?.price ?? rnp.sellerPrices?.[up(ri?.article ?? key)] ?? null,
       marginPct: pv?.marginPct ?? null, marginRub: pv?.marginRub ?? null,
       econ: productEcon({ marginRub: pv?.marginRub ?? null, adsRub: pv?.adsRub, base: pv?.base, price: pv?.price ?? null, buyout: pv?.buyout,

@@ -16,7 +16,7 @@
 import './_ads-check-env';
 import { join } from 'node:path';
 import { gate, note, ruleFor, gatewayStatus, GatewayBusy, _resetGatewayForTests } from '../api/_lib/gateway';
-import { parseWbAdverts, parseWbFullstats, parseOzonCampaigns, parseWbDailyLimits, parseOzonSkuStats, micro } from '../api/_lib/ads/sync';
+import { parseWbAdverts, parseWbFullstats, parseOzonCampaigns, parseWbDailyLimits, parseOzonSkuStats, parseWbPositions, micro } from '../api/_lib/ads/sync';
 import { parseWbFunnelHistory } from '../api/_lib/rnp';
 import { applyAdAction } from '../api/_lib/ads/actions';
 import * as store from '../api/_lib/ads/store';
@@ -31,6 +31,7 @@ function check(name: string, actual: unknown, expected: unknown): void {
 async function main() {
   console.log('Шлюз');
   check('fullstats → своё ведро 20 с', ruleFor('https://advert-api.wildberries.ru/adv/v3/fullstats?ids=1')?.bucket, 'wb-adv:fullstats');
+  check('позиции → своё ведро 6 с', ruleFor('https://advert-api.wildberries.ru/api/advert/v0/positions?advertIds=1')?.bucket, 'wb-adv:positions');
   check('fullstats v4 → то же ведро', ruleFor('https://advert-api.wildberries.ru/api/advert/v4/fullstats?advertIds=1')?.bucket, 'wb-adv:fullstats');
   check('bids/min не попадает в ведро bids', ruleFor('https://advert-api.wildberries.ru/api/advert/v1/bids/min')?.bucket, 'wb-adv:bids-min');
   check('чужие хосты без правила', ruleFor('https://api.anthropic.com/v1/messages'), null);
@@ -156,6 +157,21 @@ async function main() {
     store.logChange({ mp: 'wb', campaign_id: '40772131', sku: '923646381', actor: 'autopilot', action: 'bid',
       before: { search: 87000 }, after: { search: 95000 }, reason: 'позиция 3 → 7', status: 'proposed' });
     check('журнал пишет и читает JSON', store.listChanges(5)[0]?.after, { search: 95000 });
+
+    // Позиции в поиске WB (19.11.2026): ответ /api/advert/v0/positions.
+    const pr = parseWbPositions({ rows: [
+      { advertId: 1, nmId: 5, date: '2026-11-12', posMedian: 4, posNoboostMedian: 104, posMedianDiff: 100, ranges: [] },
+      { advertId: 1, nmId: 5, date: '2026-11-13', posMedian: 6, posNoboostMedian: 96, posMedianDiff: 90, ranges: [] },
+      { advertId: 2, nmId: 5, date: '2026-11-13', posMedian: 0, posNoboostMedian: 0, posMedianDiff: 0, ranges: [] },
+      { advertId: 'x', nmId: 5, date: '2026-11-13' },
+    ] });
+    check('позиции: битая строка отброшена', pr.length, 3);
+    store.savePosDays('wb', pr);
+    store.savePosDays('wb', pr.slice(0, 1)); // повторный сбор того же дня не двоит
+    const ps = store.posStats('wb', '2026-11-12', '2026-11-13');
+    check('позиции: среднее за период с рекламой и без', ps.byCampSku.get('1|5'), { withAd: 5, noAd: 100, lift: 95, days: 2 });
+    check('позиции: дни «не найден в выдаче» (0) не портят среднее', ps.bySku.get('5')?.days, 2);
+    check('позиции: за пределами периода пусто', store.posStats('wb', '2026-11-14', '2026-11-20').bySku.size, 0);
   }
 
   if (store.adsDb()) await checkActions();

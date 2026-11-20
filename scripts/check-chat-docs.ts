@@ -5,6 +5,7 @@
  */
 import { categoryOf, isSendable, isEnglish, friendlyName, hasPdfTwin, CHAT_EXT } from '../api/_lib/reviews/chatDocs';
 import { buildMime, maskEmail, EMAIL_RE } from '../api/_lib/mailer';
+import { cleanBuyerName } from '../api/_lib/reviews/chatStore';
 
 let failed = 0;
 function check(name: string, actual: unknown, expected: unknown): void {
@@ -61,6 +62,12 @@ check('конец письма', mime.trimEnd().endsWith('--'), true);
 check('строки не длиннее 998', mime.split('\r\n').every(l => l.length <= 998), true);
 check('адрес скрыт в журнале', maskEmail('ivanov@mail.ru'), 'iv***@mail.ru');
 check('проверка адреса', [EMAIL_RE.test('a.b@mail.ru'), EMAIL_RE.test('нет'), EMAIL_RE.test('a@b')], [true, false, false]);
+
+console.log('Имена покупателей Ozon из кабинета');
+check('обычное имя', cleanBuyerName('  Дмитрий   П. '), 'Дмитрий П.');
+check('пустое и «Покупатель» — нет имени', [cleanBuyerName(''), cleanBuyerName(null), cleanBuyerName('Покупатель')], [null, null, null]);
+check('без угловых скобок и переносов', cleanBuyerName('<b>Ира</b>\nК.'), 'b Ира /b К.');
+check('длинное — обрезано до 60', (cleanBuyerName('А'.repeat(100)) || '').length, 60);
 
 if (failed) { console.log(`\n✗ Документы в чатах: ${failed} ошибок`); process.exit(1); }
 console.log('\n✓ Документы в чатах: всё верно');

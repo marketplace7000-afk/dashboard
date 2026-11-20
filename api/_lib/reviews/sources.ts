@@ -15,7 +15,7 @@ import { fetchWithRetry } from '../fetchRetry';
 import { getDb, kvGet, kvSet, kvUpdatedAt, rlog, getSettings } from './db';
 import { stripPii } from './kb';
 import { askClaude } from './claude';
-import { chatDb, addMessages, chatMessages, setThreadMeta, getThread, wbOfferByNm } from './chatStore';
+import { chatDb, addMessages, chatMessages, setThreadMeta, getThread, wbOfferByNm, applyKnownOzonNames } from './chatStore';
 import { modelFor } from '../aiModels';
 import type { MediaIn } from './media';
 
@@ -484,6 +484,8 @@ export function syncChats(): Promise<any> {
     const out: any = {};
     try { out.wb = await syncWbChats(); } catch (e) { out.wb = { error: errText(e) }; rlog('warn', 'WB: чаты не синхронизированы', out.wb); }
     try { out.ozon = await syncOzonChats(); } catch (e) { out.ozon = { error: errText(e) }; rlog('warn', 'Ozon: чаты не синхронизированы', out.ozon); }
+    // Имена покупателей Ozon приносит агент на ПК (API их не отдаёт) — подставить новым чатам.
+    try { applyKnownOzonNames(); } catch (e) { rlog('warn', 'Ozon: имена покупателей не подставлены', { error: errText(e) }); }
     if ((out.wb?.pairs || 0) + (out.ozon?.pairs || 0) > 0) rlog('info', 'Чаты покупателей: пары обновлены', out);
     kvSet('chats_sync', { at: Date.now(), ...out });
     return out;

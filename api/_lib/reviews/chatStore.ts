@@ -201,6 +201,56 @@ export function setThreadMeta(mp: string, chatId: string, meta: { replySign?: st
     .run(mp, chatId, meta.replySign ?? null, meta.clientName ?? null, meta.sku ?? null, meta.offerId ?? null, meta.productName ?? null, Date.now());
 }
 
+// ─── Имена покупателей Ozon ─────────────────────────────────────────────────
+// Seller API Ozon имени покупателя не отдаёт ни в чатах (user = номер и тип), ни в заказах
+// (customer = null для FBS/FBO) — проверено 20.11.2026. Имя есть только в списке чатов кабинета
+// seller.ozon.ru: его читает агент на ПК (сценарий ozon_reviews, шаг «имена из чатов»).
+// Храним отдельно: чат может появиться у нас позже, чем агент прочитал имя.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Имя из кабинета → безопасная короткая строка; пустое/служебное → null. */
+export function cleanBuyerName(raw: unknown): string | null {
+  const s = String(raw ?? '').replace(/[\u0000-\u001f\u007f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  if (!s || /^(покупатель|ozon|озон)$/i.test(s)) return null;
+  return s;
+}
+
+export function saveOzonBuyerNames(rows: { chat_id?: unknown; name?: unknown }[]): { received: number; saved: number; threads: number } {
+  const d = chatDb();
+  d.exec(`CREATE TABLE IF NOT EXISTS chat_names (
+    marketplace TEXT NOT NULL, chat_id TEXT NOT NULL, name TEXT NOT NULL, at INTEGER NOT NULL,
+    PRIMARY KEY (marketplace, chat_id))`);
+  const put = d.prepare(`INSERT INTO chat_names (marketplace, chat_id, name, at) VALUES ('ozon', ?, ?, ?)
+    ON CONFLICT(marketplace, chat_id) DO UPDATE SET name = excluded.name, at = excluded.at`);
+  const upd = d.prepare(`UPDATE chat_threads SET client_name = ? WHERE marketplace = 'ozon' AND chat_id = ? AND COALESCE(client_name, '') <> ?`);
+  let saved = 0; let threads = 0;
+  const now = Date.now();
+  for (const r of rows.slice(0, 5000)) {
+    const id = String(r?.chat_id ?? '').trim().toLowerCase();
+    const name = cleanBuyerName(r?.name);
+    if (!UUID_RE.test(id) || !name) continue;
+    put.run(id, name, now); saved++;
+    threads += Number(upd.run(name, id, name).changes || 0);
+  }
+  return { received: rows.length, saved, threads };
+}
+
+/** Новые чаты Ozon, у которых имя уже прочитано агентом раньше, — подставить имя. */
+export function applyKnownOzonNames(): number {
+  const d = chatDb();
+  const has = d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chat_names'").get();
+  if (!has) return 0;
+  return Number(d.prepare(`UPDATE chat_threads SET client_name = (SELECT n.name FROM chat_names n
+      WHERE n.marketplace = chat_threads.marketplace AND n.chat_id = chat_threads.chat_id)
+    WHERE marketplace = 'ozon' AND client_name IS NULL
+      AND EXISTS (SELECT 1 FROM chat_names n WHERE n.marketplace = chat_threads.marketplace AND n.chat_id = chat_threads.chat_id)`).run().changes || 0);
+}
+
+/** Сколько чатов Ozon уже с именем — агенту: первый проход листает список глубже. */
+export function ozonNamedCount(): number {
+  return Number((chatDb().prepare("SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = 'ozon' AND client_name IS NOT NULL").get() as any)?.n || 0);
+}
+
 export function patchThread(mp: string, chatId: string, fields: Record<string, unknown>): void {
   const keys = Object.keys(fields);
   if (!keys.length) return;

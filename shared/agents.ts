@@ -105,6 +105,8 @@ export const SCENARIO_STAGES: Record<AgentTaskType, StageDef[]> = {
     { stage: 'open_cabinet', title: 'Кабинет Ozon',        counted: false },
     { stage: 'reviews_list', title: 'Отзывы без ответа',   counted: true  },
     { stage: 'ingest',       title: 'Отправка в дашборд',  counted: false },
+    // 20.11.2026: имена покупателей из списка чатов кабинета (API Ozon имён не отдаёт).
+    { stage: 'chat_names',   title: 'Имена покупателей в чатах', counted: true },
   ],
   // Агент 3 «Реклама»: какие запросы делает кабинет в разделах аналитики и как
   // устроены ответы — основа для постоянного сбора конкурентов и воронки (14.10.2026).

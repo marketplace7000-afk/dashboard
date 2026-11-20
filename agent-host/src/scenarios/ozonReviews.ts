@@ -10,7 +10,7 @@
  * Ответы на отзывы этот сценарий НЕ публикует.
  *
  * Этапы (shared/agents SCENARIO_STAGES.ozon_reviews):
- *   1 open_cabinet → 2 reviews_list → 3 ingest
+ *   1 open_cabinet → 2 reviews_list → 3 ingest → 4 chat_names (имена покупателей из списка чатов)
  */
 import { SCENARIO_STAGES, type AgentSettings, type AgentTask } from '../../../shared/agents';
 import * as api from '../api';
@@ -98,8 +98,69 @@ export async function runOzonReviews(task: AgentTask, settings: AgentSettings): 
       await api.fail(task.id, { error: 'дашборд не принял отзывы', retryable: true });
       return;
     }
-    await api.complete(task.id, `Отзывов Ozon без ответа: ${res.reviews.length}${res.complete ? '' : ' (список неполный)'}`, { reviews: res.reviews.length });
+    // 4. Имена покупателей из списка чатов (сбой шага не роняет сбор отзывов).
+    let names = 0;
+    try {
+      names = await collectChatNames(page, task, settings);
+    } catch (e) {
+      await api.log(task.id, 'warn', `имена покупателей из чатов не прочитаны: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
+    }
+    await api.complete(task.id,
+      `Отзывов Ozon без ответа: ${res.reviews.length}${res.complete ? '' : ' (список неполный)'}; имён покупателей из чатов: ${names}`,
+      { reviews: res.reviews.length, chat_names: names });
   } finally {
     await page.close().catch(() => {});
   }
+}
+
+/**
+ * Шаг 4 — имена покупателей. Seller API Ozon имени не отдаёт (ни в чатах, ни в заказах — проверено
+ * 20.11.2026), а в списке чатов кабинета у каждого чата есть подпись (title = «Дмитрий П.») и ссылка
+ * deeplink с тем же chat_id, что в API. Только чтение: открываем список чатов покупателей и листаем
+ * его колёсиком (без нажатий на чаты, без отправки сообщений).
+ */
+const MESSENGER_URL = 'https://seller.ozon.ru/app/messenger?group=customers_v2';
+const MESSENGER_ALLOWED = /^https:\/\/seller\.ozon\.ru\/app\/messenger/;
+
+async function collectChatNames(page: Awaited<ReturnType<typeof newPage>>, task: AgentTask, settings: AgentSettings): Promise<number> {
+  await api.progress(task.id, stage(3, 'Читаю имена покупателей в чатах'), true);
+  await sleep(randBetween(settings.page_pause_ms));
+  await page.goto(MESSENGER_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await sleep(6000);
+  const url = page.url();
+  const body = await page.evaluate(() => document.body?.innerText ?? '');
+  if (looksLikeChallenge(url, body)) throw new Error('Ozon показал проверку «не робот» на странице чатов');
+  if (!MESSENGER_ALLOWED.test(url)) throw new Error(`страница чатов не открылась (${url.slice(0, 60)})`);
+
+  const maxScrolls = Math.min(Math.max(Number(task.params.chat_names_scrolls) || 12, 1), 120);
+  const found = new Map<string, string>();
+  let still = 0;
+  for (let i = 0; i <= maxScrolls; i++) {
+    const r = await page.evaluate(() => {
+      const re = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+      const items = Array.from(document.querySelectorAll('div[deeplink][title]'));
+      const pairs = items.map(e => ({ chat_id: (e.getAttribute('deeplink') || '').match(re)?.[0] || '', name: e.getAttribute('title') || '' }))
+        .filter(p => p.chat_id && p.name);
+      // Листаем ближайший прокручиваемый блок списка.
+      let box: HTMLElement | null = (items[items.length - 1] as HTMLElement | undefined)?.parentElement ?? null;
+      while (box && !(box.scrollHeight > box.clientHeight + 5 && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+      const before = box ? box.scrollTop : 0;
+      if (box) box.scrollTop = box.scrollHeight;
+      return { pairs, moved: !!box && box.scrollTop > before };
+    });
+    const was = found.size;
+    for (const p of r.pairs) found.set(p.chat_id.toLowerCase(), p.name.trim());
+    still = found.size === was ? still + 1 : 0;
+    if (still >= 3 || (!r.moved && still >= 1)) break;  // список кончился или больше не подгружается
+    await sleep(1800 + Math.random() * 1700);
+  }
+  const names = [...found].map(([chat_id, name]) => ({ chat_id, name }));
+  await api.progress(task.id, stage(3, `Имён покупателей найдено: ${names.length}`, { items_done: names.length, items_total: names.length }), true);
+  if (!names.length) {
+    await api.log(task.id, 'warn', 'в списке чатов кабинета не нашлось ни одного имени — возможно, Ozon поменял страницу');
+    return 0;
+  }
+  const r = await api.chatNamesIngest(names);
+  if (!r) throw new Error('дашборд не принял имена');
+  return names.length;
 }

@@ -124,6 +124,14 @@ export async function competitorsIngest(marketplace: 'wb' | 'ozon', data: unknow
   } catch (e) { localLog(`[api] competitors-ingest не прошёл: ${(e as Error).message}`); return null; }
 }
 
+/** Имена покупателей из списка чатов кабинета Ozon → дашборд («Чаты с покупателями»). */
+export async function chatNamesIngest(names: { chat_id: string; name: string }[]): Promise<{ saved: number; threads: number } | null> {
+  try {
+    const r = await call<{ ok: boolean; saved: number; threads: number }>(`/api/agent/ozon-chat-names`, { names });
+    return r.status === 200 && r.json?.ok ? { saved: r.json.saved, threads: r.json.threads } : null;
+  } catch (e) { localLog(`[api] ozon-chat-names не прошёл: ${(e as Error).message}`); return null; }
+}
+
 /** Отзывы Ozon из кабинета → дашборд (раздел «Отзывы и вопросы»). complete = список полный. */
 export async function reviewsIngest(reviews: unknown[], complete: boolean): Promise<boolean> {
   try {

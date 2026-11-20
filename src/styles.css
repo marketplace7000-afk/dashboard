@@ -1268,7 +1268,14 @@ code {
 
 /* Чаты: список + диалог */
 /* Столбец чатов шире: вкладки «Ждут ответа · Черновики · Все» и бейджи влезают целиком (08.11.2026). */
-.rv-chat { display: grid; grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); gap: 16px; align-items: start; }
+/* 20.11.2026: список шире (до 42 % ширины, не уже 400 px), переписка — остальное: была слишком широкой. */
+.rv-chat { display: grid; grid-template-columns: minmax(400px, 42%) minmax(0, 1fr); gap: 16px; align-items: start; }
+/* Непрочитанный диалог: точка у имени, жирный текст последнего сообщения, лёгкий фон */
+.rv-thread.is-unread { background: color-mix(in srgb, var(--accent) 6%, #fff); }
+.rv-thread.is-unread:hover { background: color-mix(in srgb, var(--accent) 10%, #fff); }
+.rv-thread.is-unread.is-active { background: var(--accent-soft); }
+.rv-thread.is-unread .rv-thread-top b, .rv-thread.is-unread .rv-thread-last { font-weight: 700; }
+.rv-unread-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); margin-right: 7px; vertical-align: middle; }
 .rv-chat-list { display: grid; gap: 12px; padding: 14px; border-radius: var(--rv-r); background: #fff; border: 1px solid var(--rv-line); position: sticky; top: 64px; }
 .rv-chat-tools { display: grid; gap: 10px; }
 .rv-chat-tools .rv-search { max-width: none; }

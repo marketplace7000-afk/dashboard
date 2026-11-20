@@ -8,10 +8,12 @@ export type ChatThread = {
   confidence: string | null; escalationReason: string | null; sourcesUsed: string[];
   sentAt: number | null; sentBy: string | null; sendError: string | null; canReply: boolean;
   productPhoto?: string | null; productUrl?: string | null;
+  /** Последним написал покупатель, а в кабинете диалог после этого не открывали. */
+  unread?: boolean;
 };
 export type ChatMedia = { id: number; kind: 'photo' | 'video'; note: string | null; viewable: boolean; error: string | null };
 export type ChatMsg = { id: string; at: number; fromBuyer: boolean; text: string; media?: ChatMedia[] };
-export type ChatView = 'waiting' | 'drafts' | 'all';
+export type ChatView = 'unread' | 'waiting' | 'drafts' | 'all';
 export type ChatDoc = {
   id: string; name: string; folder: string;
   category: 'Инструкция' | 'Техпаспорт' | 'Сертификат' | 'Комплектация' | 'Характеристики' | 'Другое';
@@ -25,7 +27,7 @@ export type ChatDocsOverview = {
 };
 export type DocSendResult = { ok: boolean; sent: string[]; errors: string[]; error?: string };
 export type ChatMp = 'all' | 'wb' | 'ozon';
-export type ChatCounts = { waiting: number; drafts: number; wb: { waiting: number; drafts: number }; ozon: { waiting: number; drafts: number } };
+export type ChatCounts = { waiting: number; drafts: number; unread: number; wb: { waiting: number; drafts: number; unread: number }; ozon: { waiting: number; drafts: number; unread: number } };
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api/reviews/chats${path}`, {

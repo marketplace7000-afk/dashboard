@@ -105,10 +105,18 @@ export function Chats() {
     setSettings((await reviewsApi.saveSettings({ [k]: !settings[k] } as any)).settings);
   };
 
-  const replaceThread = (t: ChatThread) => setData(d => d ? { ...d, threads: d.threads.map(x => key(x) === key(t) ? t : x) } : d);
+  const replaceThread = (t: ChatThread) => setData(d => {
+    if (!d) return d;
+    // Открыли непрочитанный диалог — счётчик «Новые» уменьшается сразу, без перезагрузки списка.
+    const wasUnread = d.threads.some(x => key(x) === key(t) && x.unread) && !t.unread;
+    return {
+      ...d, threads: d.threads.map(x => key(x) === key(t) ? t : x),
+      counts: wasUnread ? { ...d.counts, unread: Math.max(0, d.counts.unread - 1) } : d.counts,
+    };
+  });
   const selThread = data?.threads.find(t => key(t) === sel);
   const views: [ChatView, string, number | null][] = [
-    ['waiting', 'Ждут ответа', data?.counts.waiting ?? null], ['drafts', 'Черновики', data?.counts.drafts ?? null], ['all', 'Все', null],
+    ['unread', 'Новые', data?.counts.unread ?? null], ['waiting', 'Ждут ответа', data?.counts.waiting ?? null], ['drafts', 'Черновики', data?.counts.drafts ?? null], ['all', 'Все', null],
   ];
 
   return (
@@ -179,11 +187,11 @@ export function Chats() {
           {data && !data.threads.length && <div className="rv-empty">{view === 'waiting' ? 'Все покупатели получили ответ.' : 'Здесь пока пусто.'}</div>}
           <div className="rv-threads">
             {data?.threads.map(t => (
-              <button key={key(t)} className={`rv-thread${sel === key(t) ? ' is-active' : ''}`} style={mpVar(t.marketplace)} onClick={() => setSel(key(t))}>
+              <button key={key(t)} className={`rv-thread${sel === key(t) ? ' is-active' : ''}${t.unread ? ' is-unread' : ''}`} style={mpVar(t.marketplace)} onClick={() => setSel(key(t))}>
                 <ProductThumb t={t} />
                 <span className="rv-thread-body">
                   <span className="rv-thread-top">
-                    <b>{t.clientName || 'Покупатель'}</b>
+                    <b>{t.unread && <span className="rv-unread-dot" aria-label="Не прочитано" />}{t.clientName || 'Покупатель'}</b>
                     <time>{fmt(t.lastAt)}</time>
                   </span>
                   <span className="rv-thread-product">
@@ -224,6 +232,7 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
     try {
       const r = await chatsApi.thread(mp, id);
       setTh(r.thread); setMsgs(r.messages); setText(r.thread.draftAnswer || ''); setError(r.thread.sendError);
+      onChanged(r.thread);  // диалог открыт → в списке он уже прочитан
     } catch (e: any) { setError(e?.message || 'Ошибка'); }
   };
   useEffect(() => { load(); }, [id]);

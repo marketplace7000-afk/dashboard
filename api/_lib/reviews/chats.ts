@@ -14,6 +14,7 @@ import { ozonUpstream } from '../../_proxy';
 import { codeEscalation, extractJson, FORBIDDEN } from './drafts';
 import {
   chatDb, chatMessages, chatMessagesView, chatMediaOwner, getThread, patchThread, rowToThread, replySignOf, addMessages, type ChatThread,
+  markSeen, UNREAD_SQL, UNREAD_DAYS,
 } from './chatStore';
 import { mediaOfMany, imageBlocks, saveNotes, PHOTO_RULES, type MediaRow } from './media';
 
@@ -59,10 +60,10 @@ ${PHOTO_RULES}
 needs_escalation = true, если: confidence = "low", ИЛИ брак/возврат/замена/деньги, ИЛИ грубость/угрозы/суд/Роспотребнадзор/жалоба. Иначе — false.`;
 
 // ─── Список и карточка диалога ─────────────────────────────────────────────
-export type ChatView = 'waiting' | 'drafts' | 'all';
+export type ChatView = 'unread' | 'waiting' | 'drafts' | 'all';
 const WAIT_DAYS = 14;
 
-export type ChatCounts = { waiting: number; drafts: number; wb: { waiting: number; drafts: number }; ozon: { waiting: number; drafts: number } };
+export type ChatCounts = { waiting: number; drafts: number; unread: number; wb: { waiting: number; drafts: number; unread: number }; ozon: { waiting: number; drafts: number; unread: number } };
 
 export function listThreads(q: { view?: string; q?: string; mp?: string; limit?: number; offset?: number }): { total: number; threads: ChatThread[]; counts: ChatCounts } {
   const d = chatDb();
@@ -74,7 +75,8 @@ export function listThreads(q: { view?: string; q?: string; mp?: string; limit?:
   const search = String(q.q || '').trim();
   // Поиск ищет по всем чатам, а не только во вкладке: иначе чат, где последним ответил магазин,
   // не находится из «Ждут ответа» (20.11: владелец не нашёл тестовый чат Ozon).
-  if (!search && view === 'waiting') { where.push("last_from_buyer = 1 AND status NOT IN ('skipped','sent','closed') AND last_at >= ?"); args.push(since); }
+  if (!search && view === 'unread') { where.push(UNREAD_SQL); args.push(Date.now() - UNREAD_DAYS * 86400_000); }
+  else if (!search && view === 'waiting') { where.push("last_from_buyer = 1 AND status NOT IN ('skipped','sent','closed') AND last_at >= ?"); args.push(since); }
   else if (!search && view === 'drafts') where.push("status IN ('drafted','escalated')");
   if (search) {
     const like = `%${search.slice(0, 80)}%`;
@@ -98,14 +100,16 @@ export function chatCounts(): ChatCounts {
     waiting: (d.prepare(`SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = ? AND last_from_buyer = 1
       AND status NOT IN ('skipped','sent','closed') AND last_at >= ?`).get(mp, since) as any).n,
     drafts: (d.prepare("SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = ? AND status IN ('drafted','escalated')").get(mp) as any).n,
+    unread: (d.prepare(`SELECT COUNT(*) AS n FROM chat_threads WHERE marketplace = ? AND ${UNREAD_SQL}`).get(mp, Date.now() - UNREAD_DAYS * 86400_000) as any).n,
   });
   const wb = one('wb'); const ozon = one('ozon');
-  return { waiting: wb.waiting + ozon.waiting, drafts: wb.drafts + ozon.drafts, wb, ozon };
+  return { waiting: wb.waiting + ozon.waiting, drafts: wb.drafts + ozon.drafts, unread: wb.unread + ozon.unread, wb, ozon };
 }
 
 export function threadWithMessages(mp: string, chatId: string) {
-  const th = getThread(mp, chatId);
-  if (!th) return null;
+  if (!getThread(mp, chatId)) return null;
+  markSeen(mp, chatId);  // открыли диалог в кабинете — он прочитан
+  const th = getThread(mp, chatId)!;
   return { thread: th, messages: chatMessagesView(mp, chatId, 300) };
 }
 

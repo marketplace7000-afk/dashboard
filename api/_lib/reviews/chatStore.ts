@@ -38,6 +38,7 @@ export function chatDb(): any {
     CREATE INDEX IF NOT EXISTS chat_messages_chat ON chat_messages(marketplace, chat_id, at);
   `);
   ready = true;
+  addSeenColumn(d);
   migrateKvBuffers(d);
   fixOzonImageLinks(d);
   closeThankYouThreads(d);
@@ -201,6 +202,30 @@ export function setThreadMeta(mp: string, chatId: string, meta: { replySign?: st
     .run(mp, chatId, meta.replySign ?? null, meta.clientName ?? null, meta.sku ?? null, meta.offerId ?? null, meta.productName ?? null, Date.now());
 }
 
+// ─── Прочитано / не прочитано (20.11.2026) ──────────────────────────────────
+// seen_at — когда диалог последний раз открывали в кабинете (любой сотрудник). Непрочитан —
+// последним написал покупатель и это было позже открытия. При появлении столбца уже отвеченные
+// и закрытые диалоги считаем прочитанными, чтобы не подсветить весь архив.
+function addSeenColumn(d: any): void {
+  const cols = (d.prepare('PRAGMA table_info(chat_threads)').all() as any[]).map(c => c.name);
+  if (cols.includes('seen_at')) return;
+  d.exec('ALTER TABLE chat_threads ADD COLUMN seen_at INTEGER');
+  d.prepare(`UPDATE chat_threads SET seen_at = last_at
+    WHERE last_from_buyer = 0 OR status IN ('sent','skipped','closed')`).run();
+}
+
+/** Непрочитанным считаем только свежее (14 дней) — старый архив не подсвечиваем. */
+export const UNREAD_DAYS = 14;
+export function isUnread(r: { last_from_buyer?: unknown; last_at?: unknown; seen_at?: unknown }, now = Date.now()): boolean {
+  const at = Number(r.last_at || 0);
+  return !!Number(r.last_from_buyer) && at >= now - UNREAD_DAYS * 86400_000 && at > Number(r.seen_at || 0);
+}
+export const UNREAD_SQL = `last_from_buyer = 1 AND last_at >= ? AND last_at > COALESCE(seen_at, 0)`;
+
+export function markSeen(mp: string, chatId: string): void {
+  chatDb().prepare('UPDATE chat_threads SET seen_at = ? WHERE marketplace = ? AND chat_id = ?').run(Date.now(), mp, chatId);
+}
+
 // ─── Имена покупателей Ozon ─────────────────────────────────────────────────
 // Seller API Ozon имени покупателя не отдаёт ни в чатах (user = номер и тип), ни в заказах
 // (customer = null для FBS/FBO) — проверено 20.11.2026. Имя есть только в списке чатов кабинета
@@ -265,6 +290,8 @@ export type ChatThread = {
   draftAnswer: string | null; draftModel: string | null; draftCostUsd: number | null; draftFor: string | null;
   confidence: string | null; escalationReason: string | null; sourcesUsed: string[];
   sentAt: number | null; sentBy: string | null; sendError: string | null; canReply: boolean;
+  /** Последним написал покупатель, а в кабинете диалог после этого не открывали. */
+  unread: boolean;
   /** Фото товара (справочник РНП) и ссылка на карточку на площадке. */
   productPhoto: string | null; productUrl: string | null;
 };
@@ -292,6 +319,7 @@ export function rowToThread(r: any): ChatThread {
     status: r.status, draftAnswer: r.draft_answer, draftModel: r.draft_model, draftCostUsd: r.draft_cost, draftFor: r.draft_for,
     confidence: r.confidence, escalationReason: r.escalation_reason, sourcesUsed: safeJson(r.sources_used, []),
     sentAt: r.sent_at, sentBy: r.sent_by, sendError: r.send_error, canReply: !!r.reply_sign,
+    unread: isUnread(r),
   };
 }
 

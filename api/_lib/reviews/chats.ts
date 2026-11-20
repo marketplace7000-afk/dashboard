@@ -71,12 +71,17 @@ export function listThreads(q: { view?: string; q?: string; mp?: string; limit?:
   const args: any[] = [];
   if (q.mp === 'wb' || q.mp === 'ozon') { where.push('marketplace = ?'); args.push(q.mp); }
   const view = (q.view || 'waiting') as ChatView;
-  if (view === 'waiting') { where.push("last_from_buyer = 1 AND status NOT IN ('skipped','sent','closed') AND last_at >= ?"); args.push(since); }
-  else if (view === 'drafts') where.push("status IN ('drafted','escalated')");
-  if (q.q) {
-    const like = `%${String(q.q).slice(0, 80)}%`;
-    where.push('(offer_id LIKE ? OR product_name LIKE ? OR client_name LIKE ? OR last_text LIKE ? OR sku = ?)');
-    args.push(like, like, like, like, String(q.q));
+  const search = String(q.q || '').trim();
+  // Поиск ищет по всем чатам, а не только во вкладке: иначе чат, где последним ответил магазин,
+  // не находится из «Ждут ответа» (20.11: владелец не нашёл тестовый чат Ozon).
+  if (!search && view === 'waiting') { where.push("last_from_buyer = 1 AND status NOT IN ('skipped','sent','closed') AND last_at >= ?"); args.push(since); }
+  else if (!search && view === 'drafts') where.push("status IN ('drafted','escalated')");
+  if (search) {
+    const like = `%${search.slice(0, 80)}%`;
+    // Ozon не отдаёт имя покупателя (только номер) — поэтому ищем и по тексту всей переписки.
+    where.push(`(offer_id LIKE ? OR product_name LIKE ? OR client_name LIKE ? OR last_text LIKE ? OR sku = ?
+      OR EXISTS (SELECT 1 FROM chat_messages m WHERE m.marketplace = chat_threads.marketplace AND m.chat_id = chat_threads.chat_id AND m.text LIKE ?))`);
+    args.push(like, like, like, like, search, like);
   }
   const w = `WHERE ${where.join(' AND ')}`;
   const total = (d.prepare(`SELECT COUNT(*) AS n FROM chat_threads ${w}`).get(...args) as any).n;

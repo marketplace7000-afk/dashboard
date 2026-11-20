@@ -171,7 +171,7 @@ export function Chats() {
             </div>
             <form className="rv-search" onSubmit={e => { e.preventDefault(); load(); }}>
               <MagnifyingGlassIcon size={17} />
-              <input className="input" placeholder="Товар, артикул, имя или текст" value={q} onChange={e => setQ(e.target.value)} />
+              <input className="input" placeholder="Поиск по всем чатам: товар, артикул, имя, слова из переписки" value={q} onChange={e => setQ(e.target.value)} />
             </form>
           </div>
           {err && <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span>{err}</span></div>}

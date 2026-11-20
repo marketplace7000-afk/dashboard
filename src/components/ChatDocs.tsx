@@ -75,13 +75,21 @@ export function ChatDocsPanel({ th, onClose, onSent }: { th: ChatThread; onClose
     return () => window.removeEventListener('keydown', onKey);
   }, [busy]);
 
+  const searchSeq = useRef(0);
   const search = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (q.trim().length < 2) { setFound(null); return; }
-    setBusy('search');
-    try { setFound((await chatsApi.searchDocs(q.trim())).docs); } catch (e: any) { setErr(e?.message || 'Ошибка'); }
-    setBusy(null);
+    const text = q.trim();
+    if (text.length < 2) { setFound(null); return; }
+    const my = ++searchSeq.current;
+    setBusy(b => b || 'search');
+    try {
+      const docs = (await chatsApi.searchDocs(text)).docs;
+      if (my === searchSeq.current) setFound(docs);  // ответ на устаревший запрос не показываем
+    } catch (e: any) { setErr(e?.message || 'Ошибка'); }
+    setBusy(b => (b === 'search' ? null : b));
   };
+  // Ищем сразу при наборе (раньше — только по Enter, и казалось, что выбора файлов нет).
+  useEffect(() => { const t = setTimeout(() => { search(); }, 400); return () => clearTimeout(t); }, [q]);
   const toggle = (d: ChatDoc) => setSel(m => { const n = new Map(m); if (n.has(d.id)) n.delete(d.id); else n.set(d.id, d); return n; });
 
   const picked = [...sel.values()];
@@ -162,10 +170,10 @@ export function ChatDocsPanel({ th, onClose, onSent }: { th: ChatThread; onClose
 
           {ov && (
             <section className="rv-docs-sec">
-              <h4>Другие товары</h4>
+              <h4>{th.offerId ? 'Другие товары' : 'Найти документы товара'}</h4>
               <form className="rv-search" onSubmit={search}>
                 <MagnifyingGlassIcon size={17} />
-                <input className="input" placeholder="Артикул или название файла" value={q} onChange={e => { setQ(e.target.value); if (!e.target.value) setFound(null); }} />
+                <input className="input" placeholder="Артикул, модель или название файла — например, R4000" autoFocus={!th.offerId} value={q} onChange={e => { setQ(e.target.value); if (!e.target.value) setFound(null); }} />
               </form>
               {busy === 'search' && <div className="rv-muted"><SpinnerIcon size={16} className="spin" /> Ищу…</div>}
               {found && !found.length && <p className="rv-muted">Ничего не нашлось.</p>}
@@ -227,7 +235,7 @@ export function ChatDocsPanel({ th, onClose, onSent }: { th: ChatThread; onClose
                 {ov.emails.length > 0 && <span className="rv-muted rv-docs-tip">Адрес взят из сообщений покупателя — проверьте.</span>}
                 <label className="rv-docs-field">
                   <span>Текст письма</span>
-                  <textarea className="textarea" rows={5} value={mailText} onChange={e => setMailText(e.target.value)} />
+                  <textarea className="textarea" rows={8} value={mailText} onChange={e => setMailText(e.target.value)} />
                 </label>
                 <span className="rv-muted rv-docs-tip">Письмо уйдёт с адреса {ov.mail.from}. В чат после отправки напишите, что документы на почте.</span>
               </div>
@@ -243,6 +251,15 @@ export function ChatDocsPanel({ th, onClose, onSent }: { th: ChatThread; onClose
               </div>
             )}
 
+            {picked.length > 0 && (
+              <div className="rv-docs-picked" aria-label="Выбранные файлы">
+                {picked.map(d => (
+                  <button key={d.id} type="button" title="Убрать из отправки" onClick={() => toggle(d)} disabled={busy === 'send'}>
+                    {d.name} <XIcon size={14} />
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="rv-docs-actions">
               <span className="rv-muted">
                 {busy === 'send' ? 'Готовлю и отправляю — большой файл до минуты…' : picked.length ? `Выбрано: ${picked.length}` : 'Отметьте нужные файлы'}

@@ -1334,12 +1334,14 @@ code {
 .rv-msg--shop { align-self: flex-end; background: color-mix(in srgb, var(--mp) 11%, #fff); border-bottom-right-radius: 6px; }
 .rv-composer { display: grid; gap: 4px; padding: 16px 18px 18px; border-top: 1px solid var(--rv-line); }
 .rv-composer .rv-callout { margin-bottom: 8px; }
+/* Ответ в чате растёт по тексту — черновик виден целиком (до 45 % высоты экрана) */
+.rv-composer .rv-textarea { field-sizing: content; min-height: 110px; max-height: 45vh; }
 /* «Документы» в чате (20.11.2026): инструкции, техпаспорта — в чат или на почту покупателю. */
 .rv-btn-hot { border-color: var(--mp, var(--accent)); color: var(--mp, var(--accent-2)); background: color-mix(in srgb, var(--mp, var(--accent)) 9%, #fff); }
 .rv-msg-file { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
 .rv-callout--good { background: rgba(22,163,74,.09); color: #166534; }
 .rv-docs-bg { position: fixed; inset: 0; z-index: 10000; /* выше кнопки ИИ-чата (9999) */ background: rgba(15,23,42,.35); display: flex; justify-content: flex-end; }
-.rv-docs { width: min(640px, 100%); height: 100%; background: #fff; display: flex; flex-direction: column; box-shadow: -12px 0 40px rgba(15,23,42,.18); font-size: 17px; }
+.rv-docs { width: min(920px, 100%); height: 100%; background: #fff; display: flex; flex-direction: column; box-shadow: -12px 0 40px rgba(15,23,42,.18); font-size: 17px; }
 .rv-docs-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px 14px; border-bottom: 1px solid var(--rv-line); }
 .rv-docs-head h3 { margin: 0 0 4px; font-size: 21px; }
 .rv-docs-head > div { min-width: 0; overflow-wrap: anywhere; }
@@ -1361,11 +1363,18 @@ code {
 .rv-docs-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .rv-docs-tip { font-size: 15px; line-height: 1.4; }
 .rv-docs-log { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 15px; color: var(--muted); overflow-wrap: anywhere; }
-.rv-docs-foot { border-top: 1px solid var(--rv-line); padding: 14px 20px 18px; display: grid; gap: 10px; }
+.rv-docs-foot { border-top: 1px solid var(--rv-line); padding: 14px 20px 18px; display: grid; gap: 10px; max-height: 72vh; overflow-y: auto; }
 .rv-docs-foot .rv-seg-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .rv-docs-mail { display: grid; gap: 8px; }
 .rv-docs-field { display: grid; gap: 4px; font-size: 15px; color: var(--muted); }
 .rv-docs-field .input, .rv-docs-field .textarea { font-size: 17px; color: var(--text); font-family: inherit; }
+/* Текст письма виден целиком: поле растёт по тексту (до половины экрана), дальше — прокрутка */
+.rv-docs-field .textarea { width: 100%; min-height: 12em; max-height: 50vh; field-sizing: content; resize: vertical; line-height: 1.45; }
+.rv-docs .rv-search { max-width: none; flex: none; width: 100%; }
+.rv-docs .rv-search .input { width: 100%; padding-left: 38px; }
+.rv-docs-picked { display: flex; flex-wrap: wrap; gap: 6px; }
+.rv-docs-picked button { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 10px; border: 1px solid var(--rv-line); border-radius: 999px; background: #f6f8fb; font: inherit; font-size: 15px; color: var(--text); cursor: pointer; overflow-wrap: anywhere; text-align: left; }
+.rv-docs-picked button:hover { border-color: var(--muted); }
 .rv-docs-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 @media (max-width: 640px) { .rv-docs-scroll, .rv-docs-foot, .rv-docs-head { padding-left: 16px; padding-right: 16px; } }
 

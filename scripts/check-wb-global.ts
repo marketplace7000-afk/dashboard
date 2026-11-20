@@ -52,3 +52,39 @@ console.log('check-wb-global: ok');
   if (Math.round(r.price) !== Math.round(8680 * 12.1816)) throw new Error('price must use CBR');
   console.log('check-wb-global: rateWb ok');
 }
+
+// 20.11.2026: факты кабинета — логистика из финотчёта на проданную шт не делится на выкуп.
+{
+  const base = { ...WBG_DEFAULTS, priceCny: 1000, rate: 12, cost: 5000, extra: 0, spp: 20, volumeL: 3, buyout: 50 } as any;
+  const t = calcWbGlobal(base)!;
+  if (Math.abs(t.logistics - 12 * 12 / 0.5) > 0.001) throw new Error('тариф ÷ выкуп ' + t.logistics);
+  const f = calcWbGlobal({ ...base, logisticsFactCny: 15.5 })!;
+  if (Math.abs(f.logistics - 15.5 * 12) > 0.001) throw new Error('факт логистики ' + f.logistics);
+}
+// Факты по товару: свой ДРР/выкуп при ≥ 3 продажах, иначе среднее кабинета; без рекламы — 0.
+{
+  const { rowFacts } = await import('../api/_lib/wbGlobalFacts');
+  const facts: any = { from: '2026-10-21', to: '2026-11-19', finRows: 1, campaigns: 1, finAt: 1, adsAt: 1, acquiringCny: 0, errors: [], byNm: {
+    1: { sales: 10, returns: 1, cancels: 2, revenueCny: 9000, deliveryCny: 180, adSpendCny: 900 },
+    2: { sales: 1, returns: 1, cancels: 0, revenueCny: 0, deliveryCny: 20, adSpendCny: 100 },
+    4: { sales: 1, returns: 0, cancels: 0, revenueCny: 500, deliveryCny: 9, adSpendCny: 50 },
+    3: { sales: 5, returns: 0, cancels: 5, revenueCny: 5000, deliveryCny: 100, adSpendCny: 0 },
+  } };
+  const a = rowFacts(facts, 1);
+  if (a.drr.value !== 10 || a.buyout.value !== 83.3 || a.logisticsCny.value !== 20 || a.acquiring.value !== 0) throw new Error('факты товара ' + JSON.stringify(a));
+  const b = rowFacts(facts, 2);
+  if (b.drr.value !== 7.2 || b.logisticsCny.value !== null || b.buyout.value !== Math.round(17 / 24 * 1000) / 10) throw new Error('среднее кабинета ' + JSON.stringify(b));
+  const c = rowFacts(facts, 4);
+  if (c.drr.value !== 10 || c.logisticsCny.value !== 9) throw new Error('одна продажа — свой ДРР ' + JSON.stringify(c));
+  if (rowFacts(facts, 3).drr.value !== 0 || rowFacts(facts, 99).drr.value !== 0) throw new Error('без рекламы — 0');
+  console.log('check-wb-global: facts ok');
+}
+// Тихие минуты (диспетчер API 20.11): старт Baloo :x3, сверка :16 чётного часа, Мэй :26/:56.
+{
+  const { busyMinuteWaitMs } = await import('../api/_lib/wbGlobalFacts');
+  const at = (h: number, m: number, s = 0) => Date.UTC(2026, 10, 20, h - 3, m, s);
+  if (busyMinuteWaitMs(at(10, 13, 10)) <= 0 || busyMinuteWaitMs(at(10, 12, 0)) !== 0) throw new Error('Baloo :x3');
+  if (busyMinuteWaitMs(at(10, 16)) <= 0 || busyMinuteWaitMs(at(11, 16)) !== 0) throw new Error(':16 чётного часа');
+  if (busyMinuteWaitMs(at(11, 26)) <= 0 || busyMinuteWaitMs(at(6, 0)) <= 0 || busyMinuteWaitMs(at(11, 30)) !== 0) throw new Error('Мэй');
+  console.log('check-wb-global: quiet minutes ok');
+}

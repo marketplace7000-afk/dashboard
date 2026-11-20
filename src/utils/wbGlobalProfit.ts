@@ -22,7 +22,8 @@
 //   цена ₽          = цена ¥ × курс
 //   цена покупателя = цена ₽ × (1 − СПП)        — справочно
 //   комиссия, реклама, эквайринг — % от цены ₽
-//   логистика ₽     = (8 + (max(V,1) − 1) × 2) ¥ × курс / выкуп
+//   логистика ₽     = факт финотчёта ¥ на проданную шт × курс, а без факта —
+//                     (8 + (max(V,1) − 1) × 2) ¥ × курс / выкуп
 //   фулфилмент ₽    = ФФ / выкуп
 //   поступление     = цена − комиссия − логистика − ФФ − реклама − эквайринг
 //   Payful          = поступление × %
@@ -47,6 +48,8 @@ export type WbgInput = {
   volumeL: number;      // объём упаковки, л
   logFirst: number;     // ¥ за первый литр
   logExtra: number;     // ¥ за каждый следующий литр
+  /** Факт логистики из финотчёта, ¥ на одну проданную шт (уже с отменами и возвратами — на выкуп не делим). */
+  logisticsFactCny?: number | null;
 };
 
 export type WbgResult = {
@@ -80,7 +83,8 @@ export function calcWbGlobal(i: WbgInput): WbgResult | null {
   const priceShown = i.priceCny * (i.rateWb && i.rateWb > 0 ? i.rateWb : i.rate);
   const buyerShown = priceShown * (1 - i.spp / 100);
   const logisticsCny = wbgLogisticsCny(i.volumeL, i.logFirst, i.logExtra);
-  const logistics = logisticsCny * i.rate / b;
+  const factLog = i.logisticsFactCny != null && i.logisticsFactCny > 0 ? i.logisticsFactCny : null;
+  const logistics = factLog != null ? factLog * i.rate : logisticsCny * i.rate / b;
   const fulfillment = i.fulfillment / b;
   const pctOfPrice = (i.commission + i.drr + i.acquiring) / 100;
   const commission = price * i.commission / 100;

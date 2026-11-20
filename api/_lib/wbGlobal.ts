@@ -22,6 +22,7 @@ import { fetchWithRetry } from './fetchRetry';
 import { cacheGet, cacheSet, isFresh } from './cache';
 import { fetchAllWbCards } from './wbCards';
 import { resolveCost } from './costs';
+import { getWbGlobalFacts, rowFacts, type WbgRowFacts } from './wbGlobalFacts';
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -62,6 +63,8 @@ export type WbGlobalRow = {
   costKey: string | null;
   /** Витрина WB (Агент 1): цена покупателя, ₽, и СПП этого товара, % — если снимали. */
   showcase?: { priceRub: number; oldRub: number; walletRub?: number; spp: number | null; at: number } | null;
+  /** Факты кабинета за 30 дней: ДРР, выкуп, логистика, эквайринг (null — ещё не собраны). */
+  facts?: WbgRowFacts | null;
 };
 
 /**
@@ -90,6 +93,8 @@ export type WbGlobal = {
   cnyRate: { value: number; date: string } | null;
   /** Курс витрины WB (см. WbgRate). */
   wbRate?: WbgRate | null;
+  /** Состояние фактов за 30 дней (финотчёт + реклама кабинета). */
+  factsInfo?: { from: string | null; to: string | null; finAt: number | null; adsAt: number | null; refreshing: boolean; errors: string[] } | null;
   errors: string[];
   fetchedAt: number;
 };
@@ -355,7 +360,15 @@ function withShowcase(d: WbGlobal): WbGlobal {
 }
 
 export async function getWbGlobal(noCache = false): Promise<WbGlobal> {
-  return withShowcase(await getWbGlobalRaw(noCache));
+  const d = withShowcase(await getWbGlobalRaw(noCache));
+  if (!d.configured) return d;
+  const { facts, refreshing } = await getWbGlobalFacts(wbGlobalToken());
+  return {
+    ...d,
+    factsInfo: facts ? { from: facts.from, to: facts.to, finAt: facts.finAt, adsAt: facts.adsAt, refreshing, errors: facts.errors }
+      : { from: null, to: null, finAt: null, adsAt: null, refreshing, errors: [] },
+    rows: d.rows.map(r => ({ ...r, facts: facts ? rowFacts(facts, r.nmId) : null })),
+  };
 }
 
 async function getWbGlobalRaw(noCache = false): Promise<WbGlobal> {

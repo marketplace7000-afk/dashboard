@@ -55,15 +55,18 @@ export function LiveWbGlobalPricing() {
       commission: kn('commission') ?? r.commission ?? WBG_DEFAULTS.commission,
       // СПП: вручную в строке → глобальный параметр → замер витрины товара → медиана замера → 10 %.
       spp: kn('spp') ?? gp('spp', r.showcase?.spp ?? wbr?.spp ?? WBG_DEFAULTS.spp),
-      buyout: kn('buyout') ?? gp('buyout', WBG_DEFAULTS.buyout),
+      // ДРР, выкуп, эквайринг и логистика: вручную в строке → факт кабинета за 30 дней
+      // (финотчёт + реклама, api/_lib/wbGlobalFacts.ts) → глобальный параметр → заготовка.
+      buyout: kn('buyout') ?? r.facts?.buyout.value ?? gp('buyout', WBG_DEFAULTS.buyout),
       fulfillment: gp('fulfillment', WBG_DEFAULTS.fulfillment),
-      drr: kn('drr') ?? gp('drr', WBG_DEFAULTS.drr),
-      acquiring: gp('acquiring', WBG_DEFAULTS.acquiring),
+      drr: kn('drr') ?? r.facts?.drr.value ?? gp('drr', WBG_DEFAULTS.drr),
+      acquiring: r.facts?.acquiring.value ?? gp('acquiring', WBG_DEFAULTS.acquiring),
       tax: gp('tax', WBG_DEFAULTS.tax),
       payful: gp('payful', WBG_DEFAULTS.payful),
       volumeL: r.volumeL,
       logFirst: WBG_DEFAULTS.logFirst,
       logExtra: WBG_DEFAULTS.logExtra,
+      logisticsFactCny: r.facts?.logisticsCny.value ?? null,
     };
     const calc = inp.cost > 0 ? calcWbGlobal(inp) : null;
     const roi = calc?.roi != null ? Math.round(calc.roi) : null;
@@ -145,6 +148,9 @@ export function LiveWbGlobalPricing() {
         { label: 'Средняя маржа', value: avgMargin == null ? '—' : `${avgMargin}%`, hint: 'Средняя маржа по видимым товарам с себестоимостью' },
         ...(noCost ? [{ label: 'Без себестоимости', value: noCost, hint: 'Артикул не найден в таблице «Склад» — маржу не считаем. Себестоимость можно вписать вручную в раскрытой строке' }] : []),
       ]} />
+      <div className="muted" style={{ fontSize: 16 }}>
+        {factsLine(data.factsInfo)}
+      </div>
       {data.errors.length > 0 && (
         <div className="card" style={{ padding: 12, color: 'var(--warn)', fontSize: 16 }}>
           Часть данных кабинета не пришла: {data.errors.join('; ')}
@@ -262,14 +268,15 @@ function Details({ r, k, inp, calc, edited, onKnob, onReset }: {
     { key: 'extra', label: 'Доп. расходы, ₽', val: shown('extra', inp.extra) },
   ];
   const vol = Math.max(r.volumeL, 1);
-  const lines: { l: string; v: number }[] = calc ? [
+  const lines: { l: string; v: number; t?: string }[] = calc ? [
     { l: `Комиссия WB (${inp.commission}%) · FBS${r.commission != null && k.commission === undefined ? ' · API' : ''}`, v: -calc.commission },
-    { l: r.dims
+    ...(inp.logisticsFactCny != null ? [{ l: `Логистика · факт ${inp.logisticsFactCny} ¥ на проданную шт (с отменами и возвратами)`, v: -calc.logistics, t: r.facts?.logisticsCny.note }] : []),
+    ...(inp.logisticsFactCny != null ? [] : [{ l: r.dims
         ? `Логистика · ${r.dims.length}×${r.dims.width}×${r.dims.height} см = ${r.volumeL.toFixed(2)} л → ${inp.logFirst} ¥ + ${inp.logExtra} ¥ × ${(vol - 1).toFixed(2)} = ${calc.logisticsCny} ¥ · ÷ выкуп ${inp.buyout}%`
-        : `Логистика · габаритов в карточке нет, взят 1 л = ${calc.logisticsCny} ¥ · ÷ выкуп ${inp.buyout}%`, v: -calc.logistics },
+        : `Логистика · габаритов в карточке нет, взят 1 л = ${calc.logisticsCny} ¥ · ÷ выкуп ${inp.buyout}%`, v: -calc.logistics, t: r.facts?.logisticsCny.note }]),
     { l: `Фулфилмент (${inp.fulfillment} ₽ ÷ выкуп)`, v: -calc.fulfillment },
-    { l: `Реклама ДРР (${inp.drr}%)`, v: -calc.advertising },
-    { l: `Эквайринг (${inp.acquiring}%)`, v: -calc.acquiring },
+    { l: `Реклама ДРР (${inp.drr}%)${k.drr === undefined && r.facts?.drr.value != null ? ' · факт кабинета' : ''}`, v: -calc.advertising, t: k.drr === undefined ? r.facts?.drr.note : 'задано вручную' },
+    { l: `Эквайринг (${inp.acquiring}%)${r.facts?.acquiring.value != null ? ' · факт кабинета' : ''}`, v: -calc.acquiring, t: r.facts?.acquiring.note },
     { l: `Payful — вывод средств (${inp.payful}%)`, v: -calc.payful },
     { l: `Налог владельцам кабинета (${inp.tax}% от цены в кабинете, до СПП)`, v: -calc.tax },
     { l: 'Себестоимость', v: -calc.cost },
@@ -287,6 +294,7 @@ function Details({ r, k, inp, calc, edited, onKnob, onReset }: {
             </label>
           ))}
         </div>
+        {r.facts && k.buyout === undefined && <div className="muted" style={{ fontSize: 15, marginTop: 8 }}>Выкуп: {r.facts.buyout.note}</div>}
         {edited && <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={onReset}>Сбросить к данным кабинета</button>}
         <div className="muted" style={{ fontSize: 15, marginTop: 10, lineHeight: 1.4 }}>
           {r.title}{r.subject ? ` · ${r.subject}` : ''} · nm {r.nmId}
@@ -308,7 +316,7 @@ function Details({ r, k, inp, calc, edited, onKnob, onReset }: {
             </div>
             {lines.map((x, i) => (
               <div key={i} className="flex-between muted" style={{ fontSize: 17, gap: 12 }}>
-                <span>{x.l}</span><span style={{ color: 'var(--bad)', whiteSpace: 'nowrap' }}>{fmt(Math.round(x.v))}</span>
+                <span title={x.t}>{x.l}{x.t && <span style={{ display: 'block', fontSize: 15 }}>{x.t}</span>}</span><span style={{ color: 'var(--bad)', whiteSpace: 'nowrap' }}>{fmt(Math.round(x.v))}</span>
               </div>
             ))}
             <div className="flex-between muted" style={{ fontSize: 17, borderTop: '1px dashed var(--border)', paddingTop: 4 }}>
@@ -331,4 +339,14 @@ function Details({ r, k, inp, calc, edited, onKnob, onReset }: {
       </div>
     </div>
   );
+}
+
+type FactsInfo = { from: string | null; to: string | null; finAt: number | null; adsAt: number | null; refreshing: boolean; errors: string[] } | null | undefined;
+function factsLine(fi: FactsInfo): string {
+  if (!fi || (!fi.finAt && !fi.adsAt)) return fi?.refreshing
+    ? 'Реклама, выкуп и логистика из кабинета собираются (финотчёт и статистика рекламы, до нескольких минут). Пока в расчёте заготовки: ДРР 0 %, выкуп 90 %, логистика по тарифу'
+    : 'Факты кабинета ещё не собраны — в расчёте заготовки: ДРР 0 %, выкуп 90 %, логистика по тарифу';
+  const at = Math.min(fi.finAt ?? Infinity, fi.adsAt ?? Infinity);
+  return `ДРР, выкуп, логистика и эквайринг — факт кабинета за ${fi.from ?? '?'}…${fi.to ?? '?'} (финотчёт WB и статистика рекламы, обновлено ${fmtDateClock(at)}, раз в 12 ч)` +
+    (fi.refreshing ? ' · сейчас обновляются' : '') + (fi.errors.length ? ` · не обновилось: ${fi.errors.join('; ')}` : '');
 }

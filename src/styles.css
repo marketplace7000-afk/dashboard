@@ -1334,6 +1334,40 @@ code {
 .rv-msg--shop { align-self: flex-end; background: color-mix(in srgb, var(--mp) 11%, #fff); border-bottom-right-radius: 6px; }
 .rv-composer { display: grid; gap: 4px; padding: 16px 18px 18px; border-top: 1px solid var(--rv-line); }
 .rv-composer .rv-callout { margin-bottom: 8px; }
+/* «Документы» в чате (20.11.2026): инструкции, техпаспорта — в чат или на почту покупателю. */
+.rv-btn-hot { border-color: var(--mp, var(--accent)); color: var(--mp, var(--accent-2)); background: color-mix(in srgb, var(--mp, var(--accent)) 9%, #fff); }
+.rv-msg-file { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+.rv-callout--good { background: rgba(22,163,74,.09); color: #166534; }
+.rv-docs-bg { position: fixed; inset: 0; z-index: 10000; /* выше кнопки ИИ-чата (9999) */ background: rgba(15,23,42,.35); display: flex; justify-content: flex-end; }
+.rv-docs { width: min(640px, 100%); height: 100%; background: #fff; display: flex; flex-direction: column; box-shadow: -12px 0 40px rgba(15,23,42,.18); font-size: 17px; }
+.rv-docs-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px 14px; border-bottom: 1px solid var(--rv-line); }
+.rv-docs-head h3 { margin: 0 0 4px; font-size: 21px; }
+.rv-docs-head > div { min-width: 0; overflow-wrap: anywhere; }
+.rv-docs-scroll { flex: 1; overflow-y: auto; padding: 14px 20px; display: grid; align-content: start; gap: 18px; }
+.rv-docs-sec { display: grid; gap: 10px; min-width: 0; }
+.rv-docs-sec h4 { margin: 0; font-size: 17px; font-weight: 600; }
+.rv-docs-sec p { margin: 0; line-height: 1.45; }
+.rv-doc-list { display: grid; gap: 6px; }
+.rv-doc { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--rv-line); border-radius: 12px; cursor: pointer; min-width: 0; }
+.rv-doc:hover { border-color: #c9d0da; }
+.rv-doc.is-on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, #fff); }
+.rv-doc input { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--accent); }
+.rv-doc-ic { color: var(--muted); display: inline-flex; flex-shrink: 0; }
+.rv-doc-body { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.rv-doc-name { font-weight: 500; overflow-wrap: anywhere; line-height: 1.35; }
+.rv-doc-meta { font-size: 15px; color: var(--muted); overflow-wrap: anywhere; }
+.rv-doc-warn { color: #b45309; }
+.rv-doc-open { flex-shrink: 0; padding: 6px 8px; }
+.rv-docs-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.rv-docs-tip { font-size: 15px; line-height: 1.4; }
+.rv-docs-log { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 15px; color: var(--muted); overflow-wrap: anywhere; }
+.rv-docs-foot { border-top: 1px solid var(--rv-line); padding: 14px 20px 18px; display: grid; gap: 10px; }
+.rv-docs-foot .rv-seg-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.rv-docs-mail { display: grid; gap: 8px; }
+.rv-docs-field { display: grid; gap: 4px; font-size: 15px; color: var(--muted); }
+.rv-docs-field .input, .rv-docs-field .textarea { font-size: 17px; color: var(--text); font-family: inherit; }
+.rv-docs-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+@media (max-width: 640px) { .rv-docs-scroll, .rv-docs-foot, .rv-docs-head { padding-left: 16px; padding-right: 16px; } }
 
 /* Планшет и телефон */
 @media (max-width: 900px) {

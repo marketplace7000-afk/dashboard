@@ -76,6 +76,8 @@ function callHandler(prefix: string | null) {
   };
 }
 
+// Файл к чату покупателя (инструкция, техпаспорт) — тело как есть (nginx режет на 10 МБ); json-парсер дальше его пропустит.
+app.use('/api/reviews/chats/docs/upload', express.raw({ type: () => true, limit: '11mb' }));
 app.use('/api', jsonBody, callHandler(null));
 app.use('/wb', rawBody, callHandler('wb'));
 app.use('/ozon-perf', rawBody, callHandler('ozon-perf'));

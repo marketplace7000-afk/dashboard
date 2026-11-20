@@ -135,7 +135,7 @@ async function ydList(publicKey: string, path: string): Promise<YdItem[]> {
   return out;
 }
 
-async function ydDownloadUrl(publicKey: string, path: string): Promise<string> {
+export async function ydDownloadUrl(publicKey: string, path: string): Promise<string> {
   // 429 — Диск просит не частить (08.11: 10 файлов подряд не скачались) — ждём и повторяем.
   for (const wait of [0, 10_000, 30_000, 60_000]) {
     if (wait) await new Promise(res => setTimeout(res, wait));
@@ -314,7 +314,7 @@ async function imageKnowledge(url: string, name: string, model: string): Promise
 class SkipFile extends Error {}
 
 /** Сравнение без знаков: в имени папки «/» из артикула заменяют на «-» (POL-3M-…-С/К/О ↔ С-К-О). */
-function loose(s: string): string { return String(s || '').toUpperCase().replace(/Ё/g, 'Е').replace(/[^A-ZА-Я0-9]/g, ''); }
+export function loose(s: string): string { return String(s || '').toUpperCase().replace(/Ё/g, 'Е').replace(/[^A-ZА-Я0-9]/g, ''); }
 
 function norm(s: string): string { return s.toUpperCase().replace(/[\s_]+/g, '').replace(/[,./\\]/g, ''); }
 
@@ -462,7 +462,9 @@ export function indexYandexDisk(): Promise<any> {
         .map(f => `### ${f.name}\n${cleanKnowledge(f.text)}`).join('\n\n').slice(0, 150_000);
       const name = key.split('/').pop() || key;
       const suggested = suggestOffers(name, offers);
-      const filesForDb = outFiles.map(f => ({ name: f.name, path: f.path, md5: f.md5, kind: f.kind, status: f.status, note: f.note, text: f.text, v: f.v, via: f.via }));
+      // size — для «Документов» в чатах (сразу видно, что больше 5 МБ).
+      const sizeOf = new Map(files.map(f => [f.path, f.size]));
+      const filesForDb = outFiles.map(f => ({ name: f.name, path: f.path, md5: f.md5, kind: f.kind, status: f.status, note: f.note, text: f.text, v: f.v, via: f.via, size: sizeOf.get(f.path) ?? f.size }));
       if (row) {
         d.prepare(`UPDATE kb_folders SET suggested = ?, files = ?, text = ?, updated_at = CASE WHEN ? THEN ? ELSE updated_at END,
             offer_ids = CASE WHEN confirmed = 1 THEN offer_ids ELSE ? END WHERE path = ?`)
@@ -572,7 +574,6 @@ export function productCard(offerId: string | null): string {
  */
 export function productKnowledge(offerId: string | null, query = '', limit = 7000, opts: { cardApart?: boolean } = {}): { text: string; sources: string[] } {
   if (!offerId) return { text: '', sources: [] };
-  const up = offerId.toUpperCase();
   const sources: string[] = [];
   const parts: string[] = [];
 
@@ -584,15 +585,8 @@ export function productKnowledge(offerId: string | null, query = '', limit = 700
     sources.push(`card:${offerId}`);
   }
 
-  const rows = getDb().prepare('SELECT path, offer_ids, text FROM kb_folders').all() as any[];
-  const offersOf = (r: any) => safeJson(r.offer_ids, []) as string[];
-  // Папка товара: артикул закреплён за папкой, ИЛИ общая папка без артикулов лежит внутри
-  // папки с именем-артикулом (набор POL-3M-…/PN05996 — материалы компонентов набора).
-  const mine = rows.filter(r => offersOf(r).some(o => o.toUpperCase() === up)
-    || (!offersOf(r).length && r.path.split('/').slice(0, -1).some((seg: string) => loose(seg) === loose(offerId))));
+  const { mine, brand: brandRows } = foldersForOffer(offerId);
   if (mine.length) {
-    // Общая папка бренда: её путь — начало пути папки товара (AFERIY ⊃ AFERIY/AFERIY-STAN-…).
-    const brandRows = rows.filter(r => !mine.includes(r) && mine.some(m => m.path.startsWith(r.path + '/')));
     const chunks = [...mine, ...brandRows].flatMap(r => chunksOf(r.text).map(c => ({ ...c, folder: r.path })));
     const q = terms(query);
     const isSpec = (c: { file: string }) => /характер|габар|параметр/i.test(c.file);
@@ -614,6 +608,21 @@ export function productKnowledge(offerId: string | null, query = '', limit = 700
     }
   }
   return { text: parts.join('\n\n').slice(0, limit - cardRoom), sources };
+}
+
+/**
+ * Папки Диска товара: mine — папка с закреплённым артикулом (или общая папка без артикулов внутри
+ * папки с именем-артикулом: набор POL-3M-…/PN05996); brand — общая папка бренда над ней
+ * (AFERIY ⊃ AFERIY/AFERIY-STAN-…). Нужна базе знаний и «Документам» в чатах.
+ */
+export function foldersForOffer(offerId: string): { mine: any[]; brand: any[] } {
+  const up = offerId.toUpperCase();
+  const rows = getDb().prepare('SELECT path, offer_ids, files, text FROM kb_folders').all() as any[];
+  const offersOf = (r: any) => safeJson(r.offer_ids, []) as string[];
+  const mine = rows.filter(r => offersOf(r).some(o => o.toUpperCase() === up)
+    || (!offersOf(r).length && r.path.split('/').slice(0, -1).some((seg: string) => loose(seg) === loose(offerId))));
+  const brand = rows.filter(r => !mine.includes(r) && mine.some(m => m.path.startsWith(r.path + '/')));
+  return { mine, brand };
 }
 
 /** Наши артикулы с отзывами/вопросами, по которым нет папки на Диске (отвечаем по карточке и истории). */

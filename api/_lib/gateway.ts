@@ -55,6 +55,8 @@ const RULES: Rule[] = [
   { bucket: 'wb-finance',        host: 'finance-api.wildberries.ru',     intervalMs: 60_000 },
   { bucket: 'wb-marketplace',    host: 'marketplace-api.wildberries.ru', intervalMs: 300 },
   { bucket: 'wb-supplies',       host: 'supplies-api.wildberries.ru',    intervalMs: 1_000 },
+  // Чат с покупателями: отправка сообщения — 10 запросов за 10 с, интервал 1 с (документация WB, 20.11.2026).
+  { bucket: 'wb-chat',           host: 'buyer-chat-api.wildberries.ru',  intervalMs: 1_000 },
   // ── Ozon Seller ── analytics/data — 1 запрос в минуту
   { bucket: 'oz:analytics',      host: 'api-seller.ozon.ru', path: /^\/v1\/analytics\/data/,                        intervalMs: 60_000 },
   // Начисления: прод 14.10 — серия 429 «rate limit per second» при запросах подряд

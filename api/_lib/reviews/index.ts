@@ -24,6 +24,10 @@ import { listThreads, threadWithMessages, draftThread, sendThread, chatTick, cha
 import { getThread, patchThread } from './chatStore';
 import { DIRECTIONS, type ReviewCounters, type ReviewView } from '../../../shared/reviews';
 import { getMedia, loadImage } from './media';
+import {
+  docsOverview, searchDocs, findDoc, docBytes, mimeOf, addUpload, removeUpload, sendDocsToChat, emailDocs, defaultMailText,
+} from './chatDocs';
+import { authUser } from '../auth';
 
 function body(req: VercelRequest): any {
   if (typeof req.body === 'string') { try { return JSON.parse(req.body || '{}'); } catch { return {}; } }
@@ -189,6 +193,39 @@ export async function handleReviews(req: VercelRequest, res: VercelResponse, res
       if (!b && req.method === 'GET') return res.status(200).json({ ok: true, ...listThreads(req.query as any), totals: chatTotals() });
       if (b === 'counts' && req.method === 'GET') return res.status(200).json({ ok: true, ...chatCounts() });
       if (b === 'sync' && req.method === 'POST') return res.status(200).json({ ok: true, result: await chatTick() });
+      // ─── Документы для покупателя: инструкции, техпаспорта (Яндекс.Диск + добавленные в кабинете) ───
+      if (b === 'docs') {
+        const who = authUser(req)?.name || 'owner';
+        if (!c && req.method === 'GET') {
+          const q = String((req.query as any).q || '');
+          if (q) return res.status(200).json({ ok: true, docs: searchDocs(q) });
+          if (!getThread(mp, id)) return res.status(404).json({ ok: false, error: 'not_found' });
+          return res.status(200).json({ ok: true, ...docsOverview(mp, id), mailDefault: defaultMailText(mp, id) });
+        }
+        if (c === 'file' && req.method === 'GET') {
+          const doc = findDoc(String((req.query as any).doc || ''));
+          if (!doc) return res.status(404).json({ ok: false, error: 'Файл не найден' });
+          try {
+            const data = await docBytes(doc);
+            res.setHeader('Content-Type', mimeOf(doc.name));
+            res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(doc.name)}`);
+            res.setHeader('Cache-Control', 'private, max-age=3600');
+            return res.status(200).send(data);
+          } catch (e) { return err(res, e, 502); }
+        }
+        if (c === 'upload' && req.method === 'POST') {
+          const data = Buffer.isBuffer(req.body) ? req.body : null;
+          if (!data) return res.status(400).json({ ok: false, error: 'Файл не получен' });
+          const q = req.query as any;
+          const doc = await addUpload(q.offer ? String(q.offer) : null, String(q.name || ''), data, who);
+          return res.status(200).json({ ok: true, doc });
+        }
+        if (c === 'delete' && req.method === 'POST') {
+          await removeUpload(String(p.doc || ''));
+          return res.status(200).json({ ok: true });
+        }
+        return res.status(404).json({ ok: false, error: 'not_found' });
+      }
       if (b === 'thread') {
         if (!getThread(mp, id)) return res.status(404).json({ ok: false, error: 'not_found' });
         if (!c && req.method === 'GET') return res.status(200).json({ ok: true, ...threadWithMessages(mp, id) });
@@ -202,6 +239,17 @@ export async function handleReviews(req: VercelRequest, res: VercelResponse, res
         if (c === 'send') {
           const r = await sendThread(mp, id, String(p.text ?? ''), 'owner');
           return res.status(r.ok ? 200 : 400).json(r);
+        }
+        if (c === 'send-docs') {
+          const ids = Array.isArray(p.docs) ? p.docs.map(String) : [];
+          if (!ids.length) return res.status(400).json({ ok: false, error: 'Не выбраны файлы' });
+          const r = await sendDocsToChat(mp, id, ids, authUser(req)?.name || 'owner');
+          return res.status(r.sent.length ? 200 : 400).json({ ...r, ok: r.sent.length > 0, error: r.errors.join(' · ') || undefined });
+        }
+        if (c === 'email-docs') {
+          const ids = Array.isArray(p.docs) ? p.docs.map(String) : [];
+          const r = await emailDocs(mp, id, ids, String(p.to || ''), String(p.text || ''), authUser(req)?.name || 'owner');
+          return res.status(r.sent.length ? 200 : 400).json({ ...r, ok: r.sent.length > 0, error: r.errors.join(' · ') || undefined });
         }
         if (c === 'skip') { patchThread(mp, id, { status: 'skipped' }); return res.status(200).json({ ok: true, thread: getThread(mp, id) }); }
         if (c === 'unskip') {

@@ -6,8 +6,9 @@ import { useEffect, useRef, useState } from 'react';
 import { BuyerMedia } from '../components/BuyerMedia';
 import {
   ArrowsClockwiseIcon, WarningIcon, SpinnerIcon, PaperPlaneRightIcon, SparkleIcon, MagnifyingGlassIcon, ArrowLeftIcon, ChatsCircleIcon,
-  ArrowSquareOutIcon,
+  ArrowSquareOutIcon, PaperclipIcon,
 } from '@phosphor-icons/react';
+import { ChatDocsPanel } from '../components/ChatDocs';
 import { chatsApi, type ChatThread, type ChatMsg, type ChatView, type ChatMp } from '../api/chats';
 import { reviewsApi } from '../api/reviews';
 import type { ReviewSettings } from '../../shared/reviews';
@@ -215,6 +216,7 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [docsOpen, setDocsOpen] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const area = useAutoGrow(text);
 
@@ -243,6 +245,9 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
 
   if (!th) return <div className="rv-empty rv-empty--pane">{error || <><SpinnerIcon size={20} className="spin" /> Загружаю…</>}</div>;
 
+  // Покупатель спрашивает инструкцию/паспорт/документы или почту — подсветить кнопку «Документы».
+  const lastBuyer = [...msgs].reverse().find(m => m.fromBuyer)?.text || '';
+  const asksDocs = /инструкц|паспорт|сертифик|документ|руководств|мануал|manual|pdf|на почту|e-?mail|@[\w-]+\./i.test(lastBuyer);
   const hint = [sourcesText(th.sourcesUsed), th.draftCostUsd ? `$${th.draftCostUsd.toFixed(3)}` : ''].filter(Boolean).join(' · ');
 
   return (
@@ -261,7 +266,9 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
       <div className="rv-messages">
         {msgs.map(m => (
           <div key={m.id} className={`rv-msg ${m.fromBuyer ? 'rv-msg--buyer' : 'rv-msg--shop'}`}>
-            {/^\[(фото|фото\/файл|файл[^\]]*|фото: \d+)\]$/.test(m.text.trim())
+            {!m.fromBuyer && /^\[файл: .+\]$/.test(m.text.trim())
+              ? <span className="rv-msg-file"><PaperclipIcon size={16} /> {m.text.trim().slice(7, -1)}</span>
+              : /^\[(фото|фото\/файл|файл[^\]]*|фото: \d+)\]$/.test(m.text.trim())
               ? (m.media?.length ? null : <span className="rv-muted">Фото или файл — открыть можно в кабинете {MP_NAME[th.marketplace]}</span>)
               : (m.media?.length ? m.text.replace(/\s*\[фото[^\]]*\]/g, '').trim() : m.text)}
             <BuyerMedia media={m.media} mpName={MP_NAME[th.marketplace]} />
@@ -293,6 +300,10 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
             {th.status === 'skipped' || th.status === 'closed'
               ? <button className="btn" disabled={!!busy} onClick={() => act('unskip', async () => apply((await chatsApi.unskip(mp, id)).thread))}>Вернуть в работу</button>
               : <button className="btn btn-ghost" disabled={!!busy} onClick={() => act('skip', async () => { apply((await chatsApi.skip(mp, id)).thread); onSent(); })}>Пропустить</button>}
+            <button className={`btn${asksDocs ? ' rv-btn-hot' : ''}`} disabled={!!busy} onClick={() => setDocsOpen(true)}
+              title={asksDocs ? 'Покупатель спрашивает документы — инструкции и паспорта товара здесь' : 'Инструкции, техпаспорта, сертификаты — в чат или на почту'}>
+              <PaperclipIcon size={17} /> Документы
+            </button>
             <button className="btn" disabled={!!busy} onClick={() => act('draft', async () => apply((await chatsApi.draft(mp, id)).thread))}>
               {busy === 'draft' ? <SpinnerIcon size={17} className="spin" /> : <SparkleIcon size={17} />} {th.draftAnswer ? 'Переписать' : 'Написать черновик'}
             </button>
@@ -303,6 +314,7 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
         </div>
         {error && <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span>{error}</span></div>}
       </div>
+      {docsOpen && <ChatDocsPanel th={th} onClose={() => setDocsOpen(false)} onSent={() => { load(); onSent(); }} />}
     </div>
   );
 }

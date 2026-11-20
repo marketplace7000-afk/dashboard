@@ -91,7 +91,7 @@ export async function sendMail(m: Mail): Promise<void> {
   const host = process.env.SMTP_HOST || 'smtp.yandex.ru';
   const port = Number(process.env.SMTP_PORT || 465);
   const user = process.env.SMTP_USER!;
-  const mime = buildMime(m, user, process.env.SMTP_FROM_NAME || 'Магазин');
+  const mime = buildMime(m, user, process.env.SMTP_FROM_NAME || 'Avto Vibe');
   const sock = connect({ host, port, servername: host });
   sock.setTimeout(120_000, () => sock.destroy(new Error('почтовый сервер не отвечает')));
   const next = reader(sock);

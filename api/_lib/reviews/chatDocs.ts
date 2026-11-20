@@ -25,6 +25,8 @@ const run = promisify(execFile);
 
 /** Предел площадок на один файл в чате (WB: «5 Мб каждый», 30 Мб на сообщение). */
 export const CHAT_FILE_MAX = 5 * 1024 * 1024;
+/** Ozon: тело запроса ≤ 10 МиБ, файл в base64 (+33 %) — с запасом 7,5 МБ. */
+export const OZON_FILE_MAX = Math.floor(7.5 * 1024 * 1024);
 /** Письмо: Яндекс принимает до ~30 МБ, с запасом на base64. */
 const MAIL_TOTAL_MAX = 20 * 1024 * 1024;
 /** Инструкции бывают по 70 МБ (AF-P280, 20.11) — качаем и сжимаем на сервере. */
@@ -48,7 +50,8 @@ export type ChatDoc = {
 // ─── Что показывать и как назвать ──────────────────────────────────────────
 const HIDDEN_EXT = /^(mp4|mov|avi|mkv|zip|rar|7z|psd|ai|cdr|heic|webp|gif|txt|url)$/i;
 /** Внутренние файлы: ссылка на поставщика, ТН ВЭД, таблицы для дизайнеров. */
-const INTERNAL = /ссылк|сылк|тн\s*вэд|1688|alibaba|для дизайнер|поставщ|ответы на наши|наши вопросы|себестоим|закупк/i;
+// «…от производителя» — документы завода: для нас, не для покупателя (решение владельца 20.11; покупателю — «Техпаспорт для клиента (ИП Алешко А.О.)»).
+const INTERNAL = /ссылк|сылк|тн\s*вэд|1688|alibaba|для дизайнер|поставщ|ответы на наши|наши вопросы|себестоим|закупк|от производител/i;
 // \b в JS не видит границ русских слов — поэтому явные варианты «(анг)», «анг.», «_RU».
 const ENG = /англ|\(анг|анг\)|анг\.|eng|english|original|оригинал|кит|chin/i;
 const RUS = /русск|рус\)|\(рус|[_\- ]ru[_.\- )]|[_\- ]ru$|俄语/i;
@@ -91,14 +94,23 @@ export function friendlyName(d: { name: string; category: DocCategory; english: 
   return `${cat}${d.english ? ' (англ.)' : ''} ${label}`.replace(/[\\/:*?"<>|]+/g, '-').trim() + `.${ext}`;
 }
 
+/** Word-файл, рядом с которым лежит PDF с тем же именем, — не показываем (покупателю уходит PDF). */
+export function hasPdfTwin(path: string, all: Set<string>): boolean {
+  const m = path.match(/^(.*)\.docx?$/i);
+  return !!m && (all.has(`${m[1]}.pdf`) || all.has(`${m[1]}.PDF`));
+}
+
 // ─── Список ────────────────────────────────────────────────────────────────
 const ydId = (path: string) => `yd:${path}`;
 
 function docsOfRows(rows: any[]): ChatDoc[] {
   const out: ChatDoc[] = [];
   for (const r of rows) {
-    for (const f of safeJson(r.files, []) as any[]) {
+    const files = safeJson(r.files, []) as any[];
+    const paths = new Set(files.map(f => String(f?.path || '')));
+    for (const f of files) {
       if (!f?.path || !isSendable(f.name, f.path)) continue;
+      if (hasPdfTwin(f.path, paths)) continue;
       const ext = (f.name.split('.').pop() || '').toLowerCase();
       out.push({
         id: ydId(f.path), name: f.name, folder: r.path, category: categoryOf(f.name, f.path),
@@ -254,7 +266,7 @@ export async function removeUpload(id: string): Promise<void> {
 }
 
 // ─── Подготовка к чату: уложиться в 5 МБ ────────────────────────────────────
-async function shrinkPdf(buf: Buffer): Promise<Buffer> {
+async function shrinkPdf(buf: Buffer, target = CHAT_FILE_MAX): Promise<Buffer> {
   const dir = await mkdtemp(join(tmpdir(), 'rv-doc-'));
   try {
     const src = join(dir, 'in.pdf');
@@ -267,7 +279,7 @@ async function shrinkPdf(buf: Buffer): Promise<Buffer> {
         await run('gs', ['-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.5', `-dPDFSETTINGS=${preset}`, '-dNOPAUSE', '-dBATCH', '-dQUIET', `-sOutputFile=${out}`, src], { timeout: 180_000 });
         const small = await readFile(out);
         if (small.length < best.length) best = small;
-        if (best.length <= CHAT_FILE_MAX) break;
+        if (best.length <= target) break;
       } catch (e) { console.warn('[chatDocs] gs не сжал PDF:', String((e as Error).message).slice(0, 200)); }
     }
     return best;
@@ -324,8 +336,16 @@ export async function prepareForChat(doc: ChatDoc, data: Buffer, label: string, 
   let name = friendlyName(doc, label);
   if (!doc.chatOk) throw new Error(`«${doc.name}»: в чат площадка принимает только PDF, JPG и PNG — отправьте на почту`);
   let out = data; let mime = mimeOf(doc.name);
-  // Ozon: файл не режем (решение владельца 20.11) — шлём целиком; если Ozon откажет по размеру, sendDocsToChat пробует сжатый.
-  if (mp === 'ozon') return [{ name, mime, data: out }];
+  // Ozon: файл не режем (решение владельца 20.11). Запрос Ozon ≤ 10 МБ вместе с base64 → файл ≤ 7,5 МБ
+  // (проверено 20.11: «received message larger than max (11764667 vs. 10485760)», и ответ при этом 429).
+  if (mp === 'ozon') {
+    if (out.length > OZON_FILE_MAX) {
+      if (doc.ext === 'pdf') out = await shrinkPdf(out, OZON_FILE_MAX);
+      else { out = await shrinkImage(out); mime = 'image/jpeg'; name = name.replace(/\.(png|jpe?g)$/i, '.jpg'); }
+    }
+    if (out.length > OZON_FILE_MAX) throw new Error(`«${doc.name}»: даже сжатый файл ${(out.length / 1048576).toFixed(1)} МБ, а в чат Ozon можно до 7,5 МБ — отправьте на почту`);
+    return [{ name, mime, data: out }];
+  }
   if (out.length > CHAT_FILE_MAX) {
     if (doc.ext === 'pdf') out = await shrinkPdf(out);
     else { out = await shrinkImage(out); mime = 'image/jpeg'; name = name.replace(/\.(png|jpe?g)$/i, '.jpg'); }
@@ -386,16 +406,7 @@ export async function sendDocsToChat(mp: 'wb' | 'ozon', chatId: string, ids: str
     if (!doc) { errors.push('Файл не найден — обновите список'); continue; }
     try {
       for (const f of await prepareForChat(doc, await docBytes(doc), label, mp)) {
-        try {
-          await sendFileToChat(mp, chatId, f);
-        } catch (e) {
-          // Ozon не принял большой PDF целиком — одна попытка со сжатым (без нарезки).
-          if (mp !== 'ozon' || doc.ext !== 'pdf' || f.data.length <= CHAT_FILE_MAX) throw e;
-          console.warn('[chatDocs] Ozon не принял файл целиком, пробую сжатый:', String((e as Error).message).slice(0, 200));
-          const small = await shrinkPdf(f.data);
-          if (small.length >= f.data.length) throw e;
-          await sendFileToChat(mp, chatId, { ...f, data: small });
-        }
+        await sendFileToChat(mp, chatId, f);
         sent.push(f.name);
         // Своё сообщение — сразу в ленту (WB пришлёт событие «[файл: …]» с тем же текстом, и это заменит пометку).
         addMessages(mp, chatId, [{ id: `local:${Date.now()}-${sent.length}`, at: Date.now(), fromBuyer: false, text: `[файл: ${f.name}]` }]);

@@ -3,7 +3,7 @@
  * Пути — как реально лежат на Яндекс.Диске владельца.
  * Запуск: npm run check
  */
-import { categoryOf, isSendable, isEnglish, friendlyName, CHAT_EXT } from '../api/_lib/reviews/chatDocs';
+import { categoryOf, isSendable, isEnglish, friendlyName, hasPdfTwin, CHAT_EXT } from '../api/_lib/reviews/chatDocs';
 import { buildMime, maskEmail, EMAIL_RE } from '../api/_lib/mailer';
 
 let failed = 0;
@@ -28,6 +28,15 @@ check('Word «характерист.docx» — нет', show(`${B}/ALLPOWERS/AL
 check('фото из папки «фото» — нет', show(`${B}/ALLPOWERS/ALLPOWERS-SUNPANEL-200W-SE200/фото/4.jpg`), false);
 check('архив сертификатов .rar — нет', show(`${B}/AFERIY/AFERIY-STAN-AF-P280-2kWh/техническая документация/AF-P280 certificates.rar`), false);
 check('видео — нет', show(`${B}/AFERIY/видео реклама.mp4`), false);
+check('наш техпаспорт ИП Алешко — да', show(`${B}/ALLPOWERS/R4000/Техпаспорт для клиента (ИП Алешко А.О.)/Техпаспорт ИП Алешко — ALLPOWERS R4000.pdf`), true);
+check('техпаспорт от производителя — нет', show(`${B}/ALLPOWERS/R4000/Техпаспорт от производителя/R4000_техпаспорт_русский.xlsx`), false);
+check('документация от производителя — нет', show(`${B}/AFERIY/X/Документация от производителя/AF-P280_технические_характеристики_RU.pdf`), false);
+{
+  const dir = `${B}/ALLPOWERS/R4000/Техпаспорт для клиента (ИП Алешко А.О.)/Техпаспорт ИП Алешко — ALLPOWERS R4000`;
+  const all = new Set([`${dir}.pdf`, `${dir}.docx`]);
+  check('Word рядом с таким же PDF — прячем', hasPdfTwin(`${dir}.docx`, all), true);
+  check('Word без PDF-двойника — показываем', hasPdfTwin(`${B}/X/инструкция.docx`, all), false);
+}
 
 console.log('Раздел документа');
 check('инструкция', cat(`${B}/X/инструкция на русском/C2_руководство_пользователя_RU.pdf`), 'Инструкция');

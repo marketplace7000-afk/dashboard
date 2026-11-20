@@ -22,7 +22,7 @@ function DocIcon({ ext }: { ext: string }) {
 
 function DocRow({ d, on, toggle, onDelete, showFolder }: { d: ChatDoc; on: boolean; toggle: () => void; onDelete?: () => void; showFolder?: boolean }) {
   const note = !d.chatOk ? 'в чат нельзя — только на почту'
-    : d.size != null && d.size > BIG ? (d.ext === 'pdf' ? 'больше 5 МБ — в чат WB сожмём или разделим на части, в Ozon уйдёт целиком' : 'большая — уменьшим перед отправкой') : '';
+    : d.size != null && d.size > BIG ? (d.ext === 'pdf' ? 'больше 5 МБ — в чат WB сожмём или разделим на части, в Ozon — целиком, сжатый до 7,5 МБ' : 'большая — уменьшим перед отправкой') : '';
   return (
     <label className={`rv-doc${on ? ' is-on' : ''}`}>
       <input type="checkbox" checked={on} onChange={toggle} />

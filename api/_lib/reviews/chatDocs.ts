@@ -320,10 +320,12 @@ export type ChatFile = { name: string; mime: string; data: Buffer };
  * Файл под правила чата: ≤ 5 МБ. Большой PDF — сжать; не хватило — разрезать на части
  * («… (часть 1 из 2).pdf»); большая картинка — уменьшить.
  */
-export async function prepareForChat(doc: ChatDoc, data: Buffer, label: string): Promise<ChatFile[]> {
+export async function prepareForChat(doc: ChatDoc, data: Buffer, label: string, mp: 'wb' | 'ozon' = 'wb'): Promise<ChatFile[]> {
   let name = friendlyName(doc, label);
   if (!doc.chatOk) throw new Error(`«${doc.name}»: в чат площадка принимает только PDF, JPG и PNG — отправьте на почту`);
   let out = data; let mime = mimeOf(doc.name);
+  // Ozon: файл не режем (решение владельца 20.11) — шлём целиком; если Ozon откажет по размеру, sendDocsToChat пробует сжатый.
+  if (mp === 'ozon') return [{ name, mime, data: out }];
   if (out.length > CHAT_FILE_MAX) {
     if (doc.ext === 'pdf') out = await shrinkPdf(out);
     else { out = await shrinkImage(out); mime = 'image/jpeg'; name = name.replace(/\.(png|jpe?g)$/i, '.jpg'); }
@@ -383,8 +385,17 @@ export async function sendDocsToChat(mp: 'wb' | 'ozon', chatId: string, ids: str
     const doc = findDoc(id);
     if (!doc) { errors.push('Файл не найден — обновите список'); continue; }
     try {
-      for (const f of await prepareForChat(doc, await docBytes(doc), label)) {
-        await sendFileToChat(mp, chatId, f);
+      for (const f of await prepareForChat(doc, await docBytes(doc), label, mp)) {
+        try {
+          await sendFileToChat(mp, chatId, f);
+        } catch (e) {
+          // Ozon не принял большой PDF целиком — одна попытка со сжатым (без нарезки).
+          if (mp !== 'ozon' || doc.ext !== 'pdf' || f.data.length <= CHAT_FILE_MAX) throw e;
+          console.warn('[chatDocs] Ozon не принял файл целиком, пробую сжатый:', String((e as Error).message).slice(0, 200));
+          const small = await shrinkPdf(f.data);
+          if (small.length >= f.data.length) throw e;
+          await sendFileToChat(mp, chatId, { ...f, data: small });
+        }
         sent.push(f.name);
         // Своё сообщение — сразу в ленту (WB пришлёт событие «[файл: …]» с тем же текстом, и это заменит пометку).
         addMessages(mp, chatId, [{ id: `local:${Date.now()}-${sent.length}`, at: Date.now(), fromBuyer: false, text: `[файл: ${f.name}]` }]);

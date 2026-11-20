@@ -13,14 +13,22 @@
 // Покупателю WB показывает рубли по своему курсу (04.11.2026 = ЦБ × 1,05, замер
 // Агентом 1 с витрины) — по нему только цены «как на сайте» (priceShown, buyerShown).
 //
+// Налог (с 20.11.2026, решение владельцев кабинета): 6,5 % платим им от суммы
+// продаж ДО СПП — от цены продавца со скидкой в кабинете, — а не от цены
+// покупателя. Финменеджер так и считает в «Отчет Китай WB_2026» (PNL_месяц, УСН):
+// УСН = 6,5 % × (выручка до СПП − сумма, заведённая с баланса WB на рекламу),
+// июль–ноябрь совпало до копейки. Поэтому реклама, оплаченная деньгами (ДРР), из
+// базы вычитается; реклама за бонусы в ДРР не входит. Возвраты и отмены в базу не
+// идут: расчёт — на одну выкупленную продажу.
+//
 //   цена ₽          = цена ¥ × курс
-//   цена покупателя = цена ₽ × (1 − СПП)        — только для налога и справки
+//   цена покупателя = цена ₽ × (1 − СПП)        — справочно
 //   комиссия, реклама, эквайринг — % от цены ₽
 //   логистика ₽     = (8 + (max(V,1) − 1) × 2) ¥ × курс / выкуп
 //   фулфилмент ₽    = ФФ / выкуп
 //   поступление     = цена − комиссия − логистика − ФФ − реклама − эквайринг
 //   Payful          = поступление × %
-//   налог           = цена покупателя × %
+//   налог           = (цена − реклама) × %
 //   на счёт         = поступление − Payful − налог
 //   прибыль         = на счёт − себестоимость − доп. расходы
 
@@ -36,7 +44,7 @@ export type WbgInput = {
   fulfillment: number;  // ₽ за заказ (ФФ)
   drr: number;          // %
   acquiring: number;    // %
-  tax: number;          // % от цены покупателя
+  tax: number;          // % от цены до СПП за вычетом рекламы
   payful: number;       // %
   volumeL: number;      // объём упаковки, л
   logFirst: number;     // ¥ за первый литр
@@ -82,12 +90,12 @@ export function calcWbGlobal(i: WbgInput): WbgResult | null {
   const acquiring = price * i.acquiring / 100;
   const gross = price - commission - logistics - fulfillment - advertising - acquiring;
   const payful = gross * i.payful / 100;
-  const tax = buyer * i.tax / 100;
+  const tax = (price - advertising) * i.tax / 100;
   const cash = gross - payful - tax;
   const profit = cash - i.cost - i.extra;
   // Прибыль линейна по цене: profit(P) = P·k − fixed.
   const pf = 1 - i.payful / 100;
-  const k = (1 - pctOfPrice) * pf - (1 - i.spp / 100) * i.tax / 100;
+  const k = (1 - pctOfPrice) * pf - (1 - i.drr / 100) * i.tax / 100;
   const fixed = (logistics + fulfillment) * pf + i.cost + i.extra;
   const breakevenRub = k > 0 ? fixed / k : null;
   return {

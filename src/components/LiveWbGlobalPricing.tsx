@@ -271,7 +271,7 @@ function Details({ r, k, inp, calc, edited, onKnob, onReset }: {
     { l: `Реклама ДРР (${inp.drr}%)`, v: -calc.advertising },
     { l: `Эквайринг (${inp.acquiring}%)`, v: -calc.acquiring },
     { l: `Payful — вывод средств (${inp.payful}%)`, v: -calc.payful },
-    { l: `Налог (${inp.tax}% от цены покупателя)`, v: -calc.tax },
+    { l: `Налог владельцам кабинета (${inp.tax}% от цены до СПП${inp.drr ? ' без рекламы' : ''})`, v: -calc.tax },
     { l: 'Себестоимость', v: -calc.cost },
     ...(calc.extra ? [{ l: 'Доп. расходы', v: -calc.extra }] : []),
   ] : [];

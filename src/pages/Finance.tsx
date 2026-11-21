@@ -287,6 +287,8 @@ function CalendarTab({ month, setMonth, meta, linkForm, onLinkFormUsed, onMetaCh
 
   return (
     <div className="fin-col">
+      {/* 21.11: на ПК месяц, кнопка «Операция» и цифры месяца закреплены сверху при прокрутке (на телефоне — нет) */}
+      <div className="fin-caltop">
       <div className="fin-bar">
         <div className="fin-month">
           <button className="btn" aria-label="Предыдущий месяц" onClick={() => setMonth(shiftMonth(month, -1))}><CaretLeftIcon /></button>
@@ -309,6 +311,7 @@ function CalendarTab({ month, setMonth, meta, linkForm, onLinkFormUsed, onMetaCh
           <div className="fin-kpi"><span className="l">Самый низкий остаток</span><b className={sigClass(v.totals.min, min)}>{rub(v.totals.min)}</b><span className="n">{v.totals.minDate ? `${ddmm(v.totals.minDate)}, ${wd(v.totals.minDate)}` : 'месяц уже прошёл'}</span></div>
         </div>
       )}
+      </div>
       <div className="fin-bar">
         <div className="fin-seg">
           {([['all', 'Все'], ['in', 'Приходы'], ['out', 'Расходы'], ['open', 'Не исполнено']] as Array<[Filter, string]>).map(([k, l]) => (

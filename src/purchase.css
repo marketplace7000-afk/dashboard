@@ -1,0 +1,133 @@
+/* «Закупки» (19.11.2026): что, сколько и когда заказать. Корень — .sa.pur (стиль А). */
+.pur { display: flex; flex-direction: column; gap: 16px; }
+.pur .muted { color: var(--muted); }
+.pur .bad { color: var(--bad); }
+.pur .warn { color: var(--warn); }
+.pur h2 { font-size: var(--sa-h2); font-weight: 600; margin: 0 0 12px; }
+.pur-h3 { font-size: var(--sa-em); font-weight: 600; margin: 18px 0 4px; }
+.pur-fail { border-color: var(--bad); color: var(--bad); font-size: var(--sa-cap); }
+
+.pur-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.pur-kpi { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pur-kpi b { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pur-kpi span { font-size: var(--sa-cap); color: var(--muted); }
+.pur-kpi.late b { color: var(--bad); }
+.pur-kpi.soon b { color: var(--warn); }
+
+.pur-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.pur-bar .sa-seg button { all: unset; cursor: pointer; padding: 8px 14px; font-size: var(--sa-cap); border-right: 1px solid var(--border); }
+.pur-bar .sa-seg button:last-child { border-right: 0; }
+.pur-bar .sa-seg button.on .muted { color: inherit; opacity: .75; }
+.pur-search { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.pur-search input { width: 240px; max-width: 60vw; font-family: inherit; }
+.pur-spacer { flex: 1 1 auto; }
+.pur-meta { font-size: var(--sa-small); }
+
+.pur-table-card { padding: 0; overflow: hidden; }
+.pur-scroll { overflow-x: auto; }
+.pur-table { width: 100%; border-collapse: collapse; font-size: var(--sa-cap); }
+.pur-table th { text-align: left; font-weight: 500; color: var(--muted); font-size: var(--sa-small); padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; background: var(--bg-2); }
+.pur-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; min-width: 0; overflow-wrap: anywhere; }
+.pur-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pur-row { cursor: pointer; }
+.pur-row:hover td { background: var(--bg-2); }
+.pur-row.skip td, .pur-row.none td { color: var(--muted); }
+.pur-table td.pur-name { min-width: 250px; max-width: 360px; overflow-wrap: normal; }
+.pur-name-in { display: flex; gap: 6px; }
+.pur-art { overflow-wrap: anywhere; }
+.pur-caret { color: var(--muted); padding-top: 3px; }
+.pur-art { font-size: var(--sa-small); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pur-st.out { background: var(--bg-2); color: var(--muted); }
+.pur-st.new { background: rgba(37, 99, 235, .1); color: var(--accent); }
+.pur-sub { font-size: var(--sa-small); }
+.pur-sig { display: inline-block; font-weight: 600; white-space: nowrap; }
+.pur-sig.late { color: var(--bad); }
+.pur-sig.soon { color: var(--warn); }
+.pur-sig.ok { color: var(--good); }
+.pur-sig.none, .pur-sig.skip { color: var(--muted); font-weight: 400; }
+.pur-skip { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; white-space: nowrap; font-size: var(--sa-small); }
+.pur-skip input { width: 18px; height: 18px; }
+.pur-empty { text-align: center; padding: 24px; }
+
+.pur-detail td { background: var(--bg-2); }
+.pur-det { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 24px; font-size: var(--sa-cap); }
+.pur-det-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pur-notes { grid-column: 1 / -1; margin: 4px 0 0; padding-left: 20px; color: var(--muted); font-size: var(--sa-small); }
+
+.pur-settings .pur-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px 16px; }
+.pur-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--sa-cap); min-width: 0; }
+.pur-field input { font-family: inherit; width: 100%; box-sizing: border-box; }
+.pur-season { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 8px; margin: 8px 0 14px; }
+.pur-field.small span { font-size: var(--sa-small); color: var(--muted); }
+.pur-foot { font-size: var(--sa-small); line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .pur-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pur-season { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .pur-det { grid-template-columns: minmax(0, 1fr); }
+  .pur-table td.pur-name { min-width: 200px; }
+}
+
+/* деньги */
+.pur-money h2 { margin-bottom: 10px; }
+.pur-money.short { border-color: var(--bad); }
+.pur-money-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 10px; }
+.pur-money-grid > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pur-money-grid b { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pur-money-text { display: flex; flex-direction: column; gap: 6px; font-size: var(--sa-cap); margin-bottom: 8px; }
+@media (max-width: 900px) { .pur-money-grid { grid-template-columns: minmax(0, 1fr); } }
+.pur-plan-pay { margin-top: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* листы раздела и «Сезонность» (21.11.2026) */
+.pur-sheets { align-self: flex-start; }
+.pur-sheets button { all: unset; cursor: pointer; padding: 10px 20px; font-size: var(--sa-body); font-weight: 500; border-right: 1px solid var(--border); }
+.pur-sheets button:last-child { border-right: 0; }
+.pur-sea-intro h2 { margin-bottom: 6px; }
+.pur-sea-text { font-size: var(--sa-cap); line-height: 1.5; }
+.pur-sea-up { color: var(--good); }
+.pur-sea-down { color: var(--bad); }
+.pur-sea .pur-sea-cell { text-align: center; min-width: 52px; font-weight: 500; }
+.pur-sea td.pur-name { min-width: 230px; }
+.pur-sea-det { display: flex; flex-direction: column; gap: 8px; font-size: var(--sa-cap); }
+
+/* 21.11 вечер: как в «Финансах» (просьба владельца) — шкала крупнее, серые панели с белыми карточками */
+.sa.pur { --sa-small: 18px; --sa-cap: 20px; --sa-body: 22px; --sa-em: 24px; --sa-h2: 28px; --pur-panel: #eef1f5; --pur-panel-b: #d9dfe7; }
+.sa.pur .btn { font-size: 20px; }
+.pur { gap: 20px; }
+.pur-bar .sa-seg button { padding: 10px 18px; }
+.pur-table th { padding: 12px 14px; }
+.pur-table td { padding: 14px; }
+.pur-panel { background: var(--pur-panel); border: 1px solid var(--pur-panel-b); border-radius: 12px; padding: 16px; display: grid; gap: 14px; }
+.pur-box { background: #fff; border: 1px solid var(--pur-panel-b); border-radius: 12px; padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: var(--sa-cap); overflow-wrap: anywhere; }
+.pur-box.empty { background: #f7f8fa; }
+.pur-box-h { font-size: var(--sa-body); font-weight: 600; }
+.pur-box-big { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.pur-box-big b { font-size: 32px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pur-box-row { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pur-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pur-chips .chip { font-size: var(--sa-small); padding: 4px 10px; border-radius: 999px; background: var(--bg-2); }
+.pur-sea-intro { display: flex; flex-direction: column; gap: 14px; }
+.pur-sea-src { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pur-sea-det { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 6px 0; }
+.pur-sea-goods ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.pur-sea .pur-sea-cell { min-width: 60px; font-size: var(--sa-cap); }
+.pur-sea tr.pur-detail > td { background: #fff; padding: 8px 14px 18px; }
+.pur-sea tbody tr.pur-row.open td { background: var(--accent-soft); }
+@media (max-width: 1200px) { .pur-sea-det { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 900px) {
+  .sa.pur { --sa-small: 16px; --sa-cap: 17px; --sa-body: 19px; --sa-em: 21px; --sa-h2: 23px; }
+  .pur-sea-src, .pur-sea-det { grid-template-columns: minmax(0, 1fr); }
+}
+/* «Сезонность», итоговый вид (21.11 вечер) */
+.pur-sea-det { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pur-sea-wide { grid-column: 1 / -1; }
+.pur-sea-sum-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.pur-sea-sum-grid > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pur-sea-sum-grid b { font-size: var(--sa-em); }
+.pur-sea-mini { font-size: var(--sa-small); }
+.pur-sea-mini th, .pur-sea-mini td { padding: 8px 10px; }
+.pur-sea-mini .pur-sea-cell { min-width: 48px; font-size: var(--sa-small); }
+.pur-sea tr.pur-sea-total td { background: var(--bg-2); border-bottom: 2px solid var(--border); }
+.pur-sea tr.pur-sea-total td.pur-sea-cell { border-bottom: 2px solid var(--border); }
+.pur-sea td.pur-sea-up, .pur-sea td.pur-sea-down { white-space: nowrap; font-weight: 500; }
+@media (max-width: 900px) { .pur-sea-det, .pur-sea-sum-grid { grid-template-columns: minmax(0, 1fr); } }

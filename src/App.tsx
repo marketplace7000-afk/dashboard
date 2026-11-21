@@ -4,7 +4,7 @@ import {
   GaugeIcon, TagIcon, ChatCircleTextIcon, PaperPlaneTiltIcon,
   GearIcon,
   CaretRightIcon, MegaphoneIcon,
-  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, CalendarCheckIcon, BinocularsIcon, WarehouseIcon, UsersThreeIcon, PackageIcon, PushPinIcon, WalletIcon, TargetIcon
+  ListIcon, RobotIcon, ChatsCircleIcon, PulseIcon, CalendarCheckIcon, BinocularsIcon, WarehouseIcon, UsersThreeIcon, PackageIcon, PushPinIcon, WalletIcon, TargetIcon, ShoppingCartIcon
 } from '@phosphor-icons/react';
 import { AgentHosts } from './pages/AgentHosts';
 import { Login } from './pages/Login';
@@ -17,6 +17,7 @@ import { Ads } from './pages/Ads';
 import { Competitors } from './pages/Competitors';
 import { Cards } from './pages/Cards';
 import { Finance } from './pages/Finance';
+import { Purchase } from './pages/Purchase';
 import { Rnp } from './pages/Rnp';
 import { RnpActions } from './pages/RnpActions';
 import { Plan } from './pages/Plan';
@@ -36,7 +37,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 // закрыт (api/_lib/sklad/archive.ts). Вернуть — false здесь и SKLAD_ENABLED=1 на сервере.
 const SKLAD_ARCHIVED = true;
 
-type Page = 'dashboard' | 'access' | 'sklad' | 'prices' | 'rnp' | 'actions' | 'plan' | 'fbo' | 'reviews' | 'chats' | 'ads' | 'competitors' | 'cards' | 'finance' | 'collectors' | 'settings';
+type Page = 'dashboard' | 'access' | 'sklad' | 'prices' | 'rnp' | 'actions' | 'plan' | 'fbo' | 'reviews' | 'chats' | 'ads' | 'competitors' | 'cards' | 'finance' | 'purchase' | 'collectors' | 'settings';
 
 // 25.09.2026: разделы «Прогноз закупок», «Маржинальность», «Распределение»,
 // «ROI и алерты», «BI и финансы», «База знаний», «Себестоимость» удалены по
@@ -73,6 +74,8 @@ const NAV_AFTER_PROCUREMENT: { key: Page; Icon: any; label: string }[] = [
   { key: 'cards',       Icon: PushPinIcon,         label: 'Ведение карточек' },
   // 19.11.2026: платёжный календарь, инвесторы, кредиты — только владелец, галочки в «Доступах» нет.
   { key: 'finance',     Icon: WalletIcon,          label: 'Финансы' },
+  // 19.11.2026: что, сколько и когда заказать в Китае — только владелец, галочки в «Доступах» нет.
+  { key: 'purchase',    Icon: ShoppingCartIcon,    label: 'Закупки' },
 ];
 const NAV_CONFIG: { key: Page; Icon: any; label: string }[] = [
   // «Сборщики» — сеть агентов на ПК (ТЗ «Сеть агентов»): очередь, живой ход
@@ -99,6 +102,7 @@ const TITLES: Record<Page, string> = {
   competitors: 'Конкуренты',
   cards: 'Ведение карточек',
   finance: 'Финансы · платёжный календарь',
+  purchase: 'Закупки · что и когда заказать',
   collectors: 'Сборщики · агенты на ПК',
   settings: 'Настройки',
 };
@@ -108,7 +112,14 @@ export function App() {
   // Ссылка из Telegram (напоминание о сравнениях WB) ведёт сразу в «Конкуренты»: e-avtovibe.ru/#competitors-wb
   // 08.11: e-avtovibe.ru/#prices-discounts — «Цены» → «Заявки на скидку» (из напоминания в чате Ozon).
   const [page, setPage] = useState<Page>(() => (typeof location === 'undefined' ? 'dashboard'
-    : location.hash.startsWith('#competitors') ? 'competitors' : location.hash.startsWith('#prices') ? 'prices' : 'dashboard'));
+    : location.hash.startsWith('#competitors') ? 'competitors' : location.hash.startsWith('#prices') ? 'prices'
+    : location.hash.startsWith('#finance') ? 'finance' : location.hash.startsWith('#purchase') ? 'purchase' : 'dashboard'));
+  // Переход по ссылке внутри кабинета («Запланировать оплату» в «Закупках» → #finance?new=purchase…): «Финансы» сами читают адрес.
+  useEffect(() => {
+    const on = () => { if (location.hash.startsWith('#finance')) setPage('finance'); };
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Кто вошёл и какие разделы ему открыты (роль + галочки владельца, см.
@@ -116,7 +127,7 @@ export function App() {
   // закрывает им остальное сам, здесь только меню.
   const [me, setMe] = useState<{ name: string; role: Role; sections: string[] } | null>(null);
   const restricted = !!me && me.sections.every(s => s === 'sklad');
-  const allowed = (k: Page) => k === 'actions' ? !restricted : k === 'access' || k === 'cards' || k === 'finance' ? me?.role === 'owner'
+  const allowed = (k: Page) => k === 'actions' ? !restricted : k === 'access' || k === 'cards' || k === 'finance' || k === 'purchase' ? me?.role === 'owner'
     : !(SKLAD_ARCHIVED && k === 'sklad') && (!me || me.sections.includes(k));
 
   useEffect(() => {
@@ -238,7 +249,7 @@ export function App() {
             </div>
           </div>
         </div>
-        <div className={`content ${view === 'rnp' || view === 'actions' || view === 'plan' || view === 'finance' ? 'content-wide' : view === 'prices' || view === 'ads' || view === 'competitors' || view === 'cards' || view === 'sklad' || view === 'fbo' ? 'content-prices' : ''}`}>
+        <div className={`content ${view === 'rnp' || view === 'actions' || view === 'plan' || view === 'finance' || view === 'purchase' ? 'content-wide' : view === 'prices' || view === 'ads' || view === 'competitors' || view === 'cards' || view === 'sklad' || view === 'fbo' ? 'content-prices' : ''}`}>
           <ErrorBoundary key={view ?? 'none'} name={view ? TITLES[view] : ''}>
           {view === 'dashboard' && <Dashboard onNav={navTo} can={k => allowed(k as Page)} />}
           {view === 'sklad' && <Sklad />}
@@ -253,6 +264,7 @@ export function App() {
           {view === 'competitors' && <Competitors />}
           {view === 'cards' && <Cards onOpenAds={() => setPage('ads')} onOpenCompetitors={() => setPage('competitors')} />}
           {view === 'finance' && <Finance />}
+          {view === 'purchase' && <Purchase />}
           {view === 'settings' && <Settings />}
           {view === 'collectors' && <AgentHosts />}
           {view === 'access' && <Access />}

@@ -18,6 +18,7 @@ import { mkdirSync } from 'node:fs';
 import { mskDate } from './mskDate';
 import { planArticleFacts, rnpLatestStocks, rnpLinks, sellerPrices } from './rnp';
 import { getCosts, resolveCost } from './costs';
+import { mergePlanStatuses } from '../../shared/purchase';
 import {
   addDays, avgCheck, calcPace, monthEnd, monthStart, pctOf, pickPrice, sharedStockShort, shiftMonth,
   type PlanBasis, type PlanDay, type PlanArchived, type PlanMp, type PlanResponse, type PlanRnp, type PlanRow, type PlanStatRow, type PlanStats, type PlanStatus, type PlanTotals, type PlanView,
@@ -773,13 +774,31 @@ export async function handlePlan(req: any, res: any, sub: string, user: PlanUser
 export function planForPurchase(month: string): Map<string, { status: string; qty: number; isNew: boolean }> {
   const out = new Map<string, { status: string; qty: number; isNew: boolean }>();
   const d = getDb();
-  const st = new Map<string, string>();
-  for (const r of d.prepare('SELECT mp, article, status, archived_from FROM plan_article').all() as any[]) {
-    if (r.archived_from && String(r.archived_from) <= month) continue;
-    const a = String(r.article).toUpperCase();
-    const rank = (x: string) => x === 'Новинка' ? 2 : x === 'Вывод' ? 0 : 1;
-    if (!st.has(a) || rank(String(r.status)) > rank(st.get(a)!)) st.set(a, String(r.status));
+  // Статус площадки берём, только если товар виден в «Плане» этой площадки (21.11.2026): старый «Рабочий»
+  // на WB, где товара давно нет и статус поменять негде, не должен перебивать «Вывод» на Ozon.
+  const lineMps = new Set((d.prepare('SELECT mp, article FROM plan_line WHERE month = ? AND qty > 0').all(month) as any[]).map(l => `${l.mp}|${String(l.article).toUpperCase()}`));
+  const today = mskDate(0);
+  const visible = new Map<string, (a: string) => boolean>();
+  for (const mp of ['wb', 'ozon'] as PlanMp[]) {
+    try {
+      const facts = planArticleFacts(mp, addDays(today, -30), today);
+      const stocks = rnpLatestStocks(mp);
+      const sold = new Set<string>();
+      for (const [a, x] of facts.byArticle) for (const [, v] of x.days) if (v.cnt > 0) { sold.add(a.toUpperCase()); break; }
+      const inStock = new Set([...stocks].filter(([, s]) => s > 0).map(([a]) => a.toUpperCase()));
+      visible.set(mp, a => sold.has(a) || inStock.has(a) || lineMps.has(`${mp}|${a}`));
+    } catch (e) { console.warn(`[plan] для «Закупок» не прочитаны продажи ${mp}:`, (e as Error)?.message); }
   }
+  const byArt = new Map<string, { status: string; seen: boolean }[]>();
+  for (const r of d.prepare('SELECT mp, article, status, archived_from FROM plan_article').all() as any[]) {
+    const a = String(r.article).toUpperCase();
+    // Убран в архив «Плана» — для «Закупок» тоже архив (если на другой площадке товар живой — главнее он).
+    const status = r.archived_from && String(r.archived_from) <= month ? 'Архив' : String(r.status);
+    const seen = visible.get(r.mp)?.(a) ?? true;
+    byArt.set(a, [...(byArt.get(a) ?? []), { status, seen }]);
+  }
+  const st = new Map<string, string>();
+  for (const [a, list] of byArt) st.set(a, mergePlanStatuses(list));
   for (const l of d.prepare('SELECT mp, article, qty, is_new FROM plan_line WHERE month = ?').all(month) as any[]) {
     const a = String(l.article).toUpperCase();
     const cur = out.get(a) ?? { status: st.get(a) ?? 'Рабочий', qty: 0, isNew: false };

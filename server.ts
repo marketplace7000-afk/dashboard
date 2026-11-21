@@ -119,6 +119,11 @@ app.listen(PORT, '0.0.0.0', () => {
   import('./api/_lib/discounts')
     .then(m => m.scheduleDiscounts())
     .catch(e => console.warn('[discounts] таймер не запущен:', (e as Error).message));
+  // «Закупки» → «Сезонность» (21.11.2026): частота главных запросов WB (00:40) и Ozon (00:51 МСК), 1-го и 16-го числа.
+  // Свой таймер, а не warm-extras: сбор раз в 2 недели в ночную ячейку диспетчера API, мимо больших проходов.
+  import('./api/_lib/season')
+    .then(m => m.scheduleSeason())
+    .catch(e => console.warn('[season] таймер не запущен:', (e as Error).message));
 });
 
 // ─── Прогрев кэша (замена vercel.json crons) ──────────────────────────────

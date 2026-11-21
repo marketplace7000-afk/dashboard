@@ -76,6 +76,8 @@ export function checkSectionAccess(user: AuthUser, section: string, rest: string
   if (section === 'cards') return { reason: 'Доступно только владельцу' };
   // «Финансы» (19.11.2026) — деньги, долги, инвесторы: только владелец, и чтение, и запись.
   if (section === 'finance') return { reason: 'Доступно только владельцу' };
+  // «Закупки» (19.11.2026) — суммы закупок и деньги: только владелец (решение владельца — пока только админский вход).
+  if (section === 'purchase') return { reason: 'Доступно только владельцу' };
 
   if (section === 'wb' || section === 'ozon' || section === 'ozon-perf') {
     // У WB первый сегмент — scope (prices, promotion…), сам путь дальше.

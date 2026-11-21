@@ -139,3 +139,11 @@ export async function reviewsIngest(reviews: unknown[], complete: boolean): Prom
     return r.status === 200 && !!r.json?.ok;
   } catch (e) { localLog(`[api] reviews-ingest не прошёл: ${(e as Error).message}`); return false; }
 }
+
+/** «Закупки» → «Сезонность»: частоты запросов по месяцам (кабинет Ozon, Вордстат) → дашборд. */
+export async function seasonIngest(rows: { source: 'ozon' | 'wordstat'; category: string; query: string; month: string; value: number }[]): Promise<boolean> {
+  try {
+    const r = await call<{ ok: boolean; saved: number }>(`/api/agent/season-ingest`, { rows });
+    return r.status === 200 && !!r.json?.ok;
+  } catch (e) { localLog(`[api] season-ingest не прошёл: ${(e as Error).message}`); return false; }
+}

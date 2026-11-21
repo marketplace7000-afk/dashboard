@@ -110,6 +110,14 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     return;
   }
 
+  // «Закупки» → «Сезонность» (сценарий season_collect, 21.11.2026): частоты запросов по месяцам из кабинета Ozon и Вордстата.
+  if (what === 'season-ingest') {
+    const { saveAgentRows } = await import('./season');
+    const r = saveAgentRows(Array.isArray(b?.rows) ? b.rows : []);
+    res.status(200).json({ ok: true, ...r });
+    return;
+  }
+
   // Разведка кабинета (Агент 3, сценарий cabinet_recon) — отчёт о запросах кабинета.
   if (what === 'recon-ingest') {
     const { saveRecon } = await import('./agentRecon');
@@ -172,6 +180,13 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
         } catch (e) { console.warn('[cards] план видимости не собран:', (e as Error)?.message); }
       }
     }
+    // Сезонность: что осталось собрать в текущем цикле (месяцы Ozon × запросы, запросы Вордстата).
+    if (task.type === 'season_collect') {
+      try {
+        const { seasonAgentParams } = await import('./season');
+        task.params = { ...task.params, ...((await seasonAgentParams()) ?? { ozon: [], wordstat: [] }) };
+      } catch (e) { console.warn('[season] план агента не собран:', (e as Error)?.message); }
+    }
     res.status(200).json({ task, settings: getSettings() });
     return;
   }
@@ -198,11 +213,14 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     if (action === 'complete') {
       const u = completeTask(id, String(b?.summary ?? ''), b?.stats);
       res.status(200).json({ ok: true, status: u?.status });
+      // Сезонность собирается кусками: доделано не всё — сервер ставит следующий кусок.
+      if (t.type === 'season_collect') void import('./season').then(m => m.agentChunkDone(String(b?.summary ?? ''), true)).catch(e => console.warn('[season] следующий кусок не поставлен:', (e as Error)?.message));
       return;
     }
     if (action === 'fail') {
       const u = failTask(id, String(b?.error ?? 'unknown'), !!b?.retryable, b?.pause);
       res.status(200).json({ ok: true, status: u?.status });
+      if (t.type === 'season_collect') void import('./season').then(m => m.agentChunkDone(`сбой: ${String(b?.error ?? '')}`, false)).catch(e => console.warn('[season] сбой агента не записан:', (e as Error)?.message));
       return;
     }
   }

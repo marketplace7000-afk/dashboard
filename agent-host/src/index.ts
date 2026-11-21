@@ -13,9 +13,10 @@ import { runShowcasePrices } from './scenarios/showcasePrices';
 import { runOzonReviews } from './scenarios/ozonReviews';
 import { runCabinetRecon } from './scenarios/cabinetRecon';
 import { runCompetitorWatch } from './scenarios/competitorWatch';
+import { runSeasonCollect } from './scenarios/seasonCollect';
 import type { AgentTaskType } from '../../shared/agents';
 
-const SUPPORTED: AgentTaskType[] = ['showcase_prices', 'ozon_reviews', 'cabinet_recon', 'competitor_watch'];
+const SUPPORTED: AgentTaskType[] = ['showcase_prices', 'ozon_reviews', 'cabinet_recon', 'competitor_watch', 'season_collect'];
 
 let running = false;
 let stop = false;
@@ -46,6 +47,8 @@ async function tick(): Promise<void> {
       await runCabinetRecon(task, settings);
     } else if (task.type === 'competitor_watch') {
       await runCompetitorWatch(task, settings);
+    } else if (task.type === 'season_collect') {
+      await runSeasonCollect(task, settings);
     } else {
       await api.fail(task.id, { error: `сценарий ${task.type} этим хостом не поддерживается`, retryable: false });
     }

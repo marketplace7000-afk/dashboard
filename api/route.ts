@@ -183,6 +183,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(r.status).json(r.json);
   }
 
+  // ─── /api/purchase для утренней сводки закупок на сервере (19.11.2026) ───────
+  // Тот же ключ FIN_AGENT_KEY (агенты финансов и закупок живут рядом в /root): только чтение расчёта.
+  if (section === 'purchase' && req.headers['x-fin-agent-key']) {
+    const expected = (process.env.FIN_AGENT_KEY || '').trim();
+    if (!expected || !secretEquals(String(req.headers['x-fin-agent-key']).trim(), expected)) return res.status(401).json({ error: 'fin_agent_unauthorized' });
+    if (req.method !== 'GET') return res.status(403).json({ error: 'forbidden', reason: 'агенту закупок можно только читать расчёт' });
+    const { handlePurchase } = await import('./_lib/purchase');
+    const r = await handlePurchase(parts, 'GET', req.query, null, 'Агент закупок');
+    return res.status(r.status).json(r.json);
+  }
+
   // Ingest витрин принимает ключ агента наравне с сессией (ТЗ, принцип VIII):
   // хост шлёт цены сюда же, куда их слал ручной сценарий.
   const agentIngestOk = (section === 'wb-showcase-ingest' || section === 'ozon-showcase-ingest' || section === 'wb-global-showcase-ingest')
@@ -531,6 +542,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { handleFinance } = await import('./_lib/finance');
     const u = authUser(req);
     const r = await handleFinance(parts, req.method ?? 'GET', req.query, req.body, u.name || u.login || 'владелец');
+    return res.status(r.status).json(r.json);
+  }
+
+  // ─── /api/purchase — «Закупки» (19.11.2026): что, сколько и когда заказать в Китае. Только владелец (permissions.ts).
+  if (section === 'purchase') {
+    const { handlePurchase } = await import('./_lib/purchase');
+    const u = authUser(req);
+    const r = await handlePurchase(parts, req.method ?? 'GET', req.query, req.body, u.name || u.login || 'владелец');
     return res.status(r.status).json(r.json);
   }
 

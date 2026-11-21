@@ -38,6 +38,9 @@ check('финансы: владелец пишет', ok(owner, 'finance', ['op']
 check('финансы: менеджер со всеми галочками не читает', ok(allSections, 'finance', ['month'], 'GET'), false);
 check('финансы: менеджер со всеми галочками не пишет', ok(allSections, 'finance', ['op'], 'POST'), false);
 check('финансы: склад не читает', ok(user('warehouse', ['sklad']), 'finance', ['investors'], 'GET'), false);
+check('закупки: владелец читает', ok(owner, 'purchase', [], 'GET'), true);
+check('закупки: менеджер со всеми галочками не читает', ok(allSections, 'purchase', [], 'GET'), false);
+check('закупки: менеджер не меняет отметки', ok(allSections, 'purchase', ['skip'], 'POST'), false);
 check('галочки раздела нет', (SECTIONS as readonly string[]).includes('cards'), false);
 
 console.log('Менеджер только с «Отзывами»');

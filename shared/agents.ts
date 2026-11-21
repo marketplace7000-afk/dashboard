@@ -14,7 +14,7 @@
 
 export type Marketplace = 'wb' | 'ozon';
 
-export type AgentTaskType = 'showcase_prices' | 'competitor_watch' | 'funnel_compare' | 'ozon_reviews' | 'cabinet_recon';
+export type AgentTaskType = 'showcase_prices' | 'competitor_watch' | 'funnel_compare' | 'ozon_reviews' | 'cabinet_recon' | 'season_collect';
 
 export type AgentTaskStatus = 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -75,6 +75,7 @@ export const TASK_TYPE_TITLES: Record<AgentTaskType, string> = {
   funnel_compare: 'Воронка продаж',
   ozon_reviews: 'Отзывы Ozon',
   cabinet_recon: 'Разведка кабинета',
+  season_collect: 'Сезонность (Ozon, Вордстат)',
 };
 
 export const SCENARIO_STAGES: Record<AgentTaskType, StageDef[]> = {
@@ -114,6 +115,13 @@ export const SCENARIO_STAGES: Record<AgentTaskType, StageDef[]> = {
     { stage: 'open_cabinet', title: 'Кабинет',             counted: false },
     { stage: 'discover',     title: 'Разделы аналитики',   counted: true  },
     { stage: 'ingest',       title: 'Отправка в дашборд',  counted: false },
+  ],
+  // «Закупки» → «Сезонность» (21.11.2026): частота главных запросов наших категорий по месяцам —
+  // кабинет Ozon «Поисковые запросы» (12 месяцев) и Вордстат (2 года). Только чтение; куски до ~35 минут.
+  season_collect: [
+    { stage: 'open_cabinet', title: 'Кабинет Ozon',              counted: false },
+    { stage: 'ozon_months',  title: 'Ozon: запросы по месяцам',  counted: true  },
+    { stage: 'wordstat',     title: 'Вордстат',                  counted: true  },
   ],
 };
 

@@ -165,6 +165,20 @@ export function rnpItems(mp: RnpMp): { sku: string; article: string; name: strin
   } catch { return []; }
 }
 
+/** Категория (предмет WB / категория Ozon) по артикулу продавца — для «Закупки → Сезонность». */
+export function rnpCategories(mp: RnpMp): Map<string, string> {
+  const out = new Map<string, string>();
+  const d = getDb();
+  if (!d) return out;
+  try {
+    for (const r of d.prepare("SELECT article, sku, category FROM rnp_item WHERE mp = ? AND category IS NOT NULL AND category <> ''").all(mp) as any[]) {
+      const a = String(r.article || r.sku || '').trim().toUpperCase().replace(/-DUBL$/, '');
+      if (a && !out.has(a)) out.set(a, String(r.category));
+    }
+  } catch (e) { console.warn('[rnp] категории не прочитаны:', (e as Error).message); }
+  return out;
+}
+
 /**
  * Итог одной карточки за период для «Ведения карточек». Заказы WB — по воронке, а где её нет
  * за день — по supplier/orders (как в getRnpSummary). null — за период нет ни одной строки.

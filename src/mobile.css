@@ -50,6 +50,16 @@
     text-align: center;
   }
 
+  /* Таблица внутри своего блока прокрутки остаётся таблицей. Общее правило styles.css
+     («каждая таблица сама листается вбок») делало вторую прокрутку внутри первой, и закреплённые
+     колонки (артикул в РНП, товар в Плане) уезжали вместе с цифрами. */
+  .rnp-scroll > table, .ad2-scroll > table, .cm-scroll > table, .tbl-scroll > table,
+  .fin-scroll > table, .sk-scroll > table, .db-tbl-wrap > table, .dr-table-wrap > table,
+  .rv-table-wrap > table, .ah-day-scroll > table {
+    display: table;
+    overflow: visible;
+  }
+
   /* Сетки разделов с одной колонкой (План, Ведение карточек): колонка растягивалась по ширине таблицы и выталкивала всё за край. */
   .cm { grid-template-columns: minmax(0, 1fr); }
 
@@ -85,9 +95,18 @@
 
   /* РНП и «РНП действия»: две закреплённые колонки занимали 296 px из 314. */
   .rnp-table td, .rnp-table th { padding: 6px 7px; }
-  .rnp-col-item { width: 112px; min-width: 112px; max-width: 112px; }
-  .rnp-col-metric { left: 112px; width: 104px; min-width: 104px; max-width: 104px; font-size: var(--sa-small, 15px); line-height: 1.25; }
-  .rnp-item { gap: 0; }
+  .rnp-col-item { width: 104px; min-width: 104px; max-width: 104px; }
+  .rnp-col-metric { left: 104px; width: 92px; min-width: 92px; max-width: 92px; font-size: var(--sa-small, 15px); line-height: 1.25; }
+  /* Артикул закреплён и вбок (колонка), и вниз: пока листаешь строки товара, он едет вместе с ними
+     до конца блока, чтобы всегда было видно, чьи это цифры (просьба владельца 21.11). */
+  .rnp-item, .rnp-item-text { display: contents; }
+  .rnp-col-item .rnp-item-title {
+    position: sticky; top: 40px; z-index: 1;
+    background: #fff; padding: 2px 0 6px; overflow-wrap: anywhere;
+  }
+  .rnp-total .rnp-col-item .rnp-item-title { background: #eef3ff; }
+  .rnp-col-item .rnp-econ, .rnp-col-item .rnp-econ * { overflow-wrap: anywhere; white-space: normal; }
+  .rnp-table-card { padding-left: 8px; padding-right: 8px; }
   .rnp-photo, .rnp-photo-empty { display: none; }
   .rnp-item-title { font-size: var(--sa-small, 15px); line-height: 1.25; }
   .rnp-item-sub { font-size: var(--sa-small, 15px); -webkit-line-clamp: 2; line-height: 1.25; }
@@ -96,8 +115,8 @@
   .rnp-num { min-width: 60px; }
   .act-col-kind { white-space: normal; }
   /* «РНП действия»: стрелка раскрытия забирала место у артикула — колонка товара шире, вида действия уже. */
-  .act-table .rnp-col-item { width: 132px; min-width: 132px; max-width: 132px; }
-  .act-table .rnp-col-metric { left: 132px; width: 92px; min-width: 92px; max-width: 92px; }
+  .act-table .rnp-col-item { width: 124px; min-width: 124px; max-width: 124px; }
+  .act-table .rnp-col-metric { left: 124px; width: 88px; min-width: 88px; max-width: 88px; }
   .act-table .rnp-item-title { overflow-wrap: anywhere; word-break: normal; }
   .act-caret { padding: 0 2px 0 0; }
   .rnp-item-text { min-width: 0; }

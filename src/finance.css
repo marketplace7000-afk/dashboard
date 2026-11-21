@@ -449,3 +449,30 @@
 .fin-balbtns .btn { padding: 4px 10px; }
 .fin-selbar .fin-del { color: var(--bad); border-color: #f1c4c4; }
 .fin-selbar .fin-del:hover { background: #fdecec; }
+
+/* 21.11: телефон — дата не рвётся по цифрам, операция в две строки во всю ширину,
+   под ней статус, сумма и кнопки (кнопки на 20 % меньше); компьютер не меняется */
+@media (max-width: 640px) {
+  .fin-day > header { grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 8px; padding: 8px 10px; }
+  .fin-date { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; min-width: 0; }
+  .fin-date b { font-size: 22px; white-space: nowrap; }
+  .fin-date span { font-size: var(--sa-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fin-end { font-size: var(--sa-small); padding: 2px 8px !important; white-space: nowrap; }
+  .fin-end b { font-size: var(--sa-cap); }
+  .fin-add { min-width: 36px !important; min-height: 36px !important; padding: 2px 8px !important; font-size: 18px !important; }
+  .fin-daysum { font-size: var(--sa-small); }
+
+  .fin-op { grid-template-columns: 26px auto minmax(0, 1fr) auto; grid-template-areas: "m w w w" ". st sum tools"; gap: 4px 8px; padding: 8px 10px; align-items: center; }
+  .fin-mark { grid-area: m; align-self: start; padding-top: 2px; gap: 0; }
+  .fin-mark .fin-dot { display: none; }
+  .fin-what { grid-area: w; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
+  .fin-what b { font-size: var(--sa-cap); }
+  .fin-rest { font-size: var(--sa-small); }
+  .fin-op.in .fin-what b { color: var(--good); }
+  .fin-st { grid-area: st; }
+  .fin-sum { grid-area: sum; font-size: var(--sa-cap); text-align: right; }
+  .fin-tools { grid-area: tools; gap: 6px; }
+  .sa.fin .fin-tools .btn { min-width: 36px; min-height: 36px; padding: 4px 7px; font-size: 15px; }
+  .fin-pill { font-size: var(--sa-small); padding: 2px 8px; }
+  .fin-day-all input, .fin-mark input { width: 18px; height: 18px; }
+}

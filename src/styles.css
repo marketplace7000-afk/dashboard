@@ -1269,7 +1269,7 @@ code {
 /* Чаты: список + диалог */
 /* Столбец чатов шире: вкладки «Ждут ответа · Черновики · Все» и бейджи влезают целиком (08.11.2026). */
 /* 20.11.2026: список шире (до 42 % ширины, не уже 400 px), переписка — остальное: была слишком широкой. */
-.rv-chat { display: grid; grid-template-columns: minmax(400px, 42%) minmax(0, 1fr); gap: 16px; align-items: start; }
+.rv-chat { display: grid; grid-template-columns: minmax(470px, 44%) minmax(0, 1fr); gap: 16px; align-items: start; }
 /* Непрочитанный диалог: точка у имени, жирный текст последнего сообщения, лёгкий фон */
 .rv-thread.is-unread { background: color-mix(in srgb, var(--accent) 6%, #fff); }
 .rv-thread.is-unread:hover { background: color-mix(in srgb, var(--accent) 10%, #fff); }
@@ -1433,6 +1433,64 @@ code {
   .rv-product-body .rv-muted { font-size: 15px; }
   .rv-product-link { padding: 8px 10px; flex-basis: 100%; justify-content: center; }
   .rv-composer { padding: 14px 12px; }
+}
+/* Чаты на планшете и узком окне (до 1240 px): список и переписка рядом не помещаются — показываем что-то одно. */
+@media (min-width: 761px) and (max-width: 1240px) {
+  .rv-page--chats .rv-chat { grid-template-columns: minmax(0, 1fr); }
+  .rv-page--chats .rv-chat-list { position: static; }
+  .rv-page--chats .rv-chat:not(.has-thread) .rv-chat-pane { display: none; }
+  .rv-page--chats .rv-chat.has-thread .rv-chat-list { display: none; }
+  .rv-page--chats .rv-back { display: inline-flex; }
+  .rv-page--chats .rv-threads { max-height: none; }
+}
+/* Чаты на телефоне (21.11.2026): список виден сразу, открытый диалог — во весь экран, как в мессенджере. */
+@media (max-width: 760px) {
+  /* Шапка компактная: две площадки рядом, переключатели и «Обновить» — одной строкой */
+  .rv-page--chats .rv-hero { padding: 12px 14px; gap: 10px; }
+  .rv-page--chats .rv-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; align-items: start; }
+  .rv-page--chats .rv-stat--mp { gap: 4px; min-width: 0; }
+  .rv-page--chats .rv-stat-num { font-size: 30px; }
+  .rv-page--chats .rv-stat-num--sm { font-size: 21px; }
+  .rv-page--chats .rv-stat-pair { flex-wrap: wrap; gap: 0 10px; font-size: 15px; }
+  .rv-page--chats .rv-stat-label { font-size: 15px; }
+  .rv-page--chats .rv-hero-side { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+  .rv-page--chats .rv-hero-side .btn { width: auto; min-height: 44px; }
+  .rv-page--chats .rv-sub--page { display: none; }
+  /* Вкладки 2×2, кнопки под палец (не ниже 44 px) */
+  .rv-page--chats .rv-chat-list { padding: 10px; }
+  .rv-page--chats .rv-seg--full { display: grid; grid-template-columns: 1fr 1fr; overflow: visible; width: 100%; justify-self: stretch; }
+  .rv-page--chats .rv-seg--full .rv-seg-btn { min-height: 44px; border-left: none; }
+  .sa .rv-page--chats .rv-seg--full .rv-seg-btn:nth-child(even) { border-left: 1px solid var(--border); }
+  .sa .rv-page--chats .rv-seg--full .rv-seg-btn:nth-child(n+3) { border-top: 1px solid var(--border); }
+  .rv-page--chats .rv-pill { height: 44px; flex: 1 1 auto; justify-content: center; }
+  .rv-page--chats .rv-search .input { min-height: 44px; }
+  .rv-page--chats .rv-thread { padding: 12px 8px; }
+  /* Открытый диалог поверх всего экрана; список под ним не сбрасывает прокрутку */
+  .rv-page--chats .rv-chat.has-thread .rv-chat-list { display: grid; }
+  .rv-page--chats.is-reading .rv-chat-pane { position: fixed; inset: 0; z-index: 900; min-height: 0; border: none; border-radius: 0; }
+  .rv-page--chats .rv-thread-pane { height: 100%; min-height: 0; }
+  .rv-page--chats .rv-pane-head { padding: 8px 12px; }
+  .rv-page--chats .rv-back { min-width: 44px; min-height: 44px; justify-content: center; }
+  .rv-page--chats .rv-pane-sub { display: none; }
+  .rv-page--chats .rv-product { flex-wrap: nowrap; padding: 8px 12px; }
+  .rv-page--chats .rv-pthumb--lg { width: 40px; height: 50px; }
+  .rv-page--chats .rv-product-name { -webkit-line-clamp: 1; }
+  .rv-page--chats .rv-product-link { flex-basis: auto; padding: 8px 10px; min-height: 44px; }
+  .rv-page--chats .rv-messages { flex: 1; min-height: 0; max-height: none; }
+  .rv-page--chats .rv-composer { padding: 10px 12px max(12px, env(safe-area-inset-bottom)); }
+  .rv-page--chats .rv-composer .rv-textarea { min-height: 84px; max-height: 32vh; }
+  .rv-page--chats .rv-composer .rv-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .rv-page--chats .rv-composer .rv-actions .btn { min-height: 44px; }
+  .rv-page--chats .rv-reply-foot { margin-top: 4px; gap: 6px; }
+  .rv-page--chats .rv-hint { font-size: 15px; }
+  /* «Документы» на телефоне: список файлов не сжимается в щель, когда открыта почта */
+  .rv-docs-foot { max-height: 62vh; padding-top: 10px; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+  .rv-docs-field .textarea { min-height: 6.5em; max-height: 30vh; }
+  .rv-docs-foot .rv-seg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .rv-docs-foot .rv-seg-btn { min-height: 44px; }
+  .rv-docs-actions .btn { min-height: 44px; }
+  /* Кнопка ИИ-помощника не закрывает «Отправить» */
+  body:has(.rv-page--chats.is-reading) .ai-fab { display: none !important; }
 }
 @media (prefers-reduced-motion: reduce) {
   .rv-page *, .rv-page *::after { transition: none !important; }

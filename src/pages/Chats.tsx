@@ -120,7 +120,7 @@ export function Chats() {
   ];
 
   return (
-    <div className="rv-page">
+    <div className={`rv-page rv-page--chats${sel && selThread ? ' is-reading' : ''}`}>
       <section className="rv-hero">
         <div className="rv-stats">
           {(['wb', 'ozon'] as const).map(m => (
@@ -179,7 +179,7 @@ export function Chats() {
             </div>
             <form className="rv-search" onSubmit={e => { e.preventDefault(); load(); }}>
               <MagnifyingGlassIcon size={17} />
-              <input className="input" placeholder="Поиск по всем чатам: товар, артикул, имя, слова из переписки" value={q} onChange={e => setQ(e.target.value)} />
+              <input className="input" placeholder="Поиск: товар, артикул, имя, текст" title="Поиск по всем чатам: товар, артикул, имя покупателя, слова из переписки" value={q} onChange={e => setQ(e.target.value)} />
             </form>
           </div>
           {err && <div className="rv-callout rv-callout--bad"><WarningIcon size={18} /><span>{err}</span></div>}
@@ -266,7 +266,7 @@ function ThreadPane({ mp, id, onBack, onChanged, onSent }: {
         <Avatar t={th} />
         <div className="rv-pane-title">
           <b>{th.clientName || 'Покупатель'}</b>
-          <span className="rv-muted"><MpTag mp={th.marketplace} /> чат с покупателем</span>
+          <span className="rv-muted"><MpTag mp={th.marketplace} /><span className="rv-pane-sub"> чат с покупателем</span></span>
         </div>
         {statusBadge(th)}
       </header>

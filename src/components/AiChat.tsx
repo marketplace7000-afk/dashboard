@@ -103,6 +103,7 @@ export function AiChatBubble({ currentPage }: Props) {
       <button
         onClick={() => setOpen(true)}
         title="AI-копилот"
+        className="ai-fab"
         style={{
           position: 'fixed', right: 24, bottom: 24,
           width: 56, height: 56, borderRadius: 28,

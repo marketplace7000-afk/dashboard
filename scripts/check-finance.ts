@@ -90,6 +90,34 @@ process.env.CACHE_DIR = dir;
     f.editList({ kind: 'cat', action: 'delete', name: 'Новая статья' }, 'проверка');
     check('статья убрана из списка, строка осталась', [f.lists().cat.some(i => i.name === 'Новая статья'), f.allOps().some(o => o.cat === 'Новая статья')], [false, true]);
 
+    // товары закупки (21.11)
+    const pu = f.saveOp({ date: '2026-11-25', type: 'out', cat: 'Закупка товара — поставщик', descr: 'Фабрика', plan: 2_100_000, status: 'План',
+      items: [{ article: 'S2000-PRO', name: 'S2000 PRO', qty: 60 }, { article: 'ULTRA2-KRUG', qty: '400' }] }, 'проверка');
+    check('закупка: товары сохранились', pu.items, [{ article: 'S2000-PRO', name: 'S2000 PRO', qty: 60 }, { article: 'ULTRA2-KRUG', name: '', qty: 400 }]);
+    const { items: _drop, ...noItems } = pu;
+    const pu2 = f.saveOp({ ...noItems, status: 'Подтверждено' }, 'проверка');
+    check('закупка: правка без поля товаров их не стирает (так пишет агент)', pu2.items?.length, 2);
+    let qerr = ''; try { f.saveOp({ ...pu, items: [{ article: 'X', qty: 0 }] }, 'проверка'); } catch (e) { qerr = (e as Error).message; }
+    check('закупка: ноль штук не сохраняется', qerr, 'штук у «X» — целое число больше нуля');
+    check('закупка: в списке для «Закупок» как неоплаченная', f.purchaseItems('2026-11-21').map(p => [p.opId, p.paid, p.items.length]), [[pu.id, false, 2]]);
+    f.saveOp({ ...pu, status: 'Исполнено', fact: 2_050_000 }, 'проверка');
+    check('закупка: после оплаты — оплаченная, пока не прошло 60 дней', [f.purchaseItems('2026-11-26')[0]?.paid, f.purchaseItems('2027-02-01').length], [true, 0]);
+
+    // копирование и перенос (21.11)
+    const cp = f.copyOps({ ids: [pu.id], shift: 'month' }, 'проверка');
+    check('копия: +1 месяц, «План», без факта и ключа, с товарами', [cp.dates, cp.ops[0].status, cp.ops[0].fact, cp.ops[0].key, cp.ops[0].items?.length], [['2026-12-25'], 'План', null, null, 2]);
+    check('копия: исходная строка не тронута', f.allOps().find(o => o.id === pu.id)!.status, 'Исполнено');
+    const wk = f.copyOps({ ids: [pu.id], shift: 'week' }, 'проверка');
+    check('копия: +1 неделя', wk.dates, ['2026-12-02']);
+    const mv = f.copyOps({ ids: [cp.ops[0].id], to: '2027-01-10', mode: 'move' }, 'проверка');
+    check('перенос: меняется только дата', [mv.ops[0].id, mv.ops[0].date, mv.ops[0].status, mv.ops[0].items?.length], [cp.ops[0].id, '2027-01-10', 'План', 2]);
+    let cerr = ''; try { f.copyOps({ ids: [pu.id] }, 'проверка'); } catch (e) { cerr = (e as Error).message; }
+    check('копия: без даты не делается', cerr, 'укажите дату');
+    const denied = await f.handleFinance(['finance', 'op', 'copy'], 'POST', {}, { ids: [pu.id], shift: 'week' }, 'Агент финансов');
+    check('копия: агенту нельзя', denied.status, 403);
+    f.deleteOp(wk.ops[0].id, 'проверка');
+    check('удаление строки убирает и её товары', (f.finDb().prepare('SELECT COUNT(*) AS n FROM fin_op_item WHERE op_id = ?').get(wk.ops[0].id) as { n: number }).n, 0);
+
     if (process.env.FIN_EXPORT) {
       const p2 = JSON.parse(readFileSync(process.env.FIN_EXPORT, 'utf8'));
       f.importAll(p2, 'проверка', true);

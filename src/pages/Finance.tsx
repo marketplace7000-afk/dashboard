@@ -12,8 +12,26 @@ import { Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Too
 import '../finance.css';
 import { apiGet, apiPost, errText } from '../api/http';
 import {
-  OP_STATUSES, shiftMonth, type DealCalc, type FinOp, type FinSummary, type LoanCalc, type MonthView, type OpStatus, type OpType,
+  OP_STATUSES, addMonths, dayNum, dayStr, isPurchaseOp, itemsLabel, shiftMonth,
+  type DealCalc, type FinOp, type FinSummary, type LoanCalc, type MonthView, type OpItem, type OpStatus, type OpType,
 } from '../../shared/finance';
+
+/**
+ * Ссылка из «Закупок» (21.11): e-avtovibe.ru/#finance?new=purchase&article=S2000-PRO&qty=60[&name=…][&date=2026-11-25]
+ * открывает «Календарь» и окно новой операции «Закупка товара — поставщик» с уже вписанным товаром.
+ * Сумму и дату владелец пишет сам.
+ */
+const PURCHASE_CAT = 'Закупка товара — поставщик';
+function formFromHash(): Partial<FinOp> | null {
+  if (typeof location === 'undefined' || !location.hash.startsWith('#finance?')) return null;
+  const q = new URLSearchParams(location.hash.slice('#finance?'.length));
+  if (q.get('new') !== 'purchase') return null;
+  const items: OpItem[] = [];
+  const arts = q.getAll('article'), qtys = q.getAll('qty'), names = q.getAll('name');
+  arts.forEach((a, i) => { const n = Math.round(Number(qtys[i])); if (a.trim()) items.push({ article: a.trim(), name: names[i] ?? '', qty: n > 0 ? n : 1 }); });
+  const date = q.get('date');
+  return { type: 'out', status: 'План', cat: PURCHASE_CAT, items, ...(date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : {}) };
+}
 
 type Meta = { settings: { balance: number; balanceDate: string; minBalance: number }; today: string; categories: Array<{ name: string; type: OpType }>; accounts: string[]; people: string[]; parties: string[]; lastMonth: string };
 type Tab = 'summary' | 'calendar' | 'investors' | 'loans' | 'lists';
@@ -51,6 +69,17 @@ export function Finance() {
   const meta = useLoad<Meta & { ok: boolean }>('/api/finance/meta');
   const go = (t: Tab) => { setTab(t); try { localStorage.setItem('fin.tab', t); } catch { /* вкладка просто не запомнится */ } };
   const openMonth = (m: string) => { setMonth(m); go('calendar'); };
+  // окно новой закупки по ссылке из «Закупок»; ссылка срабатывает один раз и убирается из адреса
+  const [linkForm, setLinkForm] = useState<Partial<FinOp> | null>(null);
+  useEffect(() => {
+    const take = () => {
+      const f = formFromHash(); if (!f) return;
+      setLinkForm(f); go('calendar');
+      if (f.date) setMonth(f.date.slice(0, 7));
+      try { history.replaceState(null, '', location.pathname + location.search + '#finance'); } catch (e) { console.warn('[finance] адрес не очистился:', e); }
+    };
+    take(); window.addEventListener('hashchange', take); return () => window.removeEventListener('hashchange', take);
+  }, []);
 
   return (
     <div className="sa fin">
@@ -65,7 +94,7 @@ export function Finance() {
       </div>
       {meta.err && <div className="fin-alert">Не удалось загрузить раздел: {meta.err}</div>}
       {meta.data && tab === 'summary' && <SummaryTab onOpenMonth={openMonth} meta={meta.data} onMetaChange={meta.reload} />}
-      {meta.data && tab === 'calendar' && <CalendarTab month={month} setMonth={setMonth} meta={meta.data} />}
+      {meta.data && tab === 'calendar' && <CalendarTab month={month} setMonth={setMonth} meta={meta.data} linkForm={linkForm} onLinkFormUsed={() => setLinkForm(null)} />}
       {meta.data && tab === 'investors' && <InvestorsTab meta={meta.data} onOpenMonth={openMonth} />}
       {meta.data && tab === 'loans' && <LoansTab meta={meta.data} onOpenMonth={openMonth} />}
       {meta.data && tab === 'lists' && <ListsTab onChange={meta.reload} />}
@@ -160,9 +189,34 @@ function SettingsForm({ meta, onClose, onSaved }: { meta: Meta; onClose: () => v
 
 // ═══ Календарь ═════════════════════════════════════════════════════════════
 type Filter = 'all' | 'in' | 'out' | 'open';
-function CalendarTab({ month, setMonth, meta }: { month: string; setMonth: (m: string) => void; meta: Meta }) {
+function CalendarTab({ month, setMonth, meta, linkForm, onLinkFormUsed }: { month: string; setMonth: (m: string) => void; meta: Meta; linkForm?: Partial<FinOp> | null; onLinkFormUsed?: () => void }) {
   const { data, err, busy, reload } = useLoad<{ view: MonthView }>(`/api/finance/month?m=${month}`);
   const [form, setForm] = useState<Partial<FinOp> | null>(null);
+  useEffect(() => { if (linkForm) { setForm({ date: meta.today, ...linkForm }); onLinkFormUsed?.(); } }, [linkForm]);
+  // выбранные строки (21.11): копировать / переместить в другой день
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const [toDate, setToDate] = useState('');
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [jumpTo, setJumpTo] = useState<string | null>(null);
+  useEffect(() => { if (!jumpTo) setSel(new Set()); }, [month]);
+  const toggle = (ids: number[], on: boolean) => setSel(s => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; });
+  useEffect(() => { // после копирования — открыть тот день
+    if (!jumpTo || !data?.view || data.view.month !== jumpTo.slice(0, 7)) return;
+    const t = setTimeout(() => { document.getElementById(`fin-d-${jumpTo}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }); setJumpTo(null); }, 200);
+    return () => clearTimeout(t);
+  }, [jumpTo, data]);
+  const copySel = async (mode: 'copy' | 'move', target: { to?: string; shift?: 'week' | 'month' }) => {
+    if (!sel.size) return;
+    if (!target.shift && !target.to) { setToast('Выберите дату'); return; }
+    setCopyBusy(true);
+    try {
+      const r = await apiPost<{ dates: string[] }>('/api/finance/op/copy', { ids: [...sel], mode, ...target });
+      const dates = r.data.dates; const first = dates[0];
+      setToast(`${mode === 'copy' ? 'Скопировано' : 'Перенесено'}: ${sel.size} — ${dates.map(ddmm).join(', ')}${mode === 'copy' ? '. Поправьте суммы в копиях' : ''}`);
+      setSel(new Set());
+      if (first) { setJumpTo(first); if (first.slice(0, 7) !== month) setMonth(first.slice(0, 7)); else void reload(); } else void reload();
+    } catch (e) { setToast('Не получилось: ' + errText(e)); } finally { setCopyBusy(false); }
+  };
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const [showEmpty, setShowEmpty] = useState(false);
@@ -236,7 +290,13 @@ function CalendarTab({ month, setMonth, meta }: { month: string; setMonth: (m: s
           return (
             <section key={d.date} id={`fin-d-${d.date}`} className={`fin-day ${d.date === v.today ? 'today' : ''} ${isWeekend(d.date) ? 'we' : ''} ${past ? 'past' : ''}`}>
               <header>
-                <div className="fin-date"><b>{Number(d.date.slice(8, 10))}</b><span>{MONTHS_GEN[Number(d.date.slice(5, 7)) - 1]}, {wd(d.date)}{d.date === v.today ? ' · сегодня' : ''}</span></div>
+                <div className="fin-date">
+                  {ops.length > 0 && (() => { const all = ops.every(o => sel.has(o.id)); return (
+                    <label className="fin-day-all" title="Выбрать все операции дня — чтобы скопировать или перенести">
+                      <input type="checkbox" checked={all} onChange={e => toggle(ops.map(o => o.id), e.target.checked)} aria-label={`Выбрать все операции ${ddmm(d.date)}`} />
+                    </label>); })()}
+                  <b>{Number(d.date.slice(8, 10))}</b><span>{MONTHS_GEN[Number(d.date.slice(5, 7)) - 1]}, {wd(d.date)}{d.date === v.today ? ' · сегодня' : ''}</span>
+                </div>
                 <div className="fin-daysum">
                   {d.in > 0 && <span className="in">+{rub(d.in)}</span>}
                   {d.out > 0 && <span>−{rub(d.out)}</span>}
@@ -247,11 +307,15 @@ function CalendarTab({ month, setMonth, meta }: { month: string; setMonth: (m: s
                 <button className="btn btn-sm fin-add" aria-label="Добавить операцию в этот день" onClick={() => setForm({ date: d.date, type: 'out', status: 'План' })}><PlusIcon /></button>
               </header>
               {ops.map(o => (
-                <div key={o.id} className={`fin-op ${o.type} st-${STATUS_CLASS[o.status]}`}>
-                  <span className={`fin-dot ${o.type}`} aria-hidden />
+                <div key={o.id} className={`fin-op ${o.type} st-${STATUS_CLASS[o.status]} ${sel.has(o.id) ? 'sel' : ''}`}>
+                  <span className="fin-mark">
+                    <input type="checkbox" checked={sel.has(o.id)} onChange={e => toggle([o.id], e.target.checked)} aria-label={`Выбрать «${o.cat || o.descr}»`} />
+                    <span className={`fin-dot ${o.type}`} aria-hidden />
+                  </span>
                   <div className="fin-what" onClick={() => setForm(o)} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') setForm(o); }}>
                     <b>{o.cat || o.descr}</b>
                     <span className="muted">{o.cat ? o.descr : ''}{o.account ? `${o.cat && o.descr ? ' · ' : ''}${o.account}` : ''}</span>
+                    {o.items?.length ? <span className="fin-items">{itemsLabel(o.items)}</span> : null}
                     {o.comment && <span className="fin-com">{o.comment}</span>}
                   </div>
                   <div className={`fin-sum ${o.type}`}>
@@ -275,6 +339,26 @@ function CalendarTab({ month, setMonth, meta }: { month: string; setMonth: (m: s
           );
         })}
       </div>}
+      {sel.size > 0 && (() => {
+        const chosen = (v?.days ?? []).flatMap(d => d.ops).filter(o => sel.has(o.id));
+        const sum = chosen.reduce((s, o) => s + (o.type === 'out' ? -o.plan : o.plan), 0);
+        const one = chosen.length && chosen.every(o => o.date === chosen[0].date) ? chosen[0].date : null;
+        return (
+          <div className="fin-selbar" role="region" aria-label="Выбранные операции">
+            <span>Выбрано <b>{sel.size}</b>{chosen.length ? <> · {sum < 0 ? '−' : '+'}{rub(Math.abs(sum))}</> : null}</span>
+            <span className="fin-spacer" />
+            <span className="muted">Копировать на</span>
+            <div className="fin-seg">
+              <button disabled={copyBusy} onClick={() => void copySel('copy', { shift: 'week' })} title={one ? `на ${ddmm(dayStr(dayNum(one) + 7))}` : 'каждую строку на неделю вперёд'}>+1 неделя</button>
+              <button disabled={copyBusy} onClick={() => void copySel('copy', { shift: 'month' })} title={one ? `на ${ddmm(addMonths(one, 1))}` : 'каждую строку на месяц вперёд, то же число'}>+1 месяц</button>
+            </div>
+            <input className="input" type="date" value={toDate} onChange={e => setToDate(e.target.value)} aria-label="Дата, куда копировать или переносить" />
+            <button className="btn btn-primary" disabled={copyBusy || !toDate} onClick={() => void copySel('copy', { to: toDate })}>Копировать</button>
+            <button className="btn" disabled={copyBusy || !toDate} onClick={() => void copySel('move', { to: toDate })} title="Перенести выбранные строки на эту дату (статус не меняется)">Переместить</button>
+            <button className="btn" onClick={() => setSel(new Set())} aria-label="Снять выбор"><XIcon /></button>
+          </div>
+        );
+      })()}
       {form && <OpForm op={form} meta={meta} onClose={() => setForm(null)} onSaved={(m) => { setForm(null); setToast(m); void reload(); }} />}
       {toast && <div className="fin-toast">{toast}</div>}
     </div>
@@ -287,13 +371,24 @@ function OpForm({ op, meta, onClose, onSaved }: { op: Partial<FinOp>; meta: Meta
     fact: op.fact !== null && op.fact !== undefined ? String(op.fact) : '', status: (op.status ?? 'План') as OpStatus, account: op.account ?? '', resp: op.resp ?? '', comment: op.comment ?? '',
   });
   const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+  // товары закупки (21.11): артикул + штук; сумма от них не считается
+  const [items, setItems] = useState<Array<{ article: string; name: string; qty: string }>>(() => (op.items ?? []).map(i => ({ article: i.article, name: i.name, qty: String(i.qty) })));
+  const showItems = isPurchaseOp(f) || items.some(i => i.article.trim());
+  useEffect(() => { if (showItems && !items.length) setItems([{ article: '', name: '', qty: '' }]); }, [showItems]);
+  const cat = useLoad<{ items: Array<{ article: string; name: string }>; error?: string }>(showItems ? '/api/finance/catalog' : null);
+  const known = useMemo(() => new Map((cat.data?.items ?? []).map(i => [i.article.toUpperCase(), i])), [cat.data]);
+  const setItem = (i: number, p: Partial<{ article: string; name: string; qty: string }>) => setItems(l => l.map((x, k) => (k === i ? { ...x, ...p } : x)));
   const cats = meta.categories.filter(c => c.type === f.type);
   const num = (s: string) => Number(s.replace(/\s/g, '').replace(',', '.'));
   const save = async () => {
     if (!f.plan.trim() || !Number.isFinite(num(f.plan))) { setErr('Укажите сумму'); return; }
+    const filled = items.filter(i => i.article.trim());
+    const bad = filled.find(i => !(Math.round(num(i.qty)) > 0));
+    if (bad) { setErr(`Укажите, сколько штук «${bad.article}»`); return; }
+    const outItems: OpItem[] = filled.map(i => ({ article: i.article.trim(), name: i.name.trim() || known.get(i.article.trim().toUpperCase())?.name || '', qty: Math.round(num(i.qty)) }));
     setBusy(true);
     try {
-      await apiPost('/api/finance/op', { op: { ...op, ...f, plan: num(f.plan), fact: f.fact.trim() ? num(f.fact) : null } });
+      await apiPost('/api/finance/op', { op: { ...op, ...f, plan: num(f.plan), fact: f.fact.trim() ? num(f.fact) : null, items: outItems } });
       onSaved(op.id ? 'Строка сохранена' : `Добавлено на ${ddmm(f.date)}`);
     } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
   };
@@ -330,6 +425,27 @@ function OpForm({ op, meta, onClose, onSaved }: { op: Partial<FinOp>; meta: Meta
             {[...RESP_PEOPLE, ...(f.resp && !RESP_PEOPLE.includes(f.resp) ? [f.resp] : [])].map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </Field>
+        {showItems && (
+          <div className="fin-items-box">
+            <span>Товары — чтобы «Закупки» видели эту оплату и не советовали те же штуки ещё раз. Сумма от штук не считается.</span>
+            {items.map((it, i) => {
+              const k = known.get(it.article.trim().toUpperCase());
+              return (
+                <div key={i} className="fin-item-row">
+                  <input className="input" list="fin-catalog" placeholder="артикул — начните вводить" value={it.article} aria-label="Артикул"
+                    onChange={e => setItem(i, { article: e.target.value, name: '' })} />
+                  <input className="input" inputMode="numeric" placeholder="штук" value={it.qty} aria-label="Штук" onChange={e => setItem(i, { qty: e.target.value })} />
+                  <button className="btn btn-sm" aria-label="Убрать товар" onClick={() => setItems(l => l.filter((_, x) => x !== i))}><XIcon /></button>
+                  {it.article.trim() && (it.name || k?.name ? <small>{it.name || k?.name}</small> : !k && cat.data ? <small>нет в каталоге «Склада» — проверьте артикул (сохранить можно)</small> : null)}
+                </div>
+              );
+            })}
+            <datalist id="fin-catalog">{(cat.data?.items ?? []).map(c => <option key={c.article} value={c.article}>{c.name}</option>)}</datalist>
+            <div><button className="btn btn-sm" onClick={() => setItems(l => [...l, { article: '', name: '', qty: '' }])}><PlusIcon /> товар</button></div>
+            {cat.err && <small className="muted">Каталог «Склада» не загрузился: {cat.err}. Артикул можно вписать вручную.</small>}
+            {cat.data?.error && <small className="muted">Каталог «Склада» прочитан не полностью: {cat.data.error}</small>}
+          </div>
+        )}
         <Field label="Комментарий" wide><textarea className="input" rows={2} value={f.comment} onChange={e => setF({ ...f, comment: e.target.value })} /></Field>
       </div>
       {op.key && <p className="muted fin-note">Эту строку поставил агент ({op.source}). Сумму и дату можно поправить — агент её не перезапишет.</p>}

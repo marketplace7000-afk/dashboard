@@ -34,7 +34,15 @@ export type FinOp = {
   key: string | null;
   updatedAt?: string;
   updatedBy?: string;
+  /** Товары закупки (21.11): артикул и штуки. Сумма от них не считается — её пишут руками. */
+  items?: OpItem[];
 };
+/** Товар в строке закупки: артикул «Склада», название для показа, штук. */
+export type OpItem = { article: string; name: string; qty: number };
+/** Строка — закупка товара (по статье): у неё в окне появляется блок «Товары». */
+export const isPurchaseOp = (o: { type: string; cat: string }) => o.type === 'out' && /закупк/i.test(o.cat);
+/** «S2000 PRO × 60 · Ultra2 Круглый × 400» — подпись под описанием в календаре. */
+export const itemsLabel = (items: OpItem[] | undefined) => (items ?? []).map(i => `${i.name || i.article} × ${i.qty}`).join(' · ');
 
 export type FinSettings = { balance: number; balanceDate: string; minBalance: number };
 

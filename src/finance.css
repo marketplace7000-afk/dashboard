@@ -391,3 +391,26 @@
 @media (max-width: 900px) { .fin-lists { grid-template-columns: 1fr; } }
 .fin-pay-list li .w { overflow-wrap: break-word; }
 @media (max-width: 640px) { .fin-pay-list { padding: 10px 12px; } .fin-pay-list li { grid-template-columns: 48px minmax(0, 1fr) auto; gap: 8px; } }
+
+/* 21.11: галочки у операций, панель выбранного, товары закупки */
+.fin-op { grid-template-columns: 52px minmax(0, 3fr) minmax(190px, 1.2fr) minmax(200px, 1fr) auto; }
+.fin-mark { display: flex; align-items: center; gap: 10px; }
+.fin-mark input, .fin-day-all input { width: 20px; height: 20px; margin: 0; cursor: pointer; accent-color: var(--accent); }
+.fin-op.sel { background: var(--accent-soft) !important; }
+.fin-day-all { display: inline-flex; align-items: center; gap: 8px; font-size: var(--sa-small); color: var(--muted); cursor: pointer; white-space: nowrap; }
+.fin-items { font-size: var(--sa-cap); color: var(--text, inherit); overflow-wrap: anywhere; }
+.fin-items::before { content: '📦 '; }
+.fin-selbar { position: sticky; bottom: 12px; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 14px 18px; background: #fff; border: 1px solid var(--accent); border-radius: 14px; box-shadow: 0 10px 28px rgba(16, 24, 40, .16); font-size: var(--sa-body); }
+.fin-selbar b { font-variant-numeric: tabular-nums; }
+.fin-selbar .input { font-size: var(--sa-body); padding: 8px 10px; width: auto; flex: 0 0 auto; }
+.fin-selbar .fin-seg button { font-size: var(--sa-cap); }
+.fin-items-box { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; background: var(--fin-row, #f8f9fb); border: 1px solid var(--border); border-radius: 12px; }
+.fin-items-box > span { font-size: var(--sa-small); color: var(--muted); }
+.fin-item-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; gap: 10px; align-items: center; }
+.fin-item-row .input { font-size: var(--sa-body); padding: 8px 10px; width: 100%; box-sizing: border-box; min-width: 0; }
+.fin-item-row small { grid-column: 1 / -1; margin-top: -4px; font-size: var(--sa-small); color: var(--muted); overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+  .fin-op { grid-template-columns: 44px minmax(0, 1fr) auto; }
+  .fin-selbar { bottom: 8px; padding: 12px; }
+  .fin-item-row { grid-template-columns: minmax(0, 1fr) 90px auto; }
+}

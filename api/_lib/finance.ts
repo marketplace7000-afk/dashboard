@@ -24,7 +24,8 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   OP_STATUSES, dealCalc, investorSchedule, isDate, loanCalc, loanSchedule, monthView, mskToday, summary,
-  type DealCalc, type FinOp, type FinSettings, type InvestorDeal, type InvestorMove, type Loan, type MoveKind, type NewOp, type OpStatus,
+  addMonths, dayNum, dayStr,
+  type DealCalc, type FinOp, type FinSettings, type InvestorDeal, type InvestorMove, type Loan, type MoveKind, type NewOp, type OpItem, type OpStatus,
 } from '../../shared/finance';
 
 let DatabaseSync: any = null;
@@ -58,6 +59,9 @@ export function finDb(): any {
       amount REAL NOT NULL DEFAULT 0, received REAL NOT NULL DEFAULT 0, price TEXT NOT NULL DEFAULT '', term TEXT NOT NULL DEFAULT '', how TEXT NOT NULL DEFAULT '',
       payment REAL NOT NULL DEFAULT 0, debt REAL NOT NULL DEFAULT 0, last_date TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Действует', comment TEXT NOT NULL DEFAULT '');
     CREATE TABLE IF NOT EXISTS fin_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, who TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL);
+    -- товары строки закупки (21.11): артикул и штуки; столбцов календаря не добавляем
+    CREATE TABLE IF NOT EXISTS fin_op_item (op_id INTEGER NOT NULL, pos INTEGER NOT NULL, article TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', qty INTEGER NOT NULL,
+      PRIMARY KEY (op_id, pos));
   `);
   return db;
 }
@@ -81,7 +85,16 @@ const loanParams = (l: Loan) => ({ id: l.id, lender: l.lender, contract: l.contr
 // ─── чтение ────────────────────────────────────────────────────────────────
 const rowOp = (r: any): FinOp => ({ id: r.id, date: r.date, type: r.type, cat: r.cat, descr: r.descr, plan: r.plan, fact: r.fact, status: r.status, account: r.account,
   source: r.source, resp: r.resp, comment: r.comment, key: r.key, updatedAt: r.updated_at, updatedBy: r.updated_by });
-export const allOps = (): FinOp[] => finDb().prepare('SELECT * FROM fin_op ORDER BY date, id').all().map(rowOp);
+function itemsByOp(opId?: number): Map<number, OpItem[]> {
+  const rows = (opId === undefined ? finDb().prepare('SELECT * FROM fin_op_item ORDER BY op_id, pos').all()
+    : finDb().prepare('SELECT * FROM fin_op_item WHERE op_id = ? ORDER BY pos').all(opId)) as Array<{ op_id: number; article: string; name: string; qty: number }>;
+  const m = new Map<number, OpItem[]>();
+  for (const r of rows) { const l = m.get(r.op_id) ?? []; l.push({ article: r.article, name: r.name, qty: r.qty }); m.set(r.op_id, l); }
+  return m;
+}
+const withItems = (o: FinOp, m: Map<number, OpItem[]>): FinOp => { const it = m.get(o.id); return it ? { ...o, items: it } : o; };
+export const allOps = (): FinOp[] => { const m = itemsByOp(); return finDb().prepare('SELECT * FROM fin_op ORDER BY date, id').all().map(rowOp).map((o: FinOp) => withItems(o, m)); };
+const oneOp = (id: number | bigint): FinOp => { const o = rowOp(finDb().prepare('SELECT * FROM fin_op WHERE id = ?').get(id)); return withItems(o, itemsByOp(o.id)); };
 
 export function getSettings(): FinSettings {
   const m = new Map<string, string>(finDb().prepare('SELECT k, v FROM fin_setting').all().map((r: any) => [r.k, r.v]));
@@ -141,26 +154,111 @@ const INS = `INSERT INTO fin_op (date, type, cat, descr, plan, fact, status, acc
 const params = (o: Omit<FinOp, 'id'>, who: string) => ({ date: o.date, type: o.type, cat: o.cat, descr: o.descr, plan: o.plan, fact: o.fact, status: o.status, account: o.account,
   source: o.source, resp: o.resp, comment: o.comment, key: o.key, updated_at: now(), updated_by: who });
 
+/** Товары строки: массив {article, name?, qty}. null — не трогать (агент и старые клиенты шлют строку без товаров). */
+function cleanItems(v: unknown): OpItem[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: OpItem[] = [];
+  for (const x of v.slice(0, 50)) {
+    const article = String((x as any)?.article ?? '').trim().slice(0, 120); if (!article) continue;
+    const qty = Math.round(Number((x as any)?.qty));
+    if (!(qty > 0 && qty < 10_000_000)) throw new Error(`штук у «${article}» — целое число больше нуля`);
+    out.push({ article, name: String((x as any)?.name ?? '').trim().slice(0, 200), qty });
+  }
+  return out;
+}
+function writeItems(opId: number, items: OpItem[]) {
+  finDb().prepare('DELETE FROM fin_op_item WHERE op_id = ?').run(opId);
+  const st = finDb().prepare('INSERT INTO fin_op_item (op_id, pos, article, name, qty) VALUES (?, ?, ?, ?, ?)');
+  items.forEach((it, i) => st.run(opId, i, it.article, it.name, it.qty));
+}
+
 export function saveOp(body: any, who: string): FinOp {
   const id = Number(body?.id) || 0;
   const o = cleanOp(body);
+  const items = cleanItems(body?.items);
   rememberNames(o);
   if (!id) {
     if (!o.source) o.source = who;
-    const r = finDb().prepare(INS).run(params(o, who));
-    const saved = rowOp(finDb().prepare('SELECT * FROM fin_op WHERE id = ?').get(r.lastInsertRowid));
+    const saved = tx(() => { const r = finDb().prepare(INS).run(params(o, who)); if (items?.length) writeItems(Number(r.lastInsertRowid), items); return oneOp(r.lastInsertRowid); });
     log(who, 'op.add', saved); return saved;
   }
   const old = finDb().prepare('SELECT * FROM fin_op WHERE id = ?').get(id); if (!old) throw new Error('строка уже удалена — обновите страницу');
+  const oldOp = oneOp(id);
   o.key = old.key; o.source = old.source || o.source;   // ключ агента и «кто внёс» не меняются из интерфейса
-  finDb().prepare(`UPDATE fin_op SET date=@date, type=@type, cat=@cat, descr=@descr, plan=@plan, fact=@fact, status=@status, account=@account, source=@source,
-    resp=@resp, comment=@comment, key=@key, updated_at=@updated_at, updated_by=@updated_by WHERE id=@id`).run({ ...params(o, who), id });
-  const saved = rowOp(finDb().prepare('SELECT * FROM fin_op WHERE id = ?').get(id));
-  log(who, 'op.edit', { from: rowOp(old), to: saved }); return saved;
+  const saved = tx(() => {
+    finDb().prepare(`UPDATE fin_op SET date=@date, type=@type, cat=@cat, descr=@descr, plan=@plan, fact=@fact, status=@status, account=@account, source=@source,
+      resp=@resp, comment=@comment, key=@key, updated_at=@updated_at, updated_by=@updated_by WHERE id=@id`).run({ ...params(o, who), id });
+    if (items) writeItems(id, items);
+    return oneOp(id);
+  });
+  log(who, 'op.edit', { from: oldOp, to: saved }); return saved;
 }
 export function deleteOp(id: number, who: string): void {
   const old = finDb().prepare('SELECT * FROM fin_op WHERE id = ?').get(id); if (!old) return;
-  finDb().prepare('DELETE FROM fin_op WHERE id = ?').run(id); log(who, 'op.delete', rowOp(old));
+  const was = oneOp(id);
+  tx(() => { finDb().prepare('DELETE FROM fin_op_item WHERE op_id = ?').run(id); finDb().prepare('DELETE FROM fin_op WHERE id = ?').run(id); });
+  log(who, 'op.delete', was);
+}
+
+/**
+ * Копировать / переместить выбранные строки (21.11, как в Google-таблице).
+ * Куда: точная дата `to` или сдвиг от даты каждой строки `shift` = 'week' | 'month' (то же число).
+ * Копия — статус «План», без факта и без ключа агента, товары закупки копируются.
+ * Перенос меняет только дату (статус и ключ остаются).
+ */
+export function copyOps(body: any, who: string): { ops: FinOp[]; dates: string[] } {
+  const ids = (Array.isArray(body?.ids) ? body.ids : []).map(Number).filter((n: number) => n > 0);
+  if (!ids.length) throw new Error('не выбрано ни одной строки');
+  if (ids.length > 300) throw new Error('за раз — не больше 300 строк');
+  const shift = body?.shift === 'week' || body?.shift === 'month' ? body.shift : null;
+  if (!shift && !isDate(body?.to)) throw new Error('укажите дату');
+  const move = body?.mode === 'move';
+  const target = (d: string) => (shift === 'week' ? dayStr(dayNum(d) + 7) : shift === 'month' ? addMonths(d, 1) : String(body.to));
+  const out: FinOp[] = [];
+  tx(() => {
+    for (const id of ids) {
+      const src = finDb().prepare('SELECT * FROM fin_op WHERE id = ?').get(id); if (!src) throw new Error('строка уже удалена — обновите страницу');
+      const s = oneOp(id); const date = target(s.date);
+      if (move) {
+        finDb().prepare('UPDATE fin_op SET date = ?, updated_at = ?, updated_by = ? WHERE id = ?').run(date, now(), who, id);
+        out.push(oneOp(id));
+      } else {
+        const r = finDb().prepare(INS).run(params({ ...s, date, status: 'План', fact: null, key: null, source: who }, who));
+        if (s.items?.length) writeItems(Number(r.lastInsertRowid), s.items);
+        out.push(oneOp(r.lastInsertRowid));
+      }
+    }
+  });
+  log(who, move ? 'op.move' : 'op.copy', { ids, to: body?.to ?? null, shift, result: out.map(o => ({ id: o.id, date: o.date })) });
+  return { ops: out, dates: [...new Set(out.map(o => o.date))].sort() };
+}
+
+/**
+ * Для раздела «Закупки» (21.11): строки закупки с товарами.
+ *  • open — не оплаченные (не «Исполнено» / «Отменено» / «Перенесено»): партия придёт через срок доставки после даты оплаты;
+ *  • paid — «Исполнено» за последние `days` дней (по дате строки): товар уже заказан, пока не появится в «В доставке» или в трекере.
+ * Строки без товаров сюда не попадают — «Закупки» понимают их по тексту (shared/purchase.ts).
+ */
+export type PurchaseOpItems = { opId: number; date: string; status: OpStatus; paid: boolean; plan: number; fact: number | null; cat: string; descr: string; comment: string; items: OpItem[] };
+export function purchaseItems(today = mskToday(), days = 60): PurchaseOpItems[] {
+  const from = dayStr(dayNum(today) - days);
+  return allOps()
+    .filter(o => o.items?.length && o.status !== 'Отменено' && o.status !== 'Перенесено' && (o.status !== 'Исполнено' || o.date >= from))
+    .map(o => ({ opId: o.id, date: o.date, status: o.status, paid: o.status === 'Исполнено', plan: o.plan, fact: o.fact, cat: o.cat, descr: o.descr, comment: o.comment, items: o.items! }));
+}
+
+/** Каталог для поиска товара в окне закупки: артикулы таблицы «Склад» + уже встречавшиеся в закупках. */
+async function catalog(): Promise<{ items: Array<{ article: string; name: string }>; error?: string }> {
+  const seen = new Map<string, string>();
+  for (const r of finDb().prepare('SELECT article, name FROM fin_op_item ORDER BY rowid DESC').all() as Array<{ article: string; name: string }>) if (!seen.has(r.article)) seen.set(r.article, r.name);
+  let error: string | undefined;
+  try {
+    const { getStockSheet } = await import('./stockSheet');
+    const sh = await getStockSheet();
+    if (sh.error) error = sh.error;
+    for (const a of Object.keys(sh.items)) if (!seen.has(a)) seen.set(a, '');
+  } catch (e) { error = (e as Error).message; console.warn('[finance] каталог «Склада» не прочитан:', error); }
+  return { items: [...seen.entries()].map(([article, name]) => ({ article, name })).sort((a, b) => a.article.localeCompare(b.article)), error };
 }
 function insertOps(list: NewOp[], who: string) { const st = finDb().prepare(INS); for (const o of list) st.run(params(o, who)); }
 
@@ -278,7 +376,7 @@ export function importAll(p: ImportPayload, who: string, force = false) {
   const n = (finDb().prepare('SELECT COUNT(*) AS n FROM fin_op').get() as { n: number }).n;
   if (n && !force) throw new Error(`в базе уже ${n} строк — перенос делается только в пустую базу`);
   tx(() => {
-    for (const t of ['fin_op', 'fin_deal', 'fin_move', 'fin_loan', 'fin_list', 'fin_setting']) finDb().exec(`DELETE FROM ${t}`);
+    for (const t of ['fin_op_item', 'fin_op', 'fin_deal', 'fin_move', 'fin_loan', 'fin_list', 'fin_setting']) finDb().exec(`DELETE FROM ${t}`);
     const st = finDb().prepare(INS); for (const o of p.ops) st.run(params(cleanOp(o), o.source || who));
     const sd = finDb().prepare(UPSERT_DEAL); for (const d of p.deals) sd.run(dealParams(d));
     const sm = finDb().prepare('INSERT INTO fin_move (date, deal_id, kind, amount, comment, source) VALUES (?, ?, ?, ?, ?, ?)'); for (const m of p.moves) sm.run(m.date, m.dealId, m.kind, m.amount, m.comment, m.source);
@@ -355,10 +453,15 @@ export async function handleFinance(parts: string[], method: string, query: any,
       if (a === 'summary') return { status: 200, json: { ok: true, summary: summary(allOps(), getSettings(), dealsCalc(), today, lastMonth()) } };
       if (a === 'investors') return { status: 200, json: { ok: true, deals: dealsCalc(), today } };
       if (a === 'loans') return { status: 200, json: { ok: true, loans: loansCalc(), today } };
+      if (a === 'catalog') return { status: 200, json: { ok: true, ...(await catalog()) } };
+      if (a === 'purchases') return { status: 200, json: { ok: true, today, purchases: purchaseItems(today, Number(query?.days) > 0 ? Math.min(365, Number(query.days)) : 60) } };
       if (a === 'log') return { status: 200, json: { ok: true, log: finDb().prepare('SELECT * FROM fin_log ORDER BY id DESC LIMIT 200').all() } };
     }
     if (method === 'POST') {
       if (a === 'op' && c === 'delete') { deleteOp(Number(b.id), who); return { status: 200, json: { ok: true } }; }
+      // агенту (ключ FIN_AGENT_KEY, route.ts пропускает ему POST op/*) копировать и переносить строки нельзя
+      if (a === 'op' && c === 'copy' && who === 'Агент финансов') return { status: 403, json: { error: 'forbidden', reason: 'агент строки не копирует и не переносит' } };
+      if (a === 'op' && c === 'copy') return { status: 200, json: { ok: true, ...copyOps(b, who) } };
       if (a === 'op') return { status: 200, json: { ok: true, op: saveOp(b.op ?? b, who) } };
       if (a === 'lists') return { status: 200, json: { ok: true, lists: editList(b, who) } };
       if (a === 'settings') return { status: 200, json: { ok: true, settings: setSettings(b, who) } };

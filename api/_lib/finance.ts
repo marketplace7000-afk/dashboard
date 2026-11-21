@@ -106,9 +106,42 @@ export function setSettings(p: Partial<FinSettings>, who: string): FinSettings {
   if (p.balanceDate !== undefined) { if (!isDate(p.balanceDate)) throw new Error('дата остатка — не дата'); next.balanceDate = p.balanceDate; }
   if (p.minBalance !== undefined) { if (!Number.isFinite(Number(p.minBalance))) throw new Error('порог — не число'); next.minBalance = Number(p.minBalance); }
   const st = finDb().prepare('INSERT INTO fin_setting (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v');
-  tx(() => { st.run('balance', String(next.balance)); st.run('balanceDate', next.balanceDate); st.run('minBalance', String(next.minBalance)); });
+  tx(() => {
+    st.run('balance', String(next.balance)); st.run('balanceDate', next.balanceDate); st.run('minBalance', String(next.minBalance));
+    if (p.balance !== undefined) st.run('balanceAt', now());   // когда остаток последний раз сверяли (агент, кнопка, раз в час)
+  });
   log(who, 'settings', { from: cur, to: next });
   return next;
+}
+
+/**
+ * Остаток на счетах из финучёта (21.11): лист «ДДС», строка «Остаток на конец периода в рублях» (та же, что берёт агент).
+ * Кнопка «Обновить» у остатка и раз в час по сетке (SLOTS.finBalance в server.ts). Таблица — только чтение.
+ */
+const FIN_LEDGER_ID = process.env.FIN_LEDGER_SHEET_ID || '1yedJFus6SQKp1J3AkXUxM6pTskHtmLo18yyQjIGADjk';
+let balanceBusy: Promise<unknown> | null = null;
+export function balanceAt(): string | null {
+  const r = finDb().prepare(`SELECT v FROM fin_setting WHERE k = 'balanceAt'`).get() as { v: string } | undefined;
+  return r?.v ?? null;
+}
+export async function refreshBalance(who: string): Promise<{ settings: FinSettings; at: string; changed: boolean }> {
+  if (balanceBusy) await balanceBusy.catch(() => undefined);
+  const job = (async () => {
+    const { readSheetRange } = await import('./googleSheetsApi');
+    const rows = await readSheetRange(FIN_LEDGER_ID, 'ДДС!A1:B10');
+    const row = rows.find(r => /Остаток на конец периода в рублях/i.test(String(r?.[0] ?? '')));
+    const raw = row?.[1];
+    const bal = typeof raw === 'number' ? raw : Number(String(raw ?? '').replace(/[\s ₽]/g, '').replace(',', '.'));
+    if (!row || !Number.isFinite(bal) || bal === 0) throw new Error('в финучёте не нашёл остаток (лист «ДДС», «Остаток на конец периода в рублях»)');
+    const cur = getSettings(); const today = mskToday(); const value = Math.round(bal);
+    const changed = cur.balance !== value || cur.balanceDate !== today;
+    const settings = changed ? setSettings({ balance: value, balanceDate: today }, who) : cur;
+    const at = now();
+    finDb().prepare(`INSERT INTO fin_setting (k, v) VALUES ('balanceAt', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`).run(at);
+    return { settings, at, changed };
+  })();
+  balanceBusy = job;
+  try { return await job; } finally { if (balanceBusy === job) balanceBusy = null; }
 }
 
 const rowDeal = (r: any): InvestorDeal => ({ id: r.id, person: r.person, name: r.name, start: r.start, amount: r.amount, rate: r.rate, term: r.term, mode: r.mode, status: r.status, fromId: r.from_id, comment: r.comment });
@@ -123,7 +156,7 @@ const rowLoan = (r: any): Loan => ({ id: r.id, lender: r.lender, contract: r.con
 export function meta() {
   const lists = finDb().prepare('SELECT kind, name, extra FROM fin_list ORDER BY kind, rowid').all() as Array<{ kind: string; name: string; extra: string }>;
   return {
-    settings: getSettings(), today: mskToday(), statuses: OP_STATUSES,
+    settings: getSettings(), balanceAt: balanceAt(), today: mskToday(), statuses: OP_STATUSES,
     categories: lists.filter(l => l.kind === 'cat').map(l => ({ name: l.name, type: l.extra === 'in' ? 'in' : 'out' })),
     accounts: lists.filter(l => l.kind === 'account').map(l => l.name),
     people: lists.filter(l => l.kind === 'person').map(l => l.name),
@@ -465,6 +498,7 @@ export async function handleFinance(parts: string[], method: string, query: any,
       if (a === 'op') return { status: 200, json: { ok: true, op: saveOp(b.op ?? b, who) } };
       if (a === 'lists') return { status: 200, json: { ok: true, lists: editList(b, who) } };
       if (a === 'settings') return { status: 200, json: { ok: true, settings: setSettings(b, who) } };
+      if (a === 'balance' && c === 'refresh') return { status: 200, json: { ok: true, ...(await refreshBalance(who)) } };
       if (a === 'investors' && c === 'deal') return { status: 200, json: { ok: true, deal: saveDeal(b.deal ?? b, who) } };
       if (a === 'investors' && c === 'move') return { status: 200, json: { ok: true, deal: addMove(b.move ?? b, who) } };
       if (a === 'investors' && c === 'prolong') return { status: 200, json: { ok: true, deal: prolong(b, who) } };

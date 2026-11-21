@@ -414,3 +414,36 @@
   .fin-selbar { bottom: 8px; padding: 12px; }
   .fin-item-row { grid-template-columns: minmax(0, 1fr) 90px auto; }
 }
+
+/* 21.11 вечер: строки календаря ниже — всё в одну строку, видимая черта между операциями, без пустого поля справа */
+.fin-op { grid-template-columns: 52px minmax(0, 1fr) 160px 172px auto; gap: 12px; padding: 6px 16px 6px 20px; border-top: 1px solid #cfd6e0; }
+.fin-day > header + .fin-op { border-top: 0; }
+.fin-what { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.35; }
+.fin-what b { font-size: var(--sa-body); overflow-wrap: normal; }
+.fin-rest { font-size: var(--sa-cap); color: var(--muted); }
+.fin-sum { font-size: var(--sa-body); }
+.fin-sum .muted { display: none; }
+.fin-pill { padding: 3px 10px; }
+.sa.fin .fin-tools { gap: 6px; }
+.sa.fin .fin-tools .btn { font-size: 18px; padding: 5px 9px; }
+.fin-day > header { padding-top: 8px; padding-bottom: 8px; }
+.fin-date b { font-size: 26px; }
+.fin-add { padding: 4px 12px !important; font-size: 20px !important; }
+.fin-days { gap: 12px; }
+@media (max-width: 900px) {
+  .fin-op { grid-template-columns: 44px minmax(0, 1fr) auto; padding: 8px 12px; }
+  .fin-what { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .sa.fin .fin-tools .btn { min-width: 44px; min-height: 44px; }
+}
+.fin-balbtns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 4px; }
+.fin-balbtns .btn { font-size: var(--sa-cap); background: #fff; }
+.fin-kpi .n.bad { color: var(--bad); }
+.fin-balcard .spin { animation: fin-spin 1s linear infinite; }
+@keyframes fin-spin { to { transform: rotate(360deg); } }
+/* цифры месяца ниже и в одну строку, чтобы календарю оставалось больше места */
+.fin-kpis { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.fin-kpi { padding: 10px 16px; gap: 2px; }
+.fin-kpi b, .fin-kpi.main b { font-size: clamp(22px, 1.75vw, 30px); white-space: nowrap; overflow-wrap: normal; }
+.fin-kpi .l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fin-balbtns { margin-top: 2px; }
+.fin-balbtns .btn { padding: 4px 10px; }

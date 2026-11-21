@@ -90,6 +90,11 @@ process.env.CACHE_DIR = dir;
     f.editList({ kind: 'cat', action: 'delete', name: 'Новая статья' }, 'проверка');
     check('статья убрана из списка, строка осталась', [f.lists().cat.some(i => i.name === 'Новая статья'), f.allOps().some(o => o.cat === 'Новая статья')], [false, true]);
 
+    // остаток: время сверки (21.11) — ставится при записи остатка, порог его не трогает
+    f.setSettings({ minBalance: 500 }, 'проверка');
+    f.setSettings({ balance: 1234 }, 'проверка');
+    check('остаток: время сверки обновляется при записи остатка', [typeof f.balanceAt(), f.meta().balanceAt === f.balanceAt()], ['string', true]);
+
     // товары закупки (21.11)
     const pu = f.saveOp({ date: '2026-11-25', type: 'out', cat: 'Закупка товара — поставщик', descr: 'Фабрика', plan: 2_100_000, status: 'План',
       items: [{ article: 'S2000-PRO', name: 'S2000 PRO', qty: 60 }, { article: 'ULTRA2-KRUG', qty: '400' }] }, 'проверка');

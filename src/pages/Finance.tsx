@@ -33,7 +33,7 @@ function formFromHash(): Partial<FinOp> | null {
   return { type: 'out', status: 'План', cat: PURCHASE_CAT, items, ...(date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? { date } : {}) };
 }
 
-type Meta = { settings: { balance: number; balanceDate: string; minBalance: number }; today: string; categories: Array<{ name: string; type: OpType }>; accounts: string[]; people: string[]; parties: string[]; lastMonth: string };
+type Meta = { settings: { balance: number; balanceDate: string; minBalance: number }; balanceAt?: string | null; today: string; categories: Array<{ name: string; type: OpType }>; accounts: string[]; people: string[]; parties: string[]; lastMonth: string };
 type Tab = 'summary' | 'calendar' | 'investors' | 'loans' | 'lists';
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
@@ -87,14 +87,10 @@ export function Finance() {
         {([['summary', 'Сводка'], ['calendar', 'Календарь'], ['investors', 'Инвесторы'], ['loans', 'Кредиты'], ['lists', 'Справочники']] as Array<[Tab, string]>).map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => go(k)}>{l}</button>
         ))}
-        <span className="fin-spacer" />
-        {meta.data && <span className="fin-bal" title="Остаток на счетах из финучёта; агент обновляет его каждое утро">
-          На счетах {ddmm(meta.data.settings.balanceDate)}: <b>{rub(meta.data.settings.balance)}</b>
-        </span>}
       </div>
       {meta.err && <div className="fin-alert">Не удалось загрузить раздел: {meta.err}</div>}
       {meta.data && tab === 'summary' && <SummaryTab onOpenMonth={openMonth} meta={meta.data} onMetaChange={meta.reload} />}
-      {meta.data && tab === 'calendar' && <CalendarTab month={month} setMonth={setMonth} meta={meta.data} linkForm={linkForm} onLinkFormUsed={() => setLinkForm(null)} />}
+      {meta.data && tab === 'calendar' && <CalendarTab month={month} setMonth={setMonth} meta={meta.data} linkForm={linkForm} onLinkFormUsed={() => setLinkForm(null)} onMetaChange={meta.reload} />}
       {meta.data && tab === 'investors' && <InvestorsTab meta={meta.data} onOpenMonth={openMonth} />}
       {meta.data && tab === 'loans' && <LoansTab meta={meta.data} onOpenMonth={openMonth} />}
       {meta.data && tab === 'lists' && <ListsTab onChange={meta.reload} />}
@@ -120,8 +116,7 @@ function SummaryTab({ onOpenMonth, meta, onMetaChange }: { onOpenMonth: (m: stri
       ) : <div className="fin-ok big">Кассовых разрывов в ближайшие 2,5 месяца нет.</div>}
 
       <div className="fin-kpis">
-        <div className="fin-kpi main"><span className="l">Остаток на счетах на {ddmmyy(s.settings.balanceDate)}</span><b>{rub(s.settings.balance)}</b>
-          <span className="n">из финучёта · <button className="fin-link" onClick={() => setEdit(true)}>изменить</button></span></div>
+        <BalanceCard meta={meta} onRefreshed={() => { void reload(); onMetaChange(); }} onEdit={() => setEdit(true)} />
         <div className="fin-kpi"><span className="l">Минимум за 30 дней</span><b className={sigClass(s.minNext30?.end ?? null, min)}>{rub(s.minNext30?.end)}</b><span className="n">{s.minNext30 ? `${ddmm(s.minNext30.date)}, ${wd(s.minNext30.date)}` : ''}</span></div>
         <div className="fin-kpi"><span className="l">Платежи по кредитам впереди</span><b>{rub(s.loansLeft)}</b><span className="n">за 30 дней: {rub(s.loansNext30)}</span></div>
         <div className="fin-kpi"><span className="l">Должны инвесторам</span><b>{rub(s.investors.owed)}</b><span className="n">тело {rub(s.investors.body)} · % {rub(s.investors.remInt)}</span></div>
@@ -165,6 +160,34 @@ function SummaryTab({ onOpenMonth, meta, onMetaChange }: { onOpenMonth: (m: stri
   );
 }
 
+/**
+ * Остаток на счетах (21.11): главная цифра раздела. Берётся из финучёта (лист «ДДС») раз в час и агентом;
+ * «Обновить» тянет его из таблицы сразу.
+ */
+function BalanceCard({ meta, onRefreshed, onEdit }: { meta: Meta; onRefreshed: () => void; onEdit?: () => void }) {
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
+  const at = meta.balanceAt ? new Date(meta.balanceAt) : null;
+  const atText = at ? at.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(',', ' в') : ddmm(meta.settings.balanceDate);
+  const refresh = async () => {
+    setBusy(true); setErr('');
+    try { await apiPost('/api/finance/balance/refresh', {}); onRefreshed(); } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="fin-kpi main fin-balcard">
+      <span className="l">Остаток на счетах</span>
+      <b>{rub(meta.settings.balance)}</b>
+      <span className="n">из финучёта · сверено {atText}</span>
+      <div className="fin-balbtns">
+        <button className="btn btn-sm" disabled={busy} onClick={() => void refresh()} title="Забрать остаток из таблицы финучёта прямо сейчас">
+          <ArrowClockwiseIcon className={busy ? 'spin' : ''} /> {busy ? 'Обновляю…' : 'Обновить'}
+        </button>
+        {onEdit && <button className="fin-link" onClick={onEdit}>изменить вручную</button>}
+      </div>
+      {err && <span className="n bad">Не обновилось: {err}</span>}
+    </div>
+  );
+}
+
 function SettingsForm({ meta, onClose, onSaved }: { meta: Meta; onClose: () => void; onSaved: () => void }) {
   const [f, setF] = useState({ balance: String(meta.settings.balance), balanceDate: meta.settings.balanceDate, minBalance: String(meta.settings.minBalance) });
   const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
@@ -189,7 +212,7 @@ function SettingsForm({ meta, onClose, onSaved }: { meta: Meta; onClose: () => v
 
 // ═══ Календарь ═════════════════════════════════════════════════════════════
 type Filter = 'all' | 'in' | 'out' | 'open';
-function CalendarTab({ month, setMonth, meta, linkForm, onLinkFormUsed }: { month: string; setMonth: (m: string) => void; meta: Meta; linkForm?: Partial<FinOp> | null; onLinkFormUsed?: () => void }) {
+function CalendarTab({ month, setMonth, meta, linkForm, onLinkFormUsed, onMetaChange }: { month: string; setMonth: (m: string) => void; meta: Meta; linkForm?: Partial<FinOp> | null; onLinkFormUsed?: () => void; onMetaChange?: () => void }) {
   const { data, err, busy, reload } = useLoad<{ view: MonthView }>(`/api/finance/month?m=${month}`);
   const [form, setForm] = useState<Partial<FinOp> | null>(null);
   useEffect(() => { if (linkForm) { setForm({ date: meta.today, ...linkForm }); onLinkFormUsed?.(); } }, [linkForm]);
@@ -265,6 +288,7 @@ function CalendarTab({ month, setMonth, meta, linkForm, onLinkFormUsed }: { mont
       {err && <div className="fin-alert">Месяц не загрузился: {err}</div>}
       {v && (
         <div className="fin-kpis">
+          <BalanceCard meta={meta} onRefreshed={() => { void reload(); onMetaChange?.(); }} />
           <div className="fin-kpi"><span className="l">Приход за месяц</span><b className="in">{rub(v.totals.in)}</b></div>
           <div className="fin-kpi"><span className="l">Расход за месяц</span><b>{rub(v.totals.out)}</b></div>
           <div className="fin-kpi"><span className="l">Сальдо</span><b className={v.totals.net < 0 ? 'bad' : 'good'}>{rub(v.totals.net)}</b></div>
@@ -312,12 +336,16 @@ function CalendarTab({ month, setMonth, meta, linkForm, onLinkFormUsed }: { mont
                     <input type="checkbox" checked={sel.has(o.id)} onChange={e => toggle([o.id], e.target.checked)} aria-label={`Выбрать «${o.cat || o.descr}»`} />
                     <span className={`fin-dot ${o.type}`} aria-hidden />
                   </span>
-                  <div className="fin-what" onClick={() => setForm(o)} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') setForm(o); }}>
-                    <b>{o.cat || o.descr}</b>
-                    <span className="muted">{o.cat ? o.descr : ''}{o.account ? `${o.cat && o.descr ? ' · ' : ''}${o.account}` : ''}</span>
-                    {o.items?.length ? <span className="fin-items">{itemsLabel(o.items)}</span> : null}
-                    {o.comment && <span className="fin-com">{o.comment}</span>}
-                  </div>
+                  {/* 21.11: всё в одну строку — операция жирным, дальше описание · счёт · товары · комментарий; целиком — в подсказке и в окне */}
+                  {(() => {
+                    const rest = [o.cat ? o.descr : '', o.account, o.items?.length ? '📦 ' + itemsLabel(o.items) : '', o.comment].filter(Boolean);
+                    return (
+                      <div className="fin-what" onClick={() => setForm(o)} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') setForm(o); }}
+                        title={[o.cat || o.descr, ...rest].join('\n')}>
+                        <b>{o.cat || o.descr}</b>{rest.length ? <span className="fin-rest"> · {rest.join(' · ')}</span> : null}
+                      </div>
+                    );
+                  })()}
                   <div className={`fin-sum ${o.type}`}>
                     {(() => { const a = o.status === 'Исполнено' && o.fact !== null ? o.fact : o.plan; return `${a ? (o.type === 'in' ? '+' : '−') : ''}${rub(a)}`; })()}
                     {o.status === 'Исполнено' && o.fact !== null && o.fact !== o.plan && <span className="muted">план {rub(o.plan)}</span>}

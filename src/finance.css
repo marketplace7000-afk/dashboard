@@ -400,7 +400,7 @@
 .fin-day-all { display: inline-flex; align-items: center; gap: 8px; font-size: var(--sa-small); color: var(--muted); cursor: pointer; white-space: nowrap; }
 .fin-items { font-size: var(--sa-cap); color: var(--text, inherit); overflow-wrap: anywhere; }
 .fin-items::before { content: '📦 '; }
-.fin-selbar { position: sticky; bottom: 12px; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 14px 18px; background: #fff; border: 1px solid var(--accent); border-radius: 14px; box-shadow: 0 10px 28px rgba(16, 24, 40, .16); font-size: var(--sa-body); }
+.fin-selbar { position: sticky; bottom: 12px; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 14px; background: #fff; border: 1px solid var(--accent); border-radius: 14px; box-shadow: 0 10px 28px rgba(16, 24, 40, .16); font-size: var(--sa-body); }
 .fin-selbar b { font-variant-numeric: tabular-nums; }
 .fin-selbar .input { font-size: var(--sa-body); padding: 8px 10px; width: auto; flex: 0 0 auto; }
 .fin-selbar .fin-seg button { font-size: var(--sa-cap); }
@@ -447,3 +447,5 @@
 .fin-kpi .l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fin-balbtns { margin-top: 2px; }
 .fin-balbtns .btn { padding: 4px 10px; }
+.fin-selbar .fin-del { color: var(--bad); border-color: #f1c4c4; }
+.fin-selbar .fin-del:hover { background: #fdecec; }

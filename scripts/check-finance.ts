@@ -122,6 +122,9 @@ process.env.CACHE_DIR = dir;
     check('копия: агенту нельзя', denied.status, 403);
     f.deleteOp(wk.ops[0].id, 'проверка');
     check('удаление строки убирает и её товары', (f.finDb().prepare('SELECT COUNT(*) AS n FROM fin_op_item WHERE op_id = ?').get(wk.ops[0].id) as { n: number }).n, 0);
+    const twoCopies = f.copyOps({ ids: [pu.id, mv.ops[0].id], to: '2027-02-01' }, 'проверка');
+    const del = await f.handleFinance(['finance', 'op', 'delete'], 'POST', {}, { ids: twoCopies.ops.map(o => o.id) }, 'проверка');
+    check('удаление нескольких строк сразу', [del.status, (del.json as any).deleted, f.allOps().some(o => o.date === '2027-02-01')], [200, 2, false]);
 
     if (process.env.FIN_EXPORT) {
       const p2 = JSON.parse(readFileSync(process.env.FIN_EXPORT, 'utf8'));

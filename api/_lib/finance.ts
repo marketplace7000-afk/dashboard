@@ -491,7 +491,14 @@ export async function handleFinance(parts: string[], method: string, query: any,
       if (a === 'log') return { status: 200, json: { ok: true, log: finDb().prepare('SELECT * FROM fin_log ORDER BY id DESC LIMIT 200').all() } };
     }
     if (method === 'POST') {
-      if (a === 'op' && c === 'delete') { deleteOp(Number(b.id), who); return { status: 200, json: { ok: true } }; }
+      if (a === 'op' && c === 'delete') {
+        // 21.11: несколько строк сразу (галочки в календаре) — { ids: [...] }; одна — { id }
+        const ids = (Array.isArray(b.ids) ? b.ids : [b.id]).map(Number).filter((n: number) => n > 0);
+        if (!ids.length) throw new Error('не выбрано ни одной строки');
+        if (ids.length > 300) throw new Error('за раз — не больше 300 строк');
+        tx(() => { for (const id of ids) deleteOp(id, who); });
+        return { status: 200, json: { ok: true, deleted: ids.length } };
+      }
       // агенту (ключ FIN_AGENT_KEY, route.ts пропускает ему POST op/*) копировать и переносить строки нельзя
       if (a === 'op' && c === 'copy' && who === 'Агент финансов') return { status: 403, json: { error: 'forbidden', reason: 'агент строки не копирует и не переносит' } };
       if (a === 'op' && c === 'copy') return { status: 200, json: { ok: true, ...copyOps(b, who) } };

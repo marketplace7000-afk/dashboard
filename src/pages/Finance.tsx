@@ -228,6 +228,19 @@ function CalendarTab({ month, setMonth, meta, linkForm, onLinkFormUsed, onMetaCh
     const t = setTimeout(() => { document.getElementById(`fin-d-${jumpTo}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }); setJumpTo(null); }, 200);
     return () => clearTimeout(t);
   }, [jumpTo, data]);
+  const deleteSel = async (chosen: FinOp[]) => {
+    if (!sel.size) return;
+    const sum = chosen.reduce((s, o) => s + o.plan, 0);
+    const graph = chosen.filter(o => o.key).length;
+    const days = [...new Set(chosen.map(o => ddmm(o.date)))].join(', ');
+    if (!window.confirm(`Удалить ${sel.size} ${sel.size === 1 ? 'строку' : 'строк(и)'}${days ? ` (${days})` : ''} на ${rub(sum)}?`
+      + (graph ? `\n\n${graph} из них поставлены по графику кредита или вклада — удалятся и из графика.` : '') + '\n\nВернуть их будет нельзя.')) return;
+    setCopyBusy(true);
+    try {
+      const r = await apiPost<{ deleted: number }>('/api/finance/op/delete', { ids: [...sel] });
+      setToast(`Удалено строк: ${r.data.deleted}`); setSel(new Set()); void reload();
+    } catch (e) { setToast('Не удалилось: ' + errText(e)); } finally { setCopyBusy(false); }
+  };
   const copySel = async (mode: 'copy' | 'move', target: { to?: string; shift?: 'week' | 'month' }) => {
     if (!sel.size) return;
     if (!target.shift && !target.to) { setToast('Выберите дату'); return; }
@@ -374,8 +387,9 @@ function CalendarTab({ month, setMonth, meta, linkForm, onLinkFormUsed, onMetaCh
         return (
           <div className="fin-selbar" role="region" aria-label="Выбранные операции">
             <span>Выбрано <b>{sel.size}</b>{chosen.length ? <> · {sum < 0 ? '−' : '+'}{rub(Math.abs(sum))}</> : null}</span>
+            <button className="btn fin-del" disabled={copyBusy} onClick={() => void deleteSel(chosen)} title="Удалить выбранные строки"><TrashIcon /> Удалить</button>
             <span className="fin-spacer" />
-            <span className="muted">Копировать на</span>
+            <span className="muted">Копия:</span>
             <div className="fin-seg">
               <button disabled={copyBusy} onClick={() => void copySel('copy', { shift: 'week' })} title={one ? `на ${ddmm(dayStr(dayNum(one) + 7))}` : 'каждую строку на неделю вперёд'}>+1 неделя</button>
               <button disabled={copyBusy} onClick={() => void copySel('copy', { shift: 'month' })} title={one ? `на ${ddmm(addMonths(one, 1))}` : 'каждую строку на месяц вперёд, то же число'}>+1 месяц</button>

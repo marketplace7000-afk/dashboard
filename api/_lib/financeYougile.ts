@@ -2,7 +2,7 @@
  * Платёжный календарь → YouGile (21.11.2026, решение владельца).
  *
  * Каждый расход календаря (кроме выводов — это приходы) за 3 дня до даты становится задачей
- * на доске «Платежи» в YouGile: название = операция, дедлайн = дата платежа, исполнитель — партнёр.
+ * в колонке «К работе» проекта «Александр» (доска «Бизнес задачи») в YouGile: название = операция, дедлайн = дата платежа, исполнитель — партнёр.
  *   • за 3 дня — задача и первое упоминание в её чате;
  *   • за 2 дня, если строка в календаре всё ещё не «Исполнено», — второе упоминание;
  *   • за 1 день (или день платежа) — третье упоминание и плашка «Критически важно».
@@ -14,8 +14,8 @@
  * (его читает серверный сторож). Ключ — YOUGILE_KEY в .env сервера (вносит владелец через окно, не через чат).
  * Лимит YouGile — 50 запросов в минуту на компанию: держим паузу 1,3 с между запросами.
  *
- * Настройки (.env): YOUGILE_KEY — обязательно; YOUGILE_BOARD (по умолчанию «Платежи»),
- * YOUGILE_PROJECT (по умолчанию «Александр» — где искать доску, если досок с таким именем несколько),
+ * Настройки (.env): YOUGILE_KEY — обязательно; YOUGILE_PROJECT (по умолчанию «Александр»), YOUGILE_COLUMN (по умолчанию «К работе»),
+ * YOUGILE_BOARD — если колонок с таким именем в проекте несколько,
  * YOUGILE_ASSIGNEE — почта исполнителя (иначе ищем сотрудника по имени «Александр»).
  */
 import { dayNum, mskToday, type FinOp } from '../../shared/finance';
@@ -53,32 +53,33 @@ async function yg(method: string, path: string, body?: unknown): Promise<any> {
 }
 const list = async (path: string): Promise<any[]> => ((await yg('GET', path))?.content ?? []).filter((x: any) => !x.deleted);
 
-/** Доска, первая колонка, исполнитель, плашка «Критически важно» (создаётся один раз, если её нет). */
+/**
+ * Куда ставить задачи: колонка «К работе» (регистр не важен) на досках проекта «Александр» — сейчас это
+ * доска «Бизнес задачи». Исполнитель — Александр. Плашка — состояние «критично/критически важно» у любого
+ * стикера компании (у владельца это «Приоритет: критично важно»); нет такого — создаём «Важность: Критически важно».
+ */
+const norm = (s: unknown) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+const IS_CRITICAL = /^критич\S*\s+важно$/i;
 let ctxCache: { at: number; ctx: Ctx } | null = null;
 async function context(): Promise<Ctx> {
   if (ctxCache && Date.now() - ctxCache.at < 6 * 3_600_000) return ctxCache.ctx;
-  const boardName = process.env.YOUGILE_BOARD || 'Платежи', projName = process.env.YOUGILE_PROJECT || 'Александр';
-  let boards = (await list(`/boards?title=${encodeURIComponent(boardName)}&limit=100`)).filter(b => String(b.title).trim().toLowerCase() === boardName.toLowerCase());
-  if (boards.length > 1) {
-    const projects = (await list(`/projects?title=${encodeURIComponent(projName)}&limit=100`)).map(p => p.id);
-    const inProj = boards.filter(b => projects.includes(b.projectId)); if (inProj.length) boards = inProj;
-  }
-  if (!boards.length) throw new Error(`в YouGile нет доски «${boardName}»`);
-  if (boards.length > 1) throw new Error(`в YouGile несколько досок «${boardName}» — уточните YOUGILE_PROJECT`);
-  const board = boards[0];
-  const cols = await list(`/columns?boardId=${board.id}&limit=100`);
-  if (!cols.length) throw new Error(`на доске «${boardName}» нет ни одной колонки`);
+  const projName = process.env.YOUGILE_PROJECT || 'Александр', colName = process.env.YOUGILE_COLUMN || 'К работе', boardName = process.env.YOUGILE_BOARD || '';
+  const projects = (await list('/projects?limit=1000')).filter(p => norm(p.title) === norm(projName));
+  if (projects.length !== 1) throw new Error(`проектов «${projName}» в YouGile: ${projects.length}`);
+  const boards = (await list(`/boards?projectId=${projects[0].id}&limit=1000`)).filter(b => !boardName || norm(b.title) === norm(boardName));
+  const cols: any[] = [];
+  for (const b of boards) for (const c of await list(`/columns?boardId=${b.id}&limit=100`)) if (norm(c.title) === norm(colName)) cols.push({ ...c, board: b });
+  if (cols.length !== 1) throw new Error(`колонок «${colName}» в проекте «${projName}»: ${cols.length}${cols.length > 1 ? ' — укажите YOUGILE_BOARD' : ''}`);
+  const board = cols[0].board;
 
   const users = await list('/users?limit=1000');
-  const mail = (process.env.YOUGILE_ASSIGNEE || '').trim().toLowerCase();
-  const who = mail ? users.filter(u => String(u.email).toLowerCase() === mail)
-    : users.filter(u => /^александр(\s|$)/i.test(String(u.realName ?? '').trim()));
+  const mail = norm(process.env.YOUGILE_ASSIGNEE);
+  const who = mail ? users.filter(u => norm(u.email) === mail) : users.filter(u => /^александр(\s|$)/i.test(String(u.realName ?? '').trim()));
   if (who.length !== 1) throw new Error(mail ? 'исполнитель из YOUGILE_ASSIGNEE не найден в YouGile' : `сотрудников «Александр» в YouGile: ${who.length} — укажите YOUGILE_ASSIGNEE`);
 
-  // Плашка: ищем любое поле-стикер с состоянием «Критически важно», иначе создаём «Важность».
   let stickerId = '', stateId = '';
   for (const s of await list('/string-stickers?limit=1000')) {
-    const st = (s.states ?? []).find((x: any) => !x.deleted && String(x.name).trim().toLowerCase() === CRITICAL.toLowerCase());
+    const st = (s.states ?? []).find((x: any) => !x.deleted && IS_CRITICAL.test(String(x.name).trim()));
     if (st) { stickerId = s.id; stateId = st.id; break; }
   }
   if (!stickerId) {
@@ -94,7 +95,7 @@ async function context(): Promise<Ctx> {
   const custom = b?.stickers?.custom ?? {};
   if (!custom[stickerId]) {
     await yg('PUT', `/boards/${board.id}`, { stickers: { ...(b?.stickers ?? {}), custom: { ...custom, [stickerId]: true } } });
-    console.warn(`[yougile] плашка «${CRITICAL}» включена на доске «${boardName}»`);
+    console.warn(`[yougile] плашка важности включена на доске «${board.title}»`);
   }
   const ctx = { columnId: cols[0].id, userId: who[0].id, stickerId, stateId };
   ctxCache = { at: Date.now(), ctx };

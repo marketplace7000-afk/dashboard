@@ -14,24 +14,25 @@ const check = (name: string, got: unknown, want: unknown) => {
 };
 
 // ─── поддельный YouGile ───────────────────────────────────────────────────
-type Task = { id: string; title: string; deadline?: any; stickers: Record<string, string>; completed: boolean; deleted: boolean; assigned: string[]; msgs: string[] };
+type Task = { id: string; col: string; title: string; deadline?: any; stickers: Record<string, string>; completed: boolean; deleted: boolean; assigned: string[]; msgs: string[] };
 const tasks = new Map<string, Task>(); let seq = 0;
-const stickers: any[] = []; let boardCustom: Record<string, boolean> = {};
+const stickers: any[] = [{ id: 'S1', name: 'Приоритет', states: [{ id: 'ST0', name: 'срочно' }, { id: 'ST1', name: 'критично важно' }] }]; let boardCustom: Record<string, boolean> = {};
 (globalThis as any).fetch = async (url: string, init: any) => {
   const u = new URL(url); const path = u.pathname.replace('/api-v2', ''); const m = init?.method ?? 'GET';
   const body = init?.body ? JSON.parse(init.body) : undefined;
   const ok = (j: unknown, status = 200) => new Response(JSON.stringify(j), { status });
-  if (m === 'GET' && path === '/boards') return ok({ content: [{ id: 'B1', title: 'Платежи', projectId: 'P1' }] });
+  if (m === 'GET' && path === '/projects') return ok({ content: [{ id: 'P1', title: 'Александр' }, { id: 'P2', title: 'Дмитрий' }] });
+  if (m === 'GET' && path === '/boards') return ok({ content: u.searchParams.get('projectId') === 'P1' ? [{ id: 'B1', title: 'Бизнес задачи', projectId: 'P1' }, { id: 'B2', title: 'Заметки', projectId: 'P1' }] : [] });
   if (m === 'GET' && path === '/boards/B1') return ok({ id: 'B1', stickers: { deadline: true, custom: boardCustom } });
   if (m === 'PUT' && path === '/boards/B1') { boardCustom = body.stickers.custom; return ok({ id: 'B1' }); }
-  if (m === 'GET' && path === '/columns') return ok({ content: [{ id: 'C1', title: 'Оплатить' }] });
+  if (m === 'GET' && path === '/columns') return ok({ content: u.searchParams.get('boardId') === 'B1' ? [{ id: 'C0', title: 'Выполнены' }, { id: 'C1', title: 'К Работе' }] : [{ id: 'C9', title: 'Новая колонка' }] });
   if (m === 'GET' && path === '/users') return ok({ content: [{ id: 'U-A', realName: 'Александр Алешко', email: 'a@x' }, { id: 'U-D', realName: 'Дмитрий', email: 'd@x' }] });
   if (m === 'GET' && path === '/string-stickers') return ok({ content: stickers });
   if (m === 'POST' && path === '/string-stickers') { const s = { id: 'S1', name: body.name, states: body.states.map((x: any, i: number) => ({ ...x, id: 'ST' + i })) }; stickers.push(s); return ok({ id: 'S1' }, 201); }
   if (m === 'GET' && path === '/string-stickers/S1') return ok(stickers[0]);
   if (m === 'POST' && path === '/tasks') {
     const id = 'T' + (++seq);
-    tasks.set(id, { id, title: body.title, deadline: body.deadline, stickers: body.stickers ?? {}, completed: false, deleted: false, assigned: body.assigned, msgs: [] });
+    tasks.set(id, { id, col: body.columnId, title: body.title, deadline: body.deadline, stickers: body.stickers ?? {}, completed: false, deleted: false, assigned: body.assigned, msgs: [] });
     return ok({ id }, 201);
   }
   const tm = path.match(/^\/tasks\/(T\d+)$/);
@@ -72,9 +73,9 @@ const stickers: any[] = []; let boardCustom: Record<string, boolean> = {};
     const s1 = await y.syncYougile(at('2026-11-22'));
     check('за 3 дня: две задачи, вывод и далёкая аренда — без задач', [s1?.ok, s1?.created, tasks.size], [true, 2, 2]);
     const t1 = [...tasks.values()].find(t => t.title.startsWith('Ко-Фи'))!;
-    check('задача: исполнитель Александр, дедлайн = дата платежа', [t1.assigned, ddate(t1)], [['U-A'], '2026-11-25']);
+    check('задача: колонка «К работе», исполнитель Александр, дедлайн = дата платежа', [t1.col, t1.assigned, ddate(t1)], ['C1', ['U-A'], '2026-11-25']);
     check('первое упоминание с суммой', [t1.msgs.length, t1.msgs[0].includes('[!mention:U-A!]'), t1.msgs[0].includes('117 280 ₽'), t1.msgs[0].includes('через 3 дня')], [1, true, true, true]);
-    check('плашка заведена и включена на доске', [stickers[0]?.states?.[0]?.name, boardCustom.S1], ['Критически важно', true]);
+    check('взята своя плашка «Приоритет: критично важно», новая не создана, включена на доске', [stickers.length, boardCustom.S1], [1, true]);
 
     const again = await y.syncYougile(at('2026-11-22', 15));
     check('в тот же день повторно не пишем', [again?.reminded, t1.msgs.length, tasks.size], [0, 1, 2]);
@@ -85,7 +86,7 @@ const stickers: any[] = []; let boardCustom: Record<string, boolean> = {};
     f.saveOp({ ...salary, status: 'Исполнено', fact: 30000 }, 'проверка');
     const s3 = await y.syncYougile(at('2026-11-24'));
     const t2 = [...tasks.values()].find(t => t.title.startsWith('ЗП'))!;
-    check('за 1 день — «Критически важно»', [t1.msgs.length, t1.stickers.S1, t1.msgs[2].includes('Критически важно')], [3, 'ST0', true]);
+    check('за 1 день — «Критически важно»', [t1.msgs.length, t1.stickers.S1, t1.msgs[2].includes('Критически важно')], [3, 'ST1', true]);
     check('исполнено — задача закрыта, напоминаний больше нет', [t2.completed, t2.msgs.length, s3?.closed], [true, 2, 1]);
 
     f.saveOp({ ...pay, date: '2026-12-05' }, 'проверка');

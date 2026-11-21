@@ -197,6 +197,14 @@ function scheduleCacheWarm() {
       .catch(e => console.warn('[finance] остаток из финучёта не обновился:', (e as Error).message));
   });
 
+  // «Финансы» → YouGile (21.11.2026): расходы календаря за 3 дня до даты — задачи партнёру на доске «Платежи»,
+  // напоминания за 3, 2 и 1 день, пока строка не «Исполнено». Без ключа YOUGILE_KEY ничего не делает.
+  everyAligned(SLOTS.finYougile, () => {
+    import('./api/_lib/financeYougile')
+      .then(m => m.syncYougile())
+      .catch(e => console.warn('[yougile] проход не запущен:', (e as Error).message));
+  });
+
   // Выпуски советника по МСК (15.10.2026): за 25–40 минут до выпуска — тот же прогрев,
   // в момент выпуска — сборка сигналов по обеим площадкам (api/_lib/ads/signals.ts).
   import('./api/_lib/ads/signals')

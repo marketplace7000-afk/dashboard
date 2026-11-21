@@ -488,6 +488,7 @@ export async function handleFinance(parts: string[], method: string, query: any,
       if (a === 'loans') return { status: 200, json: { ok: true, loans: loansCalc(), today } };
       if (a === 'catalog') return { status: 200, json: { ok: true, ...(await catalog()) } };
       if (a === 'purchases') return { status: 200, json: { ok: true, today, purchases: purchaseItems(today, Number(query?.days) > 0 ? Math.min(365, Number(query.days)) : 60) } };
+      if (a === 'yougile') { const m = await import('./financeYougile'); return { status: 200, json: { ok: true, enabled: !!process.env.YOUGILE_KEY, state: m.ygState() } }; }
       if (a === 'log') return { status: 200, json: { ok: true, log: finDb().prepare('SELECT * FROM fin_log ORDER BY id DESC LIMIT 200').all() } };
     }
     if (method === 'POST') {

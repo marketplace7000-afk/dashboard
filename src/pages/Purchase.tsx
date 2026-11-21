@@ -95,7 +95,7 @@ function PurchaseBuy() {
       if (filter === 'ok') return r.signal === 'ok';
       if (filter === 'skip') return r.signal === 'skip';
       return r.signal !== 'skip';   // «Все» — без архива
-    });
+    }).sort((a, b) => (filter === 'order' ? (a.daysToOrder ?? 1e9) - (b.daysToOrder ?? 1e9) : 0));   // «К заказу» — сначала самое срочное
   }, [data, filter, q]);
 
   if (!data) {
@@ -162,7 +162,7 @@ function PurchaseBuy() {
                 const etas = r.lots.map(l => l.eta).filter(Boolean).sort();
                 return (
                   <Fragment key={r.key}>
-                    <tr className={`pur-row ${sig.cls}`} onClick={() => setOpen(isOpen ? null : r.key)}>
+                    <tr className={`pur-row ${sig.cls} ${isOpen ? 'open' : ''}`} onClick={() => setOpen(isOpen ? null : r.key)}>
                       <td className="pur-name"><div className="pur-name-in">
                         <span className="pur-caret">{isOpen ? <CaretUpIcon size={16} /> : <CaretDownIcon size={16} />}</span>
                         <div>
@@ -206,24 +206,40 @@ function PurchaseBuy() {
   );
 }
 
+/** Раскрытый товар (21.11 вечер, как в «Финансах»): серая панель, белые блоки — продажи, деньги, партии, пояснения. */
 function RowDetail({ r }: { r: PurchaseRow }) {
-  const mp = (label: string, rate: number, fbo: number | null, days: number | null) =>
-    <div><b>{label}</b>: {nf1.format(rate)} в день{fbo !== null && <>, FBO {nf0.format(fbo)}{days !== null && ` (хватит на ${days} дн.)`}</>}</div>;
+  const mp = (label: string, rate: number, fbo: number | null, days: number | null) => (
+    <div className="pur-box-row"><span><b>{label}</b></span><span>{nf1.format(rate)} в день{fbo !== null && <> · FBO {nf0.format(fbo)}{days !== null && ` · хватит на ${days} дн.`}</>}</span></div>
+  );
   return (
-    <div className="pur-det">
-      <div className="pur-det-col">
+    <div className="pur-panel pur-det">
+      <div className="pur-box">
+        <div className="pur-box-h">Продажи</div>
         {mp('WB', r.rate.wb, r.fbo.wb, r.fboDays.wb)}
         {mp('Ozon', r.rate.ozon, r.fbo.ozon, r.fboDays.ozon)}
-        <div>Продано: за 7 дней {nf0.format(r.sold7)}, за 30 дней {nf0.format(r.sold30)}; в наличии {r.inStockDays} дн. из 30</div>
+        <div className="pur-box-row"><span className="muted">Продано за 7 / 30 дней</span><span>{nf0.format(r.sold7)} / {nf0.format(r.sold30)} шт.</span></div>
+        <div className="pur-box-row"><span className="muted">В наличии</span><span>{r.inStockDays} дн. из 30</span></div>
       </div>
-      <div className="pur-det-col">
-        <div>Срок доставки: {r.lead} дн.{r.leadSamples >= 2 ? ` (свой, по ${r.leadSamples} доставкам)` : ' (общий)'}</div>
-        <div>Цена фабрики: {rub(r.factoryPrice)} · себестоимость {rub(r.landedCost)} · вес {r.weightG ? `${nf0.format(r.weightG)} г` : '–'}</div>
-        <div>Фабрике {rub(r.sumFactory)} · логистика {rub(r.sumLogistics)}</div>
-        {r.lots.map(l => <div key={l.order + l.article}>Заказ {l.order}: {nf0.format(l.qty)} шт., {l.stage.toLowerCase()}{l.eta ? `, придёт ≈ ${ddmm(l.eta)}` : ''}{l.issues.length > 0 && <span className="warn"> — {l.issues.join('; ')}</span>}</div>)}
+      <div className="pur-box">
+        <div className="pur-box-h">Заказ и деньги</div>
+        <div className="pur-box-big">{r.qty > 0 ? <><b>{nf0.format(r.qty)} шт.</b><span className="muted">на {rub(r.sumFactory + r.sumLogistics)}</span></> : <span className="muted">заказывать не нужно</span>}</div>
+        <div className="pur-box-row"><span className="muted">Фабрике / логистика</span><span>{rub(r.sumFactory)} / {rub(r.sumLogistics)}</span></div>
+        <div className="pur-box-row"><span className="muted">Цена фабрики · себестоимость</span><span>{rub(r.factoryPrice)} · {rub(r.landedCost)}</span></div>
+        <div className="pur-box-row"><span className="muted">Вес · срок доставки</span><span>{r.weightG ? `${nf0.format(r.weightG)} г` : '–'} · {r.lead} дн.{r.leadSamples >= 2 ? ` (свой, ${r.leadSamples} доставки)` : ' (общий)'}</span></div>
       </div>
-      {r.notes.length > 0 && <ul className="pur-notes">{r.notes.map(n => <li key={n}>{n}</li>)}</ul>}
-      {r.qty > 0 && !r.skip && <div className="pur-plan-pay"><button className="btn" onClick={() => { location.hash = planPayLink(r); }}>Запланировать оплату в «Финансах»</button> <span className="muted">откроется новая закупка с этим товаром и {nf0.format(r.qty)} шт.; сумму и дату впишете сами</span></div>}
+      {r.lots.length > 0 && (
+        <div className="pur-box pur-det-wide">
+          <div className="pur-box-h">Партии в пути и в календаре</div>
+          {r.lots.map(l => <div key={l.order + l.article} className="pur-box-row"><span>{l.order}: <b>{nf0.format(l.qty)} шт.</b> · {l.stage.toLowerCase()}</span><span>{l.eta ? `придёт ≈ ${ddmm(l.eta)}` : ''}{l.issues.length > 0 && <span className="warn"> — {l.issues.join('; ')}</span>}</span></div>)}
+        </div>
+      )}
+      {r.notes.length > 0 && (
+        <div className="pur-box pur-det-wide">
+          <div className="pur-box-h">Почему так</div>
+          <ul className="pur-notes">{r.notes.map(n => <li key={n}>{n}</li>)}</ul>
+        </div>
+      )}
+      {r.qty > 0 && !r.skip && <div className="pur-plan-pay pur-det-wide"><button className="btn btn-primary" onClick={() => { location.hash = planPayLink(r); }}>Запланировать оплату в «Финансах»</button> <span className="muted">откроется новая закупка с этим товаром и {nf0.format(r.qty)} шт.; сумму и дату впишете сами</span></div>}
     </div>
   );
 }
@@ -315,26 +331,26 @@ function MoneyCard({ m, min, rows }: { m: MoneyCheck; min: number; rows: Purchas
   const sumOf = (keys: string[]) => keys.reduce((s, k) => { const r = byKey.get(k); return s + (r ? r.sumFactory + r.sumLogistics : 0); }, 0);
   const gapBefore = m.minBefore && m.minBefore.end < min;
   return (
-    <div className={`card pur-money ${m.shortfall > 0 ? 'short' : 'fine'}`}>
+    <div className={`card pur-money pur-panel ${m.shortfall > 0 ? 'short' : 'fine'}`}>
       <h2>Хватит ли денег на закупки</h2>
       <div className="pur-money-grid">
-        <div>
-          <div className="card-title">Рекомендации на {ddmm(m.horizon)} (60 дней)</div>
+        <div className="pur-box">
+          <span className="muted">Рекомендации до {ddmm(m.horizon)} (60 дней)</span>
           <b>{mln(m.total)}</b>
         </div>
-        <div>
-          <div className="card-title">Самый низкий остаток без них</div>
+        <div className="pur-box">
+          <span className="muted">Самый низкий остаток без них</span>
           <b className={gapBefore ? 'bad' : ''}>{m.minBefore ? mln(m.minBefore.end) : '–'}</b>
           <span className="muted">{m.minBefore ? ddmm(m.minBefore.date) : ''}</span>
         </div>
-        <div>
-          <div className="card-title">С ними</div>
+        <div className={`pur-box ${m.shortfall > 0 ? 'pur-box-bad' : ''}`}>
+          <span className="muted">Самый низкий остаток с ними</span>
           <b className={m.shortfall > 0 ? 'bad' : ''}>{m.minAfter ? mln(m.minAfter.end) : '–'}</b>
           <span className="muted">{m.minAfter ? ddmm(m.minAfter.date) : ''}</span>
         </div>
       </div>
       {m.shortfall > 0 ? (
-        <div className="pur-money-text">
+        <div className="pur-box pur-money-text">
           <div>Не хватает <b>{mln(m.shortfall)}</b> (с запасом {mln(min)}) — с {ddmm(m.firstShort ?? '')}{m.backOn ? `, сам закроется к ${ddmm(m.backOn)}` : ', за 60 дней сам не закрывается'}.</div>
           <div>Искать деньги — до <b>{ddmm(m.askBy ?? '')}</b>. Инвестор под 25 % годовых на этот срок обойдётся примерно в <b>{rub(m.investCost)}</b>.</div>
           {gapBefore && <div className="muted">Разрыв в «Финансах» есть и без новых закупок — его закрывать в первую очередь.</div>}
@@ -342,7 +358,7 @@ function MoneyCard({ m, min, rows }: { m: MoneyCheck; min: number; rows: Purchas
           {m.postpone.length > 0 && <div>Остальное ({mln(sumOf(m.postpone))}) — разбить партии (сначала половину) или привлечь деньги. Самое срочное: {m.postpone.slice(0, 5).map(name).join(', ')}.</div>}
         </div>
       ) : (
-        <div className="pur-money-text">Денег хватает: остаток не опускается ниже {mln(min)}.</div>
+        <div className="pur-box pur-money-text">Денег хватает: остаток не опускается ниже {mln(min)}.</div>
       )}
       <div className="muted pur-sub">Оплата фабрике — 100 % в день заказа, логистика — к приходу в Москву. Прогноз остатка — из «Финансов»; в календарь отсюда ничего не пишется.</div>
     </div>

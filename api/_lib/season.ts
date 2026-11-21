@@ -338,7 +338,8 @@ export async function queueAgent(why: string, delayMs = 0): Promise<string> {
   if (busy) return 'задание уже стоит в очереди';
   const left = await seasonAgentParams();
   if (!left) return 'всё собрано в этом цикле';
-  q.createTask('season_collect', { marketplace: 'ozon' }, 'schedule', { scheduledFor: Date.now() + delayMs, priority: 0 });
+  // План — сразу в задание: при выдаче агенту сервер его уже не пересчитывает (агент ждёт ответа не дольше 45 с).
+  q.createTask('season_collect', left, 'schedule', { scheduledFor: Date.now() + delayMs, priority: 0 });
   const n = left.ozon.reduce((a, m) => a + m.items.length, 0);
   logRun('agent', true, `поставлено задание (${why}): Ozon ${n} пар «месяц × запрос», Вордстат ${left.wordstat.length} запросов`);
   return 'задание поставлено';

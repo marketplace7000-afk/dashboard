@@ -92,15 +92,6 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     return;
   }
 
-  // Имена покупателей из списка чатов кабинета Ozon (сценарий ozon_reviews, шаг 4) → «Чаты с покупателями».
-  if (what === 'ozon-chat-names') {
-    const { saveOzonBuyerNames } = await import('./reviews/chatStore');
-    const r = saveOzonBuyerNames(Array.isArray(b?.names) ? b.names : []);
-    if (r.saved) console.warn(`[chats] имена покупателей Ozon от агента: получено ${r.received}, сохранено ${r.saved}, чатов обновлено ${r.threads}`);
-    res.status(200).json({ ok: true, ...r });
-    return;
-  }
-
   // Конкуренты и позиции из аналитики кабинетов (Агент 3, сценарий competitor_watch).
   if (what === 'competitors-ingest') {
     const { saveCabinetSnapshot } = await import('./ads/cabinet');
@@ -141,11 +132,6 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
     if (task.type === 'ozon_reviews' && !task.params.company_id) {
       task.params = { ...task.params, marketplace: 'ozon', company_id: String(process.env.OZON_CLIENT_ID || '').trim() };
     }
-    // Имена покупателей из чатов: пока имён мало — первый проход листает список глубже.
-    if (task.type === 'ozon_reviews') {
-      const { ozonNamedCount } = await import('./reviews/chatStore');
-      task.params = { ...task.params, chat_names_scrolls: ozonNamedCount() < 300 ? 80 : 12 };
-    }
     // Конкуренты Ozon (Агент 3): id компании и типы наших товаров по выручке.
     // Быстрому проходу тоже нужен id компании — он снимает продажи по артикулам (20.10.2026).
     if (task.type === 'competitor_watch' && task.params.marketplace === 'ozon') {
@@ -181,7 +167,8 @@ export async function handleAgentApi(req: VercelRequest, res: VercelResponse, re
       }
     }
     // Сезонность: что осталось собрать в текущем цикле (месяцы Ozon × запросы, запросы Вордстата).
-    if (task.type === 'season_collect') {
+    // План считается при постановке задания (пересчёт «Закупок» дольше, чем агент ждёт ответа); здесь — только запасной путь.
+    if (task.type === 'season_collect' && !Array.isArray((task.params as any).ozon)) {
       try {
         const { seasonAgentParams } = await import('./season');
         task.params = { ...task.params, ...((await seasonAgentParams()) ?? { ozon: [], wordstat: [] }) };

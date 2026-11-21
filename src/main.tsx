@@ -9,6 +9,10 @@ import './styles.css';
 // Телефон: общий слой поверх стилей разделов — строго после styles.css (21.11.2026).
 import './mobile.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { setupPinchZoom } from './pinchZoom';
+
+// Телефон: масштаб двумя пальцами (свести — видно больше, развести — крупнее).
+setupPinchZoom();
 
 // Общую память настроек (архив, параметры) App подтягивает уже ПОСЛЕ входа:
 // раньше запрос уходил до входа и получал 401 (src/App.tsx).

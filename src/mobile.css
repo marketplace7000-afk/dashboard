@@ -97,14 +97,10 @@
   .rnp-table td, .rnp-table th { padding: 6px 7px; }
   .rnp-col-item { width: 104px; min-width: 104px; max-width: 104px; }
   .rnp-col-metric { left: 104px; width: 92px; min-width: 92px; max-width: 92px; font-size: var(--sa-small, 15px); line-height: 1.25; }
-  /* Артикул закреплён и вбок (колонка), и вниз: пока листаешь строки товара, он едет вместе с ними
-     до конца блока, чтобы всегда было видно, чьи это цифры (просьба владельца 21.11). */
-  .rnp-item, .rnp-item-text { display: contents; }
-  .rnp-col-item .rnp-item-title {
-    position: sticky; top: 40px; z-index: 1;
-    background: #fff; padding: 2px 0 6px; overflow-wrap: anywhere;
-  }
-  .rnp-total .rnp-col-item .rnp-item-title { background: #eef3ff; }
+  /* Артикул закреплён только при прокрутке вбок (колонка). Прилипание при прокрутке вниз
+     владелец попросил убрать 21.11 — мешало. */
+  .rnp-item { gap: 0; }
+  .rnp-col-item .rnp-item-title { overflow-wrap: anywhere; }
   .rnp-col-item .rnp-econ, .rnp-col-item .rnp-econ * { overflow-wrap: anywhere; white-space: normal; }
   .rnp-table-card { padding-left: 8px; padding-right: 8px; }
   .rnp-photo, .rnp-photo-empty { display: none; }

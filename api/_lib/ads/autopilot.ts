@@ -761,7 +761,10 @@ function effectOf(r: any): Ads2Proposal['effect'] {
 
 /** Старые отказы в журнале хранят сырой ответ WB — показываем понятным текстом. */
 function humanResult(res: any): any {
-  return typeof res?.message === 'string' ? { ...res, message: humanWbError(res.message) } : res;
+  if (!res || typeof res !== 'object') return res;
+  return { ...res,
+    ...(typeof res.message === 'string' ? { message: humanWbError(res.message) } : {}),
+    ...(typeof res.error === 'string' ? { error: humanWbError(res.error) } : {}) };
 }
 
 export async function listProposals(mp: AdMp | null, history = false): Promise<Ads2Proposal[]> {

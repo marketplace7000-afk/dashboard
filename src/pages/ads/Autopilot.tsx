@@ -125,10 +125,15 @@ export function Autopilot({ d, setToast, reload }: { d: Ads2Overview; setToast: 
     } finally { setBusy(null); }
   };
 
+  const [showOldFails, setShowOldFails] = useState(false);
   const st = data?.state;
   const list = data?.proposals ?? [];
   const commands = list.filter(isCommand);
   const advice = list.filter(p => !isCommand(p));
+  // 21.11.2026: отказы WB до исправления 01.11 (автопилот не знал минимальных ставок) — старые, по умолчанию скрыты.
+  const isOldFail = (p: Ads2Proposal) => p.status === 'failed' && (p.decidedAt ?? p.createdAt) < Date.parse('2026-11-01T00:00:00+03:00');
+  const oldFails = list.filter(isOldFail).length;
+  const doneList = showOldFails ? list : list.filter(p => !isOldFail(p));
 
   const card = (p: Ads2Proposal) => {
     const pr = p.sku ? prodBySku.get(p.sku) : undefined;
@@ -210,13 +215,19 @@ export function Autopilot({ d, setToast, reload }: { d: Ads2Overview; setToast: 
 
       {data && view === 'done' && (
         <section className="card ad2-tablecard">
-          {!list.length && <p className="muted">Решённых предложений пока нет.</p>}
-          {list.length > 0 && (
+          {oldFails > 0 && (
+            <p className="muted ad2-small">
+              {showOldFails ? 'Показаны' : 'Скрыты'} старые отказы WB до 01.11 ({oldFails}) — тогда автопилот ещё не знал минимальные ставки; с 01.11 не повторяются.{' '}
+              <button className="ad2-link" onClick={() => setShowOldFails(!showOldFails)}>{showOldFails ? 'скрыть' : 'показать'}</button>
+            </p>
+          )}
+          {!doneList.length && <p className="muted">Решённых предложений пока нет.</p>}
+          {doneList.length > 0 && (
             <div className="ad2-scroll">
               <table className="ad2-table">
                 <thead><tr><th>Когда</th><th>Предложение</th><th>Решение</th><th>Эффект</th></tr></thead>
                 <tbody>
-                  {list.map(p => {
+                  {doneList.map(p => {
                     const pr = p.sku ? prodBySku.get(p.sku) : undefined;
                     return (
                       <tr key={p.id}>

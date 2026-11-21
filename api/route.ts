@@ -430,7 +430,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (what === 'log') {
         const logMp = req.query.mp === 'wb' || req.query.mp === 'ozon' ? req.query.mp : undefined;
-        return res.status(200).json({ ok: true, items: store.listChanges(Number(req.query.limit) || 100, logMp) });
+        // 21.11.2026: ответ площадки — простыми словами (как в «Автопилоте»), а не сырым JSON WB.
+        const { humanWbError } = await import('./_lib/ads/wbMinBids');
+        const items = store.listChanges(Number(req.query.limit) || 100, logMp).map((i: any) =>
+          i.result && typeof i.result === 'object'
+            ? { ...i, result: { ...i.result, ...(typeof i.result.message === 'string' ? { message: humanWbError(i.result.message) } : {}), ...(typeof i.result.error === 'string' ? { error: humanWbError(i.result.error) } : {}) } }
+            : i);
+        return res.status(200).json({ ok: true, items });
       }
       if (what === 'flags') {
         if (req.method === 'POST') {

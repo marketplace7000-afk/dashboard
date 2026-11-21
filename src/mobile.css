@@ -1,0 +1,143 @@
+/* ============================================================
+   Телефон (21.11.2026): общий слой для всех разделов.
+   Подключается последним (App.tsx), поэтому перебивает стили разделов.
+   Что решает (проверено на 390 px):
+   — шапка в одну строку, без серой полосы от спрятанного меню;
+   — переключатели (периоды, площадки, вкладки) — одна строка с прокруткой
+     пальцем, а не «лесенка» в 2–4 строки;
+   — в широких таблицах колонка с товаром узкая, название переносится,
+     чтобы цифры были видны сразу, а не только после прокрутки;
+   — плитки с цифрами по две в ряд.
+   ============================================================ */
+
+@media (max-width: 768px) {
+  /* Тень спрятанного меню торчала серой полосой у левого края. */
+  .sidebar { box-shadow: none; }
+  .app.mobile-nav-open .sidebar { box-shadow: 2px 0 24px rgba(20, 30, 50, .18); }
+
+  /* Шапка: заголовок в одну строку с многоточием, кнопки справа не переносятся. */
+  .topbar { flex-wrap: nowrap; }
+  .topbar h1 {
+    font-size: var(--sa-body, 17px);
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .topbar-meta { flex-wrap: nowrap; flex-shrink: 0; }
+  .topbar-meta > .chip { display: none; }
+  .topbar .profile-avatar { display: none; }
+
+  /* Переключатели: одна строка, лишнее — прокруткой пальцем. Кнопки делят ширину поровну, пока помещаются. */
+  .period-switch, .sa .period-switch,
+  .ad2-tabs, .sa .ad2-tabs, .sa .sa-seg,
+  .db-seg, .fbo-seg, .fin-seg, .rv-seg, .rv-tabs, .cm-tabs {
+    display: flex;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    max-width: 100%;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .period-switch::-webkit-scrollbar, .ad2-tabs::-webkit-scrollbar, .db-seg::-webkit-scrollbar,
+  .fbo-seg::-webkit-scrollbar, .fin-seg::-webkit-scrollbar, .rv-seg::-webkit-scrollbar,
+  .rv-tabs::-webkit-scrollbar, .cm-tabs::-webkit-scrollbar { display: none; }
+  .period-switch > *, .ad2-tabs > *, .sa-seg > *, .db-seg > *, .fbo-seg > *,
+  .fin-seg > *, .rv-seg > *, .rv-tabs > *, .cm-tabs > * {
+    flex: 1 0 auto;
+    white-space: nowrap;
+    justify-content: center;
+    text-align: center;
+  }
+
+  /* Сетки разделов с одной колонкой (План, Ведение карточек): колонка растягивалась по ширине таблицы и выталкивала всё за край. */
+  .cm { grid-template-columns: minmax(0, 1fr); }
+
+  /* Отзывы: вкладки «Без ответа / Ждут решения / Отвеченные / Все» — сеткой 2×2, как в «Чатах». */
+  .rv-inbox .rv-seg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; overflow: visible; justify-self: stretch; }
+  .rv-inbox .rv-seg .rv-seg-btn { min-height: 44px; justify-content: center; }
+
+  /* Сборщики: строка журнала не вылезает за край из-за длинного имени. */
+  .ah-jrow-name { white-space: normal; }
+
+  /* Остатки: кластеры — одной лентой с прокруткой, а не восемь строк по одной кнопке. */
+  .fbo-clbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 10px; }
+  .fbo-clbar > * { flex: 0 0 auto; white-space: nowrap; }
+  .fbo-sort { white-space: nowrap; max-width: 100%; }
+  .fbo-sort select { min-width: 0; flex: 1 1 auto; }
+
+  /* Плитки с цифрами — по две в ряд, а не по одной на экран. */
+  .plan-kpis, .ad2-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .plan-kpi { padding: 12px 14px; }
+  .plan-kpi b { font-size: var(--sa-em, 21px); }
+  .plan-kpi.main { grid-column: 1 / -1; }
+  .plan-kpi.main b { font-size: 28px; }
+  .ad2-kpi-v { font-size: var(--sa-em, 21px); white-space: nowrap; }
+  .ad2-kpis > .card { padding: 12px 14px; }
+}
+
+@media (max-width: 640px) {
+  /* --- Таблицы: колонка с товаром узкая, название переносится --- */
+
+  /* Общий запрет переноса во всех таблицах (styles.css) делал колонку с названием шириной в экран. */
+  /* Переносится только колонка с названием (первая), цифры остаются в одну строку. */
+  .content table thead th:first-child, .content table td:first-child { white-space: normal; }
+
+  /* РНП и «РНП действия»: две закреплённые колонки занимали 296 px из 314. */
+  .rnp-table td, .rnp-table th { padding: 6px 7px; }
+  .rnp-col-item { width: 112px; min-width: 112px; max-width: 112px; }
+  .rnp-col-metric { left: 112px; width: 104px; min-width: 104px; max-width: 104px; font-size: var(--sa-small, 15px); line-height: 1.25; }
+  .rnp-item { gap: 0; }
+  .rnp-photo, .rnp-photo-empty { display: none; }
+  .rnp-item-title { font-size: var(--sa-small, 15px); line-height: 1.25; }
+  .rnp-item-sub { font-size: var(--sa-small, 15px); -webkit-line-clamp: 2; line-height: 1.25; }
+  .rnp-item-cat { display: none; }
+  .rnp-col-spark { display: none; }
+  .rnp-num { min-width: 60px; }
+  .act-col-kind { white-space: normal; }
+  /* «РНП действия»: стрелка раскрытия забирала место у артикула — колонка товара шире, вида действия уже. */
+  .act-table .rnp-col-item { width: 132px; min-width: 132px; max-width: 132px; }
+  .act-table .rnp-col-metric { left: 132px; width: 92px; min-width: 92px; max-width: 92px; }
+  .act-table .rnp-item-title { overflow-wrap: anywhere; word-break: normal; }
+  .act-caret { padding: 0 2px 0 0; }
+  .rnp-item-text { min-width: 0; }
+  .rnp-table-head { flex-wrap: wrap; }
+  .rnp-table-head > b { flex: 0 0 100%; }
+
+  /* План: товар закреплён слева, но не шире 140 px. */
+  .plan .cm-prod { min-width: 0; width: 128px; gap: 0; }
+  .plan .cm-prod img, .plan .cm-prod .ph { display: none; }
+  .plan-table .cm-prod b { font-size: var(--sa-small, 15px); line-height: 1.25; }
+  .plan .cm-prod .nm { font-size: var(--sa-small, 15px); }
+  .plan-table td.stick, .plan-table th.stick { max-width: 140px; }
+  .plan-table.cm-table.cm-list > tbody > tr.cm-row > td { padding: 10px 8px; font-size: var(--sa-cap, 17px); }
+
+  /* Ведение карточек и другие cm-таблицы. */
+  .cm-prod { min-width: 0; width: 150px; gap: 8px; }
+  .cm-prod img { width: 36px; height: 48px; }
+  .cm-prod b { font-size: var(--sa-small, 15px); overflow-wrap: anywhere; }
+  .cm-table td, .cm-table th { padding: 9px 8px; }
+  .cm-table td.q { min-width: 150px; }
+
+  /* Конкуренты: товар 340 px → 150 px, название в две строки. */
+  .cmp-col-prod { min-width: 150px; max-width: 150px; width: 150px; }
+  .cmp-col-prod .ad2-prod-t > * { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ad2-prod img, .ad2-noimg { width: 32px; height: 43px; }
+  .ad2-prod-t, .ad2-prod-t .muted { font-size: var(--sa-small, 15px); }
+
+  /* Цены WB / Ozon: фото меньше, артикул переносится. */
+  .tbl-scroll table.mp-table { width: max-content; min-width: 100%; }
+  .pr-table-card table.mp-table > thead > tr > th:nth-child(2),
+  .pr-table-card table.mp-table > tbody > tr > td:nth-child(2) { min-width: 120px; max-width: 132px; white-space: normal; overflow-wrap: anywhere; }
+  .pr-table-card table.mp-table > tbody > tr > td:first-child img { width: 40px !important; height: 53px !important; }
+  .pr-table-card table.mp-table > tbody > tr > td { padding: 10px 6px; }
+
+  /* Главная: таблица «Расходы и прибыль» — без минимальной ширины 600 px, статья переносится. */
+  .db-tbl { min-width: 0; font-size: var(--sa-small, 15px); }
+  .db-tbl td, .db-tbl th { padding: 8px 6px; }
+  .db-tbl td:first-child { white-space: normal; min-width: 108px; }
+
+  /* Доступы: имя переносится. */
+  .sk-table td:first-child { min-width: 120px; }
+
+}

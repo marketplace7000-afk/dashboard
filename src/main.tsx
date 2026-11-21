@@ -6,6 +6,8 @@ import '@fontsource/golos-text/400.css';
 import '@fontsource/golos-text/500.css';
 import '@fontsource/golos-text/600.css';
 import './styles.css';
+// Телефон: общий слой поверх стилей разделов — строго после styles.css (21.11.2026).
+import './mobile.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Общую память настроек (архив, параметры) App подтягивает уже ПОСЛЕ входа:

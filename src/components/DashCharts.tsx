@@ -4,7 +4,7 @@
  * последним, кольцо с отступами между долями, полоса со штриховкой и
  * одинаковая подсказка при наведении. Цвета — токены главной (.db в styles.css).
  */
-import { useId, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, Line, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -23,6 +23,19 @@ export function fmtShort(n: number): string {
 /** Подпись оси: «2,3 млн», «750 тыс» — коротко, чтобы не переносилась. */
 const fmtAxis = (n: number) => n >= 1_000_000 ? (n / 1_000_000).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + ' млн'
   : n >= 1000 ? Math.round(n / 1000).toLocaleString('ru-RU') + ' тыс' : String(Math.round(n));
+
+/** Узкий экран (телефон): меньше подписей на оси и уже поле под цифры. */
+function useNarrow(max = 640): boolean {
+  const q = `(max-width: ${max}px)`;
+  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.matchMedia(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia(q);
+    const on = () => setNarrow(m.matches);
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, [q]);
+  return narrow;
+}
 
 /** «2026-10-21» → «21.10». */
 export const fmtDay = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
@@ -141,12 +154,13 @@ const TICK = 15;
 export function OrdersChart({ rows, showWb, showOz, prevName }: { rows: DayRow[]; showWb: boolean; showOz: boolean; prevName: string }) {
   const id = useId().replace(/:/g, '');
   const names = { wb: 'Wildberries', oz: 'Ozon', prev: prevName };
-  // Не больше ~10 дат по оси, иначе подписи налезают друг на друга.
-  const every = Math.max(1, Math.ceil(rows.length / 10));
+  // Не больше ~10 дат по оси (на телефоне — 4), иначе подписи налезают друг на друга.
+  const narrow = useNarrow();
+  const every = Math.max(1, Math.ceil(rows.length / (narrow ? 4 : 10)));
   return (
     <div className="db-big">
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={rows} margin={{ top: 8, right: 36, bottom: 0, left: 0 }}>
+        <ComposedChart data={rows} margin={{ top: 8, right: narrow ? 12 : 36, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id={`wb${id}`} x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor="var(--db-wb)" stopOpacity={0.42} />
@@ -160,7 +174,7 @@ export function OrdersChart({ rows, showWb, showOz, prevName }: { rows: DayRow[]
           <CartesianGrid vertical={false} stroke="var(--db-line)" strokeDasharray="3 5" />
           <XAxis dataKey="label" axisLine={false} tickLine={false} interval={every - 1}
             tick={{ fill: 'var(--db-muted)', fontSize: TICK }} dy={8} height={32} />
-          <YAxis axisLine={false} tickLine={false} width={78} tickFormatter={v => fmtAxis(Number(v))}
+          <YAxis axisLine={false} tickLine={false} width={narrow ? 60 : 78} tickFormatter={v => fmtAxis(Number(v))}
             tick={{ fill: 'var(--db-muted)', fontSize: TICK }} />
           <Tooltip cursor={{ stroke: 'var(--db-line)', strokeWidth: 1 }}
             content={<ChartTip names={names} format={v => fmtRub(v)} title={(_l, p) => p?.date ? `${fmtDay(p.date)}${p.today ? ' · сегодня, день не закрыт' : ''}` : _l} />} />

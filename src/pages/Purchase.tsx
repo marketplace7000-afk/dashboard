@@ -113,7 +113,7 @@ function PurchaseBuy() {
         </div>
       )}
 
-      <div className="pur-kpis">
+      <div className="card pur-kpis">
         <div className="card pur-kpi late"><div className="card-title">Пора заказывать</div><b>{t.late}</b><span>{mln(t.sumLate)}</span></div>
         <div className="card pur-kpi soon"><div className="card-title">Заказать на этой неделе</div><b>{t.soon}</b><span>{mln(t.sumSoon)}</span></div>
         <div className="card pur-kpi"><div className="card-title">Закупки на 30 дней вперёд</div><b>{mln(t.sum30)}</b><span>фабрика + логистика</span></div>
@@ -142,7 +142,7 @@ function PurchaseBuy() {
 
       <div className="card pur-table-card">
         <div className="pur-scroll">
-          <table className="pur-table">
+          <table className="pur-table pur-list">
             <thead>
               <tr>
                 <th>Товар</th>
@@ -256,10 +256,10 @@ function LotsCard({ lots }: { lots: TransitLot[] }) {
   if (!lots.length) return null;
   const sorted = [...lots].sort((a, b) => (a.eta || '9') .localeCompare(b.eta || '9'));
   return (
-    <div className="card">
+    <div className="card pur-table-card pur-lots-card">
       <h2>Едет из Китая</h2>
       <div className="pur-scroll">
-        <table className="pur-table pur-lots">
+        <table className="pur-table pur-lots pur-list">
           <thead><tr><th>Заказ</th><th>Товар</th><th className="num">Штук</th><th>Этап</th><th>Придёт на ФФ</th><th>Что не так</th></tr></thead>
           <tbody>
             {sorted.map(l => (
@@ -331,7 +331,7 @@ function MoneyCard({ m, min, rows }: { m: MoneyCheck; min: number; rows: Purchas
   const sumOf = (keys: string[]) => keys.reduce((s, k) => { const r = byKey.get(k); return s + (r ? r.sumFactory + r.sumLogistics : 0); }, 0);
   const gapBefore = m.minBefore && m.minBefore.end < min;
   return (
-    <div className={`card pur-money pur-panel ${m.shortfall > 0 ? 'short' : 'fine'}`}>
+    <div className={`card pur-money ${m.shortfall > 0 ? 'short' : 'fine'}`}>
       <h2>Хватит ли денег на закупки</h2>
       <div className="pur-money-grid">
         <div className="pur-box">
@@ -349,14 +349,36 @@ function MoneyCard({ m, min, rows }: { m: MoneyCheck; min: number; rows: Purchas
           <span className="muted">{m.minAfter ? ddmm(m.minAfter.date) : ''}</span>
         </div>
       </div>
+      {gapBefore && <div className="pur-box pur-box-warn">Разрыв в «Финансах» есть и без новых закупок — его закрывать в первую очередь.</div>}
       {m.shortfall > 0 ? (
-        <div className="pur-box pur-money-text">
-          <div>Не хватает <b>{mln(m.shortfall)}</b> (с запасом {mln(min)}) — с {ddmm(m.firstShort ?? '')}{m.backOn ? `, сам закроется к ${ddmm(m.backOn)}` : ', за 60 дней сам не закрывается'}.</div>
-          <div>Искать деньги — до <b>{ddmm(m.askBy ?? '')}</b>. Инвестор под 25 % годовых на этот срок обойдётся примерно в <b>{rub(m.investCost)}</b>.</div>
-          {gapBefore && <div className="muted">Разрыв в «Финансах» есть и без новых закупок — его закрывать в первую очередь.</div>}
-          {m.affordable.length > 0 && <div>Без нехватки можно оплатить ({mln(sumOf(m.affordable))}): {m.affordable.map(name).join(', ')}.</div>}
-          {m.postpone.length > 0 && <div>Остальное ({mln(sumOf(m.postpone))}) — разбить партии (сначала половину) или привлечь деньги. Самое срочное: {m.postpone.slice(0, 5).map(name).join(', ')}.</div>}
-        </div>
+        <>
+          <div className="pur-money-grid two">
+            <div className="pur-box pur-box-bad">
+              <span className="muted">Не хватает (с запасом {mln(min)})</span>
+              <b className="bad">{mln(m.shortfall)}</b>
+              <span>с {ddmm(m.firstShort ?? '')}{m.backOn ? ` · сам закроется к ${ddmm(m.backOn)}` : ' · за 60 дней сам не закрывается'}</span>
+            </div>
+            <div className="pur-box">
+              <span className="muted">Найти деньги до</span>
+              <b>{ddmm(m.askBy ?? '')}</b>
+              <span>инвестор под 25 % годовых на этот срок ≈ {rub(m.investCost)}</span>
+            </div>
+          </div>
+          <div className="pur-money-grid two">
+            <div className="pur-box">
+              <div className="pur-box-h">Можно оплатить сейчас{m.affordable.length > 0 && <span className="muted"> · {mln(sumOf(m.affordable))}</span>}</div>
+              {m.affordable.length ? <ul className="pur-money-list">{m.affordable.map(k => <li key={k}>{name(k)}</li>)}</ul> : <span className="muted">ничего — денег нет уже без закупок</span>}
+            </div>
+            <div className="pur-box">
+              <div className="pur-box-h">Отложить или разбить{m.postpone.length > 0 && <span className="muted"> · {mln(sumOf(m.postpone))}</span>}</div>
+              {m.postpone.length ? <>
+                <ul className="pur-money-list">{m.postpone.slice(0, 6).map(k => <li key={k}>{name(k)}</li>)}</ul>
+                {m.postpone.length > 6 && <span className="muted">и ещё {m.postpone.length - 6} тов.</span>}
+                <span className="muted">Сначала заказать половину партии или привлечь деньги.</span>
+              </> : <span className="muted">нет</span>}
+            </div>
+          </div>
+        </>
       ) : (
         <div className="pur-box pur-money-text">Денег хватает: остаток не опускается ниже {mln(min)}.</div>
       )}

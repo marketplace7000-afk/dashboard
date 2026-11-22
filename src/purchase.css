@@ -149,3 +149,48 @@
 .pur-kpi { padding: 16px 20px; }
 .pur-kpi b { font-size: 34px; }
 @media (max-width: 900px) { .pur-det { grid-template-columns: minmax(0, 1fr); } }
+
+/* 22.11: серый фон по-настоящему (правило .sa .card перекрывало .pur-panel). Все карточки раздела — серые панели
+   с белыми блоками внутри, как в «Финансах»; строки товаров — белые плашки на сером. */
+.sa.pur .card { background: var(--pur-panel); border: 1px solid var(--pur-panel-b); box-shadow: none; }
+.sa.pur .card .pur-panel { background: transparent; border: 0; padding: 0; }
+.sa.pur .card.pur-fail { border-color: var(--bad); background: #fff8f8; }
+.sa.pur .card.pur-kpis { padding: 16px; gap: 14px; }
+.sa.pur .card.pur-kpis .pur-kpi { background: #fff; border: 1px solid var(--pur-panel-b); border-radius: 12px; padding: 16px 20px; }
+.sa.pur .card.pur-table-card { padding: 8px 14px 12px; overflow: visible; }
+.sa.pur .card.pur-lots-card { padding: 20px 14px 12px; }
+.sa.pur .card.pur-lots-card h2 { padding-left: 6px; margin-bottom: 4px; }
+.pur-table.pur-list { border-collapse: separate; border-spacing: 0 8px; }
+.pur-table.pur-list th { background: transparent; border: 0; padding: 6px 14px 0; }
+.pur-table.pur-list > tbody > tr > td { background: #fff; border-top: 1px solid var(--pur-panel-b); border-bottom: 1px solid var(--pur-panel-b); }
+.pur-table.pur-list > tbody > tr > td:first-child { border-left: 1px solid var(--pur-panel-b); border-radius: 12px 0 0 12px; }
+.pur-table.pur-list > tbody > tr > td:last-child { border-right: 1px solid var(--pur-panel-b); border-radius: 0 12px 12px 0; }
+.pur-table.pur-list > tbody > tr > td:only-child { border-radius: 12px; }
+.pur-table.pur-list > tbody > tr.pur-row:hover > td { background: #f4f7fb; }
+.pur-table.pur-list > tbody > tr.pur-row.open > td { background: var(--accent-soft); border-color: #c9d8f5; }
+.pur-table.pur-list > tbody > tr.pur-detail > td { background: transparent; border: 0; padding: 0 0 10px 28px; }
+.pur-table.pur-list > tbody > tr.pur-sea-total > td { background: #e2e7ee; }
+.pur-table.pur-list .pur-empty { background: #fff; }
+/* деньги */
+.sa.pur .card.pur-money { display: flex; flex-direction: column; gap: 14px; padding: 20px; }
+.sa.pur .card.pur-money.short { border-color: #f1c4c4; }
+.pur-money-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pur-money-grid .pur-box > span:not(.muted) { font-size: var(--sa-cap); }
+.pur-money-list { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; font-size: var(--sa-cap); line-height: 1.35; }
+.pur-box-warn { background: #fff7e6; border-color: #f1d9a6; font-size: var(--sa-body); }
+.pur-money > .pur-sub { font-size: var(--sa-small); line-height: 1.45; }
+@media (max-width: 900px) {
+  .pur-money-grid.two { grid-template-columns: minmax(0, 1fr); }
+  .pur-table.pur-list > tbody > tr.pur-detail > td { padding-left: 0; }
+}
+
+/* 22.11: главная таблица «Сезонности» влезает в окно 1385 px целиком, раскрытая категория — не шире экрана */
+.pur-sea.pur-list th, .pur-sea.pur-list td { padding-left: 8px; padding-right: 8px; }
+.pur-sea.pur-list .pur-sea-cell { min-width: 38px; padding-left: 4px; padding-right: 4px; }
+.pur-sea.pur-list td.pur-name { min-width: 200px; max-width: 240px; padding-left: 12px; }
+.pur-sea.pur-list th.pur-sea-drop { white-space: normal; max-width: 110px; line-height: 1.25; }
+.pur-sea-pd { min-width: 130px; max-width: 170px; font-weight: 500; font-size: var(--sa-small); line-height: 1.4; }
+.pur-sea-pd div { overflow-wrap: anywhere; }
+.pur-sea-goods ul { columns: 2; column-gap: 32px; display: block; }
+.pur-sea-goods li { break-inside: avoid; margin-bottom: 4px; }
+@media (max-width: 900px) { .pur-sea-goods ul { columns: 1; } }

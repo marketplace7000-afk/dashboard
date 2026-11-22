@@ -114,14 +114,13 @@ export function PurchaseSeason() {
 
       <div className="card pur-table-card">
         <div className="pur-scroll">
-          <table className="pur-table pur-sea">
+          <table className="pur-table pur-sea pur-list">
             <thead>
               <tr>
                 <th>Категория</th>
                 <MonthHead />
-                <th>Пик</th>
-                <th>Спад</th>
-                <th className="num">Янв–фев к ноя–дек</th>
+                <th>Пик / спад</th>
+                <th className="num pur-sea-drop">Янв–фев к ноя–дек</th>
               </tr>
             </thead>
             <tbody>
@@ -131,8 +130,7 @@ export function PurchaseSeason() {
                   <tr className="pur-sea-total">
                     <td className="pur-name"><b>Все категории</b><div className="muted pur-sub">среднее по категориям</div></td>
                     <Cells k={total} />
-                    <td className="pur-sea-up">{pd.peaks.join(', ') || '–'}</td>
-                    <td className="pur-sea-down">{pd.dips.join(', ') || '–'}</td>
+                    <PeakDip pd={pd} />
                     <td className={`num ${dr != null && dr < 0.85 ? 'bad' : ''}`}>{dr == null ? '–' : `${pct(dr)} %`}</td>
                   </tr>
                 );
@@ -154,15 +152,14 @@ export function PurchaseSeason() {
                         </div>
                       </div></td>
                       <Cells k={k} />
-                      <td className="pur-sea-up">{pd.peaks.join(', ') || '–'}</td>
-                      <td className="pur-sea-down">{pd.dips.join(', ') || '–'}</td>
+                      <PeakDip pd={pd} />
                       <td className={`num ${dr != null && dr < 0.85 ? 'bad' : ''}`}>{dr == null ? '–' : `${pct(dr)} %`}</td>
                     </tr>
-                    {isOpen && <tr className="pur-detail"><td colSpan={16}><CategoryDetail c={c} /></td></tr>}
+                    {isOpen && <tr className="pur-detail"><td colSpan={15}><CategoryDetail c={c} /></td></tr>}
                   </Fragment>
                 );
               })}
-              {!cats.length && <tr><td colSpan={16} className="muted pur-empty">Товаров для закупки нет.</td></tr>}
+              {!cats.length && <tr><td colSpan={15} className="muted pur-empty">Товаров для закупки нет.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -178,6 +175,16 @@ export function PurchaseSeason() {
   );
 }
 
+/** Пик и спад одной ячейкой: ↑ месяцы пика, ↓ месяцы спада (22.11 — чтобы таблица влезала в окно владельца). */
+function PeakDip({ pd }: { pd: { peaks: string[]; dips: string[] } }) {
+  return (
+    <td className="pur-sea-pd">
+      <div className="pur-sea-up">↑ {pd.peaks.join(', ') || '–'}</div>
+      <div className="pur-sea-down">↓ {pd.dips.join(', ') || '–'}</div>
+    </td>
+  );
+}
+
 /** Раскрытая категория: итог словами, год по источникам, год по каждому запросу, товары. */
 function CategoryDetail({ c }: { c: SeasonCategory }) {
   const all = combined(c);
@@ -186,7 +193,7 @@ function CategoryDetail({ c }: { c: SeasonCategory }) {
   const rows: { name: string; k: K; hint?: string }[] = SEASON_SOURCES.map(s => ({ name: SRC_NAME[s.key], k: c.sources[s.key]?.k ?? MONTHS_RU.map(() => null), hint: c.sources[s.key] ? undefined : 'нет данных' }));
   return (
     <div className="pur-panel pur-sea-det">
-      <div className="pur-box pur-sea-sum">
+      <div className="pur-box pur-sea-sum pur-sea-wide">
         <div className="pur-box-h">Итог по категории</div>
         <div className="pur-sea-sum-grid">
           <div><span className="muted">Пик спроса</span><b className="pur-sea-up">{pd.peaks.join(', ') || 'ровно'}</b></div>
@@ -228,7 +235,7 @@ function CategoryDetail({ c }: { c: SeasonCategory }) {
         </div>
       )}
 
-      <div className="pur-box pur-sea-goods">
+      <div className="pur-box pur-sea-goods pur-sea-wide">
         <div className="pur-box-h">Товары в категории</div>
         <ul>{c.products.map(p => <li key={p.key}>{p.name}</li>)}</ul>
       </div>

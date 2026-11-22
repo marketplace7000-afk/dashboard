@@ -64,8 +64,13 @@ function upsert(source: SeasonSource, key: string, query: string, month: string,
     ON CONFLICT(source, key, query, month) DO UPDATE SET freq = excluded.freq, at = excluded.at`).run(source, key, query.toLowerCase().trim(), month, freq, nowIso());
 }
 
-/** Закупочные товары: ключ → артикулы карточек (из «Закупок»). */
-async function purchaseProducts(): Promise<{ key: string; name: string; articles: string[]; skip: boolean }[]> {
+export type SeasonProduct = { key: string; name: string; articles: string[]; skip: boolean };
+/**
+ * Закупочные товары: ключ → артикулы карточек (из «Закупок»). given — список от самого расчёта «Закупок»:
+ * 22.11 без него расчёт ждал сам себя (getPurchase → сезонность → getPurchase) и раздел не открывался.
+ */
+async function purchaseProducts(given?: SeasonProduct[]): Promise<SeasonProduct[]> {
+  if (given) return given;
   const { getPurchase } = await import('./purchase');
   const p = await getPurchase();
   return p.rows.map(r => ({ key: r.key, name: r.name, articles: r.articles, skip: r.skip }));
@@ -229,8 +234,8 @@ export function ozonMonths(today = mskDate(0)): string[] {
 }
 
 /** Категории закупочных товаров (без архива): категория → товары. */
-async function categoryMap(): Promise<Map<string, { key: string; name: string }[]>> {
-  const products = (await purchaseProducts()).filter(p => !p.skip);
+async function categoryMap(given?: SeasonProduct[]): Promise<Map<string, { key: string; name: string }[]>> {
+  const products = (await purchaseProducts(given)).filter(p => !p.skip);
   const cats = { wb: rnpCategories('wb'), ozon: rnpCategories('ozon') };
   const out = new Map<string, { key: string; name: string }[]>();
   for (const p of products) {
@@ -270,10 +275,10 @@ const CURATED: Record<string, string[]> = {
  * Главные запросы категории (до 4): по частоте на WB за год у наших карточек категории, без брендов, без
  * слишком общих слов, без перестановок слов одного запроса; запрос должен быть хотя бы в 3 месяцах.
  */
-export async function seasonPlan(): Promise<{ category: string; products: { key: string; name: string }[]; queries: string[] }[]> {
+export async function seasonPlan(given?: SeasonProduct[]): Promise<{ category: string; products: { key: string; name: string }[]; queries: string[] }[]> {
   const d = seasonDb();
   const out = [];
-  for (const [category, products] of await categoryMap()) {
+  for (const [category, products] of await categoryMap(given)) {
     if (CURATED[category]) { out.push({ category, products, queries: CURATED[category] }); continue; }
     const score = new Map<string, { f: number; months: Set<string> }>();
     for (const p of products) {
@@ -379,9 +384,9 @@ export function scheduleSeason(): void {
 }
 
 // ─── Лист «Сезонность» ───────────────────────────────────────────────────────
-export async function getSeason(): Promise<SeasonResponse> {
+export async function getSeason(given?: SeasonProduct[]): Promise<SeasonResponse> {
   const d = seasonDb();
-  const plan = await seasonPlan();
+  const plan = await seasonPlan(given);
   const series = (source: SeasonSource, keys: string[], query: string): QuerySeries => {
     const months: Record<string, number> = {};
     for (const k of keys) {
@@ -419,7 +424,7 @@ export async function getSeason(): Promise<SeasonResponse> {
     const r = d.prepare(`SELECT count(DISTINCT month) n, min(month) a, max(month) b FROM sq_freq WHERE source = ? AND freq > 0 ${s === 'wb' ? '' : "AND key LIKE 'cat:%'"}`).get(s) as any;
     coverage[s] = { months: Number(r?.n ?? 0), from: String(r?.a ?? ''), to: String(r?.b ?? '') };
   }
-  const left = await seasonAgentParams().catch(() => null);
+  const left = given ? null : await seasonAgentParams().catch(() => null);
   const pending = left ? { ozon: left.ozon.reduce((a, m) => a + m.items.length, 0), wordstat: left.wordstat.length } : { ozon: 0, wordstat: 0 };
   return { ok: true, builtAt: nowIso(), categories, runs, notes: [], coverage, pending };
 }
@@ -432,9 +437,9 @@ export type PurchaseSeasonCat = { category: string; wb: number[]; ozon: number[]
  * только подтверждённые двумя годами Вордстата (shared/season.ts → calcSeason). Категория без Вордстата за
  * два года в список не попадает — её товары считаются запасным способом.
  */
-export async function purchaseSeason(today = mskDate(0)): Promise<PurchaseSeasonCat[]> {
+export async function purchaseSeason(today: string, products: SeasonProduct[]): Promise<PurchaseSeasonCat[]> {
   const d = seasonDb();
-  const sea = await getSeason();
+  const sea = await getSeason(products);
   const lastMonth = addMonths(today.slice(0, 7), -1);
   const out: PurchaseSeasonCat[] = [];
   for (const c of sea.categories) {

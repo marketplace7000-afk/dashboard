@@ -380,10 +380,6 @@ async function build(): Promise<PurchaseResponse> {
   const { out: sales, names } = salesByKey(today, failed);
   const fbo = fboByKey(today, failed);
   const history = await wbHistory(failed);
-  // Сезонность категорий по площадкам (лист «Сезонность»): только то, что повторилось два года.
-  let seasonCats: import('./season').PurchaseSeasonCat[] = [];
-  try { seasonCats = await (await import('./season')).purchaseSeason(today); } catch (e) { failed.push(`сезонность категорий не прочитана — взята запасная (${(e as Error).message})`); }
-  const seasonByKey = new Map(seasonCats.flatMap(c => c.products.map(k => [k, c] as const)));
   const overrides = new Map((pdb().prepare('SELECT key, skip FROM pur_skip').all() as any[]).map(r => [String(r.key), Number(r.skip) === 1] as const));
 
   const rawRates = settings.usd > 0 && settings.cny > 0 ? null : await cbrRates();
@@ -397,6 +393,7 @@ async function build(): Promise<PurchaseResponse> {
 
   // Закупочные товары: всё, что есть в «Складе» (там только наш товар с себестоимостью).
   const rows: PurchaseRow[] = [];
+  const todo: { x: PurchaseInput; finish: (row: PurchaseRow) => void }[] = [];
   for (const [key, st] of stock) {
     const s = sales.get(key);
     const rateOf = (a: { s7: number; s30: number; inStock: Set<string>; inStock7: Set<string> } | undefined) => {
@@ -430,19 +427,32 @@ async function build(): Promise<PurchaseResponse> {
       leadOwn: median(leads), leadSamples: leads.length,
       ...resolveSkip(p?.status ?? '', overrides.get(key)), planStatus: p?.status ?? '', planQty: p?.qty ?? 0,
       history: history.get(key),
-      seasonCat: (() => { const c = seasonByKey.get(key); return c ? { category: c.category, wb: c.wb, ozon: c.ozon, trendFrom: c.trendFrom } : undefined; })(),
     };
     // Нет партии в «В доставке» — цена фабрики ≈ себестоимость минус оценка логистики ($/кг).
     if (!x.factoryPrice && x.landedCost > 0) {
       const logi = (x.weightG / 1000) * settings.usdPerKg * rates.usd;
       x.factoryPrice = Math.max(Math.round(x.landedCost - logi), Math.round(x.landedCost * 0.6));
     }
-    const row = calcRow(x, calcSettings, today, leadDefault);
+    todo.push({ x, finish: row => {
     if (!factory.has(key) && x.landedCost > 0) row.notes.push('цена фабрики оценена по себестоимости минус логистика');
     delete row.history;   // экрану история не нужна — только итоговые коэффициенты
     delete row.seasonCat;
     if (calQty > 0) row.notes.push(`уже стоит в календаре «Финансов»: ${calQty} шт. — рекомендация сверх этого`);
     if (moving > 0) row.notes.push(`перемещается между нашими складами: ${moving} шт. (учтено в FBS)`);
+    } });
+  }
+  // Сезонность категорий по площадкам (лист «Сезонность»): только то, что повторилось два года.
+  // Список товаров передаём сами — сезонность не должна вызывать расчёт «Закупок» обратно.
+  let seasonCats: import('./season').PurchaseSeasonCat[] = [];
+  try {
+    seasonCats = await (await import('./season')).purchaseSeason(today, todo.map(({ x }) => ({ key: x.key, name: x.name, articles: x.articles, skip: x.skip })));
+  } catch (e) { failed.push(`сезонность категорий не прочитана — взята запасная (${(e as Error).message})`); }
+  const seasonByKey = new Map(seasonCats.flatMap(c => c.products.map(k => [k, c] as const)));
+  for (const { x, finish } of todo) {
+    const c = seasonByKey.get(x.key);
+    if (c) x.seasonCat = { category: c.category, wb: c.wb, ozon: c.ozon, trendFrom: c.trendFrom };
+    const row = calcRow(x, calcSettings, today, leadDefault);
+    finish(row);
     rows.push(row);
   }
   // Деньги: прогноз остатка «Финансов» минус рекомендованные закупки (раздел «Финансы» ничего не пишет и не меняет).

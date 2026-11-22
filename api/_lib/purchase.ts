@@ -71,14 +71,14 @@ export function getSettings(): PurchaseSettings {
   return s;
 }
 
-const NUM_KEYS = ['coverDays', 'safetyDays', 'leadDays', 'moscowFfDays', 'minOrderDays', 'usdPerKg', 'usd', 'cny'] as const;
+const NUM_KEYS = ['coverDays', 'safetyDays', 'leadDays', 'moscowFfDays', 'minOrderDays', 'usdPerKg', 'usd', 'cny', 'turnMin'] as const;
 export function setSettings(b: any, who: string): PurchaseSettings {
   const cur = getSettings();
   const next: any = { ...cur };
   for (const k of NUM_KEYS) {
     if (b?.[k] === undefined) continue;
     const n = Number(String(b[k]).replace(',', '.'));
-    if (!Number.isFinite(n) || n < 0 || n > 100_000) throw new Error(`неверное значение «${k}»`);
+    if (!Number.isFinite(n) || n < 0 || n > (k === 'turnMin' ? 100_000_000 : 100_000)) throw new Error(`неверное значение «${k}»`);
     next[k] = n;
   }
   if (b?.usd !== undefined || b?.cny !== undefined) next.ratesAt = mskDate(0);
@@ -253,6 +253,8 @@ export type PurchaseResponse = {
   lots: TransitLot[];
   failed: string[];
   notes: string[];
+  /** Сезонность категорий, которая идёт в расчёт (показ в настройках). */
+  seasonUsed: { category: string; wb: number[]; ozon: number[]; trendFrom: string; products: number }[];
 };
 
 let cache: { at: number; data: PurchaseResponse } | null = null;
@@ -378,6 +380,10 @@ async function build(): Promise<PurchaseResponse> {
   const { out: sales, names } = salesByKey(today, failed);
   const fbo = fboByKey(today, failed);
   const history = await wbHistory(failed);
+  // Сезонность категорий по площадкам (лист «Сезонность»): только то, что повторилось два года.
+  let seasonCats: import('./season').PurchaseSeasonCat[] = [];
+  try { seasonCats = await (await import('./season')).purchaseSeason(today); } catch (e) { failed.push(`сезонность категорий не прочитана — взята запасная (${(e as Error).message})`); }
+  const seasonByKey = new Map(seasonCats.flatMap(c => c.products.map(k => [k, c] as const)));
   const overrides = new Map((pdb().prepare('SELECT key, skip FROM pur_skip').all() as any[]).map(r => [String(r.key), Number(r.skip) === 1] as const));
 
   const rawRates = settings.usd > 0 && settings.cny > 0 ? null : await cbrRates();
@@ -424,6 +430,7 @@ async function build(): Promise<PurchaseResponse> {
       leadOwn: median(leads), leadSamples: leads.length,
       ...resolveSkip(p?.status ?? '', overrides.get(key)), planStatus: p?.status ?? '', planQty: p?.qty ?? 0,
       history: history.get(key),
+      seasonCat: (() => { const c = seasonByKey.get(key); return c ? { category: c.category, wb: c.wb, ozon: c.ozon, trendFrom: c.trendFrom } : undefined; })(),
     };
     // Нет партии в «В доставке» — цена фабрики ≈ себестоимость минус оценка логистики ($/кг).
     if (!x.factoryPrice && x.landedCost > 0) {
@@ -433,6 +440,7 @@ async function build(): Promise<PurchaseResponse> {
     const row = calcRow(x, calcSettings, today, leadDefault);
     if (!factory.has(key) && x.landedCost > 0) row.notes.push('цена фабрики оценена по себестоимости минус логистика');
     delete row.history;   // экрану история не нужна — только итоговые коэффициенты
+    delete row.seasonCat;
     if (calQty > 0) row.notes.push(`уже стоит в календаре «Финансов»: ${calQty} шт. — рекомендация сверх этого`);
     if (moving > 0) row.notes.push(`перемещается между нашими складами: ${moving} шт. (учтено в FBS)`);
     rows.push(row);
@@ -452,6 +460,7 @@ async function build(): Promise<PurchaseResponse> {
   return {
     ok: true, today, builtAt: new Date().toISOString(), settings, rates, leadDefault, leadSamples: tracker.allLeads.length,
     rows, totals: totals(rows), money, minBalance,
+    seasonUsed: seasonCats.map(c => ({ category: c.category, wb: c.wb, ozon: c.ozon, trendFrom: c.trendFrom, products: c.products.length })),
     lots: [...lots, ...tracker.lots.filter(t => t.issues.includes('в трекере едет, а в «В доставке» строки нет'))],
     failed, notes,
   };

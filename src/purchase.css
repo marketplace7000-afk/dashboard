@@ -194,3 +194,9 @@
 .pur-sea-goods ul { columns: 2; column-gap: 32px; display: block; }
 .pur-sea-goods li { break-inside: avoid; margin-bottom: 4px; }
 @media (max-width: 900px) { .pur-sea-goods ul { columns: 1; } }
+
+/* 22.11: «Увеличить оборачиваемость» и сезонность в настройках */
+.pur-turn-hint { font-size: var(--sa-cap); line-height: 1.45; background: #fff7e6; border-color: #f1d9a6; }
+.pur-st.heavy { background: #fff1e0; color: #a35c00; }
+.pur-season-used { margin: 8px 0 14px; }
+.pur-season-used td:first-child { min-width: 220px; }

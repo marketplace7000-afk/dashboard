@@ -4,10 +4,10 @@
  * Запуск: npx tsx scripts/check-purchase.ts
  */
 import {
-  DEFAULT_SETTINGS, calcRow, daysUntilOut, matchCalendarPurchase, mergePlanStatuses, moneyCheck, parseTracker, purchaseKey, resolveSkip, roundToBox, seasonFromHistory, usefulStock,
+  DEFAULT_SETTINGS, calcRow, daysUntilOut, matchCalendarPurchase, mergePlanStatuses, moneyCheck, parseTracker, purchaseKey, resolveSkip, roundToBox, seasonFromHistory, seasonRelative, usefulStock,
   type PurchaseInput,
 } from '../shared/purchase';
-import { mainQueries, seasonIndex, winterDrop } from '../shared/season';
+import { addMonths, calcSeason, mainQueries, seasonIndex, winterDrop } from '../shared/season';
 
 let fails = 0;
 const check = (name: string, got: unknown, want: unknown) => {
@@ -119,6 +119,30 @@ check('сезон: пропуск месяцев', seasonIndex([{ query: 'x', mo
 check('сезон: спад янв–фев к ноя–дек', winterDrop([0.5, 0.5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), 0.5);
 check('сезон: без зимы — нет спада', winterDrop([null, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), null);
 check('главные запросы без бренда', mainQueries([{ query: 'allpowers r600', freq: 900 }, { query: 'Портативная электростанция', freq: 500 }, { query: '123456', freq: 999 }, { query: 'электростанция', freq: 300 }, { query: 'зарядная станция', freq: 100 }], ['allpowers'], 2), ['портативная электростанция', 'электростанция']);
+
+// Сезонность для расчёта (22.11): только повторившаяся два года; новый тренд не берём.
+const yr = (from: string, vals: number[]) => Object.fromEntries(vals.map((v, i) => [addMonths(from, i), v]));
+// Ноябрь 2024 … октябрь 2026; декабрь (индекс 1 от ноября) — пик оба года.
+const both = { ...yr('2024-11', [10, 30, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10]), ...yr('2025-11', [10, 25, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10]) };
+const cs = calcSeason([{ query: 'q', months: both }], null, '2026-10')!;
+check('сезон расчёта: декабрь повторился — поднят', cs.k[11] > 1.3, true);
+check('сезон расчёта: обычный месяц чуть ниже пика', cs.k[5] < 1 && cs.k[5] > 0.85, true);
+check('сезон расчёта: тренда нет', cs.trendFrom, '');
+// Пик только во втором году — не сезон.
+const once = { ...yr('2024-11', Array(12).fill(10)), ...yr('2025-11', [10, 10, 10, 10, 10, 10, 10, 10, 10, 30, 10, 10]) };
+check('сезон расчёта: пик один год — не берём', calcSeason([{ query: 'q', months: once }], null, '2026-10')!.k[7], 1);
+// Летом 2026 рост в 3 раза к 2025 — тренд; в сезонность идёт форма первого года (июль +20 %).
+const trend = { ...yr('2024-11', [10, 10, 10, 10, 10, 10, 10, 10, 12, 12, 10, 10]), ...yr('2025-11', [10, 10, 10, 10, 10, 10, 10, 15, 36, 36, 30, 30]) };
+const ct = calcSeason([{ query: 'q', months: trend }], null, '2026-10')!;
+check('сезон расчёта: новый тренд найден', ct.trendFrom, '2026-07');
+check('сезон расчёта: при тренде пик не раздут', ct.k[6] < 1.25, true);
+check('сезон расчёта: площадка только смягчает', calcSeason([{ query: 'q', months: both }], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.1], '2026-10')!.k[11], 1.1);
+check('сезон расчёта: Вордстата за 2 года нет — null', calcSeason([{ query: 'q', months: yr('2025-11', Array(12).fill(10)) }], null, '2026-10'), null);
+const kDec = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5];
+check('множитель: декабрь к ноябрю ×1,5', Math.round(seasonRelative(kDec, '2026-12-01', '2026-12-01', 31) * 100) / 100, 1.5);
+const xs = calcRow(inp({ rate: { wb: 10, wbg: 0, ozon: 0 }, sold30: 300, seasonCat: { category: 'Доски', wb: kDec, ozon: Array(12).fill(1), trendFrom: '' } }), S, '2026-11-01', 20);
+check('категория главнее истории', xs.season.by, 'category');
+check('деньги в товаре', calcRow(inp({ stockFf: 1000, stockFbo: 500, transit: 100, landedCost: 150 }), S, T, 20).stockMoney, 225000);
 
 if (fails) { console.error(`\nОшибок: ${fails}`); process.exit(1); }
 console.log('\nЗакупки: всё сходится');

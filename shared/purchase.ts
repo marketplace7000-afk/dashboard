@@ -29,13 +29,15 @@ export type PurchaseSettings = {
   usd: number;
   cny: number;
   ratesAt: string;
-  /** Сезонность: коэффициент спроса по месяцам 1..12 (1 = как сейчас). */
+  /** Сезонность: коэффициент спроса по месяцам 1..12 (1 = как сейчас). Запасная — для товаров без сезонности категории. */
   season: number[];
+  /** «Увеличить оборачиваемость»: в товаре на складах лежит не меньше стольких ₽ по себестоимости (владелец 22.11: 100 тыс.). */
+  turnMin: number;
 };
 
 export const DEFAULT_SETTINGS: PurchaseSettings = {
   coverDays: 35, safetyDays: 10, leadDays: 0, moscowFfDays: 4, minOrderDays: 7, usdPerKg: 2,
-  usd: 0, cny: 0, ratesAt: '', season: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  usd: 0, cny: 0, ratesAt: '', season: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], turnMin: 100_000,
 };
 
 /** Партия в пути (из трекера закупщика). */
@@ -80,6 +82,8 @@ export type PurchaseInput = {
   planQty: number;
   /** Заказы ₽ по месяцам год назад (WB, отчёт «Культуры Аналитики») — для сезонности товара. */
   history?: Record<string, number>;
+  /** Сезонность категории товара по площадкам (лист «Сезонность», подтверждённая двумя годами Вордстата). */
+  seasonCat?: { category: string; wb: number[]; ozon: number[]; trendFrom: string };
 };
 
 export type Signal = 'late' | 'soon' | 'ok' | 'none' | 'skip';
@@ -104,7 +108,9 @@ export type PurchaseRow = PurchaseInput & {
   /** На сколько дней хватит FBO каждой площадки при её продажах (null — продаж там нет). */
   fboDays: { wb: number | null; ozon: number | null };
   /** Сезонные множители спроса: до прихода партии и пока партия продаётся; own — по истории самого товара. */
-  season: { now: number; sell: number; own: boolean };
+  season: { now: number; sell: number; own: boolean; by: 'category' | 'history' | 'settings' };
+  /** Деньги в товаре по себестоимости: на складах (FBS + FBO) и в пути из Китая. */
+  stockMoney: number; transitMoney: number;
   notes: string[];
 };
 
@@ -143,6 +149,16 @@ export function seasonFactor(season: number[], from: string, days: number): numb
     s += k > 0 ? k : 1;
   }
   return s / days;
+}
+
+/**
+ * Сезонный множитель по коэффициентам месяцев: среднее за дни [from, from+days) ÷ среднее за последние 30 дней
+ * (окно, по которому посчитан темп продаж — его сезон уже «внутри» темпа). 0,6–1,6.
+ */
+export function seasonRelative(k: number[], today: string, from: string, days: number): number {
+  const avgK = (a: string, n: number) => { let s = 0; for (let i = 0; i < n; i++) s += k[Number(addDays(a, i).slice(5, 7)) - 1] || 1; return s / n; };
+  if (days <= 0) return 1;
+  return Math.min(1.6, Math.max(0.6, avgK(from, days) / avgK(addDays(today, -30), 30)));
 }
 
 /**
@@ -215,7 +231,8 @@ export function calcRow(x: PurchaseInput, s: PurchaseSettings, today: string, le
   const v = basis === 'plan' ? { ...x, stockFf: x.stockFf + x.fbo.wb + x.fbo.ozon, fbo: { wb: 0, ozon: 0 } } : x;
   const base: PurchaseRow = {
     ...x, ratePerDay: rate, rateBasis: basis, lead, daysOnHand: null, daysTotal: null, stockoutDate: '', orderBy: '', daysToOrder: null,
-    signal: x.skip ? 'skip' : 'none', qty: 0, sumFactory: 0, sumLogistics: 0, gap: null, season: { now: 1, sell: 1, own: false },
+    signal: x.skip ? 'skip' : 'none', qty: 0, sumFactory: 0, sumLogistics: 0, gap: null, season: { now: 1, sell: 1, own: false, by: 'settings' },
+    stockMoney: Math.round((x.stockFf + x.stockFbo) * x.landedCost), transitMoney: Math.round(x.transit * x.landedCost),
     fboDays: { wb: x.rate.wb > 0 ? Math.round(x.fbo.wb / x.rate.wb) : null, ozon: x.rate.ozon > 0 ? Math.round(x.fbo.ozon / x.rate.ozon) : null }, notes,
   };
   if (rate <= 0) {
@@ -223,9 +240,17 @@ export function calcRow(x: PurchaseInput, s: PurchaseSettings, today: string, le
     return base;
   }
   // Продажи впереди с учётом сезонности: на время до прихода и на время продажи партии.
-  // Своя история товара год назад главнее общей сезонности из настроек.
-  const season = (from: string, days: number) => seasonFromHistory(x.history, today, from, days) ?? seasonFactor(s.season, from, days);
-  const ownSeason = seasonFromHistory(x.history, today, today, 1) !== null;
+  // 22.11: главная — сезонность категории по площадкам (повторилась два года, без новых трендов); нет её —
+  // своя история товара год назад; нет и её — запасные цифры из настроек.
+  const sc = x.seasonCat;
+  const catK = sc ? (() => {
+    const wbW = x.rate.wb + x.rate.wbg, ozW = x.rate.ozon, w = wbW + ozW;
+    return sc.wb.map((kw, m) => (w > 0 ? (wbW * kw + ozW * sc.ozon[m]) / w : (kw + sc.ozon[m]) / 2));
+  })() : null;
+  const ownSeason = !catK && seasonFromHistory(x.history, today, today, 1) !== null;
+  const by: PurchaseRow['season']['by'] = catK ? 'category' : ownSeason ? 'history' : 'settings';
+  const season = (from: string, days: number) => catK ? seasonRelative(catK, today, from, days)
+    : (seasonFromHistory(x.history, today, from, days) ?? seasonFactor(s.season, from, days));
   const kNow = season(today, Math.max(1, lead));
   const daysOnHand = daysUntilOut(v, rate, kNow, false);
   const daysTotal = daysUntilOut(v, rate, kNow, true);
@@ -265,10 +290,11 @@ export function calcRow(x: PurchaseInput, s: PurchaseSettings, today: string, le
     if (out < etas[0]) base.gap = { from: out, to: etas[0] };
   }
   if (x.inStockDays < 30 && basis === 'fact') notes.push(`в наличии был ${x.inStockDays} дн. из 30 — темп по этим дням`);
-  base.season = { now: kNow, sell: kSell, own: ownSeason };
-  if (Math.abs(kNow - 1) > 0.01 || Math.abs(kSell - 1) > 0.01) {
-    notes.push(`сезонность ${ownSeason ? 'по продажам товара год назад' : 'общая'}: до прихода ×${kNow.toFixed(2)}, партия ×${kSell.toFixed(2)}`);
-  }
+  base.season = { now: kNow, sell: kSell, own: ownSeason, by };
+  const how = by === 'category' ? `категории «${sc!.category}» (WB и Ozon, повторилась два года по Вордстату)` : by === 'history' ? 'по продажам товара год назад' : 'из настроек';
+  if (Math.abs(kNow - 1) > 0.01 || Math.abs(kSell - 1) > 0.01) notes.push(`сезонность ${how}: до прихода ×${kNow.toFixed(2)}, партия ×${kSell.toFixed(2)}`);
+  else if (by === 'category') notes.push(`сезонность категории «${sc!.category}»: на эти месяцы спрос обычный (×1)`);
+  if (sc?.trendFrom) notes.push(`с ${sc.trendFrom.slice(5, 7)}.${sc.trendFrom.slice(0, 4)} спрос категории вырос в разы — это новый тренд, в сезонность не взят`);
   return base;
 }
 

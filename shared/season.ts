@@ -102,3 +102,61 @@ export type SeasonResponse = {
   pending: { ozon: number; wordstat: number };
   notes: string[];
 };
+
+/** 'YYYY-MM' + n месяцев. */
+export function addMonths(m: string, n: number): string {
+  const t = Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7)) - 1 + n;
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`;
+}
+const onlyMonths = (ss: QuerySeries[], from: string, to: string): QuerySeries[] =>
+  ss.map(s => ({ query: s.query, months: Object.fromEntries(Object.entries(s.months).filter(([m]) => m >= from && m <= to)) }));
+const median = (xs: number[]) => { const a = [...xs].sort((x, y) => x - y); return a.length ? (a.length % 2 ? a[a.length >> 1] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : 0; };
+
+/** Сезонность для расчёта закупки: коэффициент месяца (0 = январь), 1 — месяц не трогаем. */
+export type CalcSeason = {
+  k: number[];
+  /** С какого месяца начался новый тренд ('' — тренда нет): последний год вырос в разы к прошлому — в сезонность не берём. */
+  trendFrom: string;
+  /** Сколько месяцев подтверждено двумя годами (не равны 1). */
+  confirmed: number;
+};
+
+/**
+ * Решение владельца 22.11: в расчёт идёт только сезонность, которая повторилась два года подряд по Вордстату
+ * (год A — 24–13 месяцев назад, год B — последние 12 полных месяцев). Месяц поднят, только если он выше
+ * обычного в ОБА года, опущен — если ниже в оба года; берём более осторожное из двух значений.
+ * Площадка (WB или Ozon, их 12 месяцев совпадают с годом B) может только смягчить коэффициент, не усилить.
+ * Новый тренд — последние 4 месяца года B выше тех же месяцев года A в 1,6+ раза (у станций лето 2026 — в 2–3 раза):
+ * тогда год B и площадку не берём вовсе, остаётся форма года A. Коэффициент — от 0,6 до 1,6.
+ * Вордстата за два года нет — null (расчёт возьмёт запасной способ).
+ */
+export function calcSeason(ws: QuerySeries[], mp: (number | null)[] | null, lastMonth: string): CalcSeason | null {
+  const bFrom = addMonths(lastMonth, -11), aTo = addMonths(lastMonth, -12), aFrom = addMonths(lastMonth, -23);
+  const A = seasonIndex(onlyMonths(ws, aFrom, aTo)), B = seasonIndex(onlyMonths(ws, bFrom, lastMonth));
+  if (!A.queries || !B.queries) return null;
+  // Тренд: рост уровня (сырые доли, не формы) месяца к тому же месяцу год назад.
+  const growth = (m: string) => median(ws.map(s => { const a = s.months[addMonths(m, -12)], b = s.months[m]; return a > 0 && b > 0 ? b / a : NaN; }).filter(Number.isFinite));
+  const last4 = [0, 1, 2, 3].map(i => addMonths(lastMonth, -i));
+  const g4 = median(ws.map(s => {
+    let a = 0, b = 0;
+    for (const m of last4) { a += s.months[addMonths(m, -12)] ?? 0; b += s.months[m] ?? 0; }
+    return a > 0 && b > 0 ? b / a : NaN;
+  }).filter(Number.isFinite));
+  let trendFrom = '';
+  if (g4 >= 1.6) {
+    for (let i = 11; i >= 0; i--) { const m = addMonths(lastMonth, -i); if (growth(m) >= 1.6) { trendFrom = m; break; } }
+    trendFrom = trendFrom || last4[3];
+  }
+  const clamp = (x: number) => Math.min(1.6, Math.max(0.6, x));
+  const k = Array.from({ length: 12 }, (_, m) => {
+    const a = A.k[m], b = B.k[m];
+    if (a == null) return 1;
+    if (trendFrom) return Math.abs(a - 1) >= 0.1 ? clamp(a) : 1;
+    if (b == null) return 1;
+    let c = a >= 1.1 && b >= 1.1 ? Math.min(a, b) : a <= 0.9 && b <= 0.9 ? Math.max(a, b) : 1;
+    const x = mp?.[m];
+    if (c !== 1 && x != null) c = c > 1 ? Math.min(c, Math.max(1, x)) : Math.max(c, Math.min(1, x));
+    return clamp(c);
+  });
+  return { k, trendFrom, confirmed: k.filter(x => x !== 1).length };
+}

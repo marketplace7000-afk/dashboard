@@ -19,7 +19,7 @@ import { wbUpstream } from '../_proxy';
 import { rnpCategories, rnpItems } from './rnp';
 import { SLOTS, everyAligned } from './cronSchedule';
 import { purchaseKey } from '../../shared/purchase';
-import { SKIP_MONTHS, mainQueries, seasonIndex, winterDrop, type QuerySeries, type SeasonCategory, type SeasonResponse, type SeasonSource } from '../../shared/season';
+import { SKIP_MONTHS, addMonths, calcSeason, mainQueries, seasonIndex, winterDrop, type QuerySeries, type SeasonCategory, type SeasonResponse, type SeasonSource } from '../../shared/season';
 // sq_wordstat_query и sq_month_done — служебные; ряды всех источников — в sq_freq (Ozon и Вордстат: key = 'cat:<категория>').
 
 let DatabaseSync: any = null;
@@ -422,4 +422,31 @@ export async function getSeason(): Promise<SeasonResponse> {
   const left = await seasonAgentParams().catch(() => null);
   const pending = left ? { ozon: left.ozon.reduce((a, m) => a + m.items.length, 0), wordstat: left.wordstat.length } : { ozon: 0, wordstat: 0 };
   return { ok: true, builtAt: nowIso(), categories, runs, notes: [], coverage, pending };
+}
+
+/** Сезонность категории для расчёта закупки. */
+export type PurchaseSeasonCat = { category: string; wb: number[]; ozon: number[]; trendFrom: string; confirmed: number; products: string[] };
+
+/**
+ * Сезонность для «Что заказать» (22.11): по каждой категории — коэффициенты месяцев для WB и для Ozon,
+ * только подтверждённые двумя годами Вордстата (shared/season.ts → calcSeason). Категория без Вордстата за
+ * два года в список не попадает — её товары считаются запасным способом.
+ */
+export async function purchaseSeason(today = mskDate(0)): Promise<PurchaseSeasonCat[]> {
+  const d = seasonDb();
+  const sea = await getSeason();
+  const lastMonth = addMonths(today.slice(0, 7), -1);
+  const out: PurchaseSeasonCat[] = [];
+  for (const c of sea.categories) {
+    const ws = c.queries.map(q => {
+      const months: Record<string, number> = {};
+      for (const r of d.prepare("SELECT month, freq FROM sq_freq WHERE source = 'wordstat' AND key = ? AND query = ?").all(catKey(c.category), q.query) as any[]) months[r.month] = Number(r.freq);
+      return { query: q.query, months };
+    });
+    const wb = calcSeason(ws, c.sources.wb?.k ?? null, lastMonth);
+    if (!wb) continue;
+    const oz = calcSeason(ws, c.sources.ozon?.k ?? null, lastMonth) ?? wb;
+    out.push({ category: c.category, wb: wb.k, ozon: oz.k, trendFrom: wb.trendFrom, confirmed: Math.max(wb.confirmed, oz.confirmed), products: c.products.map(p => p.key) });
+  }
+  return out;
 }

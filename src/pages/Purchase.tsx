@@ -14,8 +14,11 @@ type Resp = {
   ok: true; today: string; builtAt: string; settings: PurchaseSettings;
   rates: { usd: number; cny: number; source: 'owner' | 'cbr' | 'none'; date: string };
   leadDefault: number; leadSamples: number; rows: PurchaseRow[]; totals: PurchaseTotals; lots: TransitLot[]; failed: string[]; notes: string[]; money: MoneyCheck | null; minBalance: number;
+  seasonUsed?: { category: string; wb: number[]; ozon: number[]; trendFrom: string; products: number }[];
 };
-type Filter = 'order' | 'all' | 'ok' | 'skip';
+type Filter = 'order' | 'all' | 'ok' | 'turn' | 'skip';
+/** Много денег в товаре (≥ порога из настроек) — вкладка «Увеличить оборачиваемость». Архив тоже: его как раз надо распродать. */
+const heavy = (r: PurchaseRow, min: number) => r.stockMoney >= min;
 
 /** Почему товар в архиве или почему нет, хотя «План» говорит иное. */
 const skipNote = (r: PurchaseRow) =>
@@ -94,15 +97,17 @@ function PurchaseBuy() {
       if (filter === 'order') return r.signal === 'late' || r.signal === 'soon';
       if (filter === 'ok') return r.signal === 'ok';
       if (filter === 'skip') return r.signal === 'skip';
+      if (filter === 'turn') return heavy(r, data?.settings.turnMin ?? 100_000);
       return r.signal !== 'skip';   // «Все» — без архива
-    }).sort((a, b) => (filter === 'order' ? (a.daysToOrder ?? 1e9) - (b.daysToOrder ?? 1e9) : 0));   // «К заказу» — сначала самое срочное
+    }).sort((a, b) => (filter === 'order' ? (a.daysToOrder ?? 1e9) - (b.daysToOrder ?? 1e9)   // «К заказу» — сначала самое срочное
+      : filter === 'turn' ? b.stockMoney - a.stockMoney : 0));                                     // «Оборачиваемость» — где больше денег
   }, [data, filter, q]);
 
   if (!data) {
     return <div className="card">{err ? <span className="bad">Не загрузилось: {err}</span> : 'Считаю закупки…'}</div>;
   }
   const t = data.totals;
-  const counts = { order: t.late + t.soon, all: data.rows.filter(r => r.signal !== 'skip').length, ok: t.ok, skip: data.rows.filter(r => r.signal === 'skip').length };
+  const counts = { order: t.late + t.soon, all: data.rows.filter(r => r.signal !== 'skip').length, ok: t.ok, skip: data.rows.filter(r => r.signal === 'skip').length, turn: data.rows.filter(r => heavy(r, data.settings.turnMin ?? 100_000)).length };
 
   return (
     <>
@@ -124,7 +129,7 @@ function PurchaseBuy() {
 
       <div className="pur-bar">
         <div className="sa-seg">
-          {([['order', 'К заказу'], ['all', 'Все'], ['ok', 'Запас есть'], ['skip', 'Архив']] as Array<[Filter, string]>).map(([k, l]) => (
+          {([['order', 'К заказу'], ['all', 'Все'], ['ok', 'Запас есть'], ['turn', 'Увеличить оборачиваемость'], ['skip', 'Архив']] as Array<[Filter, string]>).map(([k, l]) => (
             <button key={k} className={filter === k ? 'on' : ''} onClick={() => setF(k)}>{l} <span className="muted">{counts[k]}</span></button>
           ))}
         </div>
@@ -137,6 +142,13 @@ function PurchaseBuy() {
         <button className="btn" onClick={() => setShowSettings(v => !v)}><GearIcon size={18} /> Настройки</button>
         <button className="btn" disabled={busy} onClick={() => void load(true)}><ArrowClockwiseIcon size={18} /> {busy ? 'Считаю…' : 'Пересчитать'}</button>
       </div>
+
+      {filter === 'turn' && (
+        <div className="pur-box pur-turn-hint">
+          Товары, в которых на складах лежит от {rub(data.settings.turnMin ?? 100_000)} по себестоимости — сначала где денег больше всего.
+          Эти деньги нужно обернуть: реклама, акции и скидки, перенос остатков туда, где продаётся. «Продастся за» — при нынешних продажах.
+        </div>
+      )}
 
       {showSettings && <SettingsPanel data={data} onSaved={() => { setShowSettings(false); void load(true); }} />}
 
@@ -151,7 +163,7 @@ function PurchaseBuy() {
                 <th className="num">Едет из Китая</th>
                 <th className="num">Хватит, дней</th>
                 <th>Когда заказать</th>
-                <th className="num">Сколько и сумма</th>
+                <th className="num">{filter === 'turn' ? 'Денег в товаре' : 'Сколько и сумма'}</th>
                 <th>В архив</th>
               </tr>
             </thead>
@@ -167,7 +179,7 @@ function PurchaseBuy() {
                         <span className="pur-caret">{isOpen ? <CaretUpIcon size={16} /> : <CaretDownIcon size={16} />}</span>
                         <div>
                           <div>{r.name}</div>
-                          <div className="muted pur-art">{r.articles.join(' · ')}{r.planStatus && r.planStatus !== 'Рабочий' && <span className={`chip pur-st ${r.planStatus === 'Новинка' ? 'new' : 'out'}`}>{r.planStatus}</span>}</div>
+                          <div className="muted pur-art">{r.articles.join(' · ')}{r.planStatus && r.planStatus !== 'Рабочий' && <span className={`chip pur-st ${r.planStatus === 'Новинка' ? 'new' : 'out'}`}>{r.planStatus}</span>}{filter !== 'turn' && heavy(r, data.settings.turnMin ?? 100_000) && <span className="chip pur-st heavy" title="Много денег в товаре — см. «Увеличить оборачиваемость»">{mln(r.stockMoney)} в товаре</span>}</div>
                         </div>
                       </div></td>
                       <td className="num">{r.ratePerDay ? nf1.format(r.ratePerDay) : '–'}{r.rateBasis === 'plan' && <div className="muted pur-sub">по плану</div>}</td>
@@ -175,7 +187,11 @@ function PurchaseBuy() {
                       <td className="num">{r.transit ? nf0.format(r.transit) : '–'}{etas.length > 0 && <div className="muted pur-sub">≈ {ddmm(etas[0])}</div>}</td>
                       <td className="num">{r.daysOnHand ?? '–'}{r.transit > 0 && r.daysTotal !== null && <div className="muted pur-sub">с едущим {r.daysTotal}</div>}</td>
                       <td><span className={`pur-sig ${sig.cls}`}>{sig.label}</span><div className="pur-sub">{whenText(r)}</div>{r.gap && <div className="pur-sub bad">не будет с {ddmm(r.gap.from)} до {ddmm(r.gap.to)}</div>}</td>
-                      <td className="num">{r.qty ? `${nf0.format(r.qty)} шт.` : '–'}{r.qty > 0 && <div className="pur-sub">{rub(r.sumFactory + r.sumLogistics)}</div>}{r.boxQty > 1 && r.qty > 0 && <div className="muted pur-sub">коробка {r.boxQty}</div>}</td>
+                      {filter === 'turn' ? (
+                        <td className="num"><b className={r.daysOnHand != null && r.daysOnHand > 60 ? 'bad' : ''}>{rub(r.stockMoney)}</b>
+                          <div className="pur-sub">{r.daysOnHand == null ? 'продаж нет' : `продастся за ${r.daysOnHand >= 999 ? '999+' : r.daysOnHand} дн.`}</div>
+                          {r.transitMoney > 0 && <div className="muted pur-sub">+ {rub(r.transitMoney)} в пути</div>}</td>
+                      ) : <td className="num">{r.qty ? `${nf0.format(r.qty)} шт.` : '–'}{r.qty > 0 && <div className="pur-sub">{rub(r.sumFactory + r.sumLogistics)}</div>}{r.boxQty > 1 && r.qty > 0 && <div className="muted pur-sub">коробка {r.boxQty}</div>}</td>}
                       <td onClick={e => e.stopPropagation()}>
                         <label className="pur-skip" title="Архив: не предлагать к заказу, не считать в деньгах и в утренней сводке"><input type="checkbox" checked={r.skip} onChange={e => void toggleSkip(r.key, e.target.checked)} /> </label>
                         {skipNote(r) && <div className="muted pur-sub">{skipNote(r)}</div>}
@@ -219,6 +235,7 @@ function RowDetail({ r }: { r: PurchaseRow }) {
         {mp('Ozon', r.rate.ozon, r.fbo.ozon, r.fboDays.ozon)}
         <div className="pur-box-row"><span className="muted">Продано за 7 / 30 дней</span><span>{nf0.format(r.sold7)} / {nf0.format(r.sold30)} шт.</span></div>
         <div className="pur-box-row"><span className="muted">В наличии</span><span>{r.inStockDays} дн. из 30</span></div>
+        <div className="pur-box-row"><span className="muted">Денег в товаре (по себестоимости)</span><span>{rub(r.stockMoney)}{r.transitMoney > 0 ? ` + ${rub(r.transitMoney)} в пути` : ''}</span></div>
       </div>
       <div className="pur-box">
         <div className="pur-box-h">Заказ и деньги</div>
@@ -280,7 +297,7 @@ function SettingsPanel({ data, onSaved }: { data: Resp; onSaved: () => void }) {
   const [f, setF] = useState(() => ({
     coverDays: String(s.coverDays), safetyDays: String(s.safetyDays), leadDays: String(s.leadDays), minOrderDays: String(s.minOrderDays),
     usdPerKg: String(s.usdPerKg), usd: s.usd ? String(s.usd) : '', cny: s.cny ? String(s.cny) : '',
-    season: s.season.map(String),
+    season: s.season.map(String), turnMin: String(s.turnMin ?? 100_000),
   }));
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -308,9 +325,33 @@ function SettingsPanel({ data, onSaved }: { data: Resp; onSaved: () => void }) {
         {field('usdPerKg', 'Логистика, $ за кг', 'Китай → Москва')}
         {field('usd', 'Курс доллара, ₽', `пусто — курс ЦБ (${nf1.format(data.rates.usd)})`)}
         {field('cny', 'Курс юаня, ₽', `пусто — курс ЦБ (${nf1.format(data.rates.cny)})`)}
+        {field('turnMin', 'Увеличить оборачиваемость от, ₽', 'денег в товаре на складах')}
       </div>
-      <h3 className="pur-h3">Сезонность по месяцам (1 — как сейчас)</h3>
-      <div className="muted pur-sub">Если у товара есть продажи WB год назад, сезонность берётся из них; эти цифры — для остальных товаров.</div>
+      <h3 className="pur-h3">Сезонность, которая идёт в расчёт</h3>
+      <div className="muted pur-sub">
+        По категориям, с листа «Сезонность»: WB и Ozon отдельно, в расчёт товара — по его продажам на каждой площадке. Берём только то, что
+        повторилось два года подряд по Вордстату. Резкий рост последнего года (новый тренд, как у станций летом 2026) не берём — неизвестно, повторится ли.
+      </div>
+      {data.seasonUsed?.length ? (
+        <div className="pur-scroll">
+          <table className="pur-table pur-sea pur-sea-mini pur-season-used">
+            <thead><tr><th>Категория</th>{MONTHS.map(m => <th key={m} className="num">{m}</th>)}</tr></thead>
+            <tbody>
+              {data.seasonUsed.map(c => {
+                const k = c.wb.map((x, i) => (x + c.ozon[i]) / 2);
+                return (
+                  <tr key={c.category}>
+                    <td>{c.category}<div className="muted pur-sub">{c.products} тов.{c.trendFrom ? ` · новый тренд с ${c.trendFrom.slice(5, 7)}.${c.trendFrom.slice(0, 4)} не взят` : ''}</div></td>
+                    {k.map((x, i) => <td key={i} className={`num pur-sea-cell ${x > 1.005 ? 'pur-sea-up' : x < 0.995 ? 'pur-sea-down' : 'muted'}`}>{Math.abs(x - 1) < 0.005 ? '·' : `${x > 1 ? '+' : '−'}${Math.round(Math.abs(x - 1) * 100)}`}</td>)}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : <div className="muted">Пока нет: для сезонности нужен Вордстат за два года.</div>}
+      <h3 className="pur-h3">Запасная сезонность (1 — как сейчас)</h3>
+      <div className="muted pur-sub">Только для товаров вне категорий выше: сначала их продажи WB год назад, нет их — эти цифры.</div>
       <div className="pur-season">
         {MONTHS.map((m, i) => (
           <label key={m} className="pur-field small"><span>{m}</span>

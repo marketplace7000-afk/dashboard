@@ -1,7 +1,8 @@
 /**
- * Проверка связки «Платёжный календарь → YouGile» (21.11.2026) на поддельном YouGile:
- * задача за 3 дня, повтор за 2, «Критически важно» за 1, закрытие по «Исполнено», удаление по «Отменено»,
- * правка при смене даты, выводы (приходы) не трогаем, ночью не пишем. Запуск: npx tsx scripts/check-fin-yougile.ts
+ * Проверка связки «Платёжный календарь → YouGile» на поддельном YouGile (23.11.2026 — одна задача в день):
+ * задача дня со списком платежей на 3 дня вперёд и просроченных, «Исполнено» убирает строку, всё оплачено — задача закрыта,
+ * назавтра вчерашняя закрывается, плашка при платеже сегодня/завтра, выводы (приходы) не берём, ночью не пишем,
+ * задачи старой схемы (по одной на платёж) удаляются. Запуск: npx tsx scripts/check-fin-yougile.ts
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +15,7 @@ const check = (name: string, got: unknown, want: unknown) => {
 };
 
 // ─── поддельный YouGile ───────────────────────────────────────────────────
-type Task = { id: string; col: string; title: string; deadline?: any; stickers: Record<string, string>; completed: boolean; deleted: boolean; assigned: string[]; msgs: string[] };
+type Task = { id: string; col: string; title: string; description?: string; deadline?: any; stickers: Record<string, string>; completed: boolean; deleted: boolean; assigned: string[]; msgs: string[] };
 const tasks = new Map<string, Task>(); let seq = 0;
 const stickers: any[] = [{ id: 'S1', name: 'Приоритет', states: [{ id: 'ST0', name: 'срочно' }, { id: 'ST1', name: 'критично важно' }] }]; let boardCustom: Record<string, boolean> = {};
 (globalThis as any).fetch = async (url: string, init: any) => {
@@ -32,13 +33,14 @@ const stickers: any[] = [{ id: 'S1', name: 'Приоритет', states: [{ id: 
   if (m === 'GET' && path === '/string-stickers/S1') return ok(stickers[0]);
   if (m === 'POST' && path === '/tasks') {
     const id = 'T' + (++seq);
-    tasks.set(id, { id, col: body.columnId, title: body.title, deadline: body.deadline, stickers: body.stickers ?? {}, completed: false, deleted: false, assigned: body.assigned, msgs: [] });
+    tasks.set(id, { id, col: body.columnId, title: body.title, description: body.description, deadline: body.deadline, stickers: body.stickers ?? {}, completed: false, deleted: false, assigned: body.assigned, msgs: [] });
     return ok({ id }, 201);
   }
   const tm = path.match(/^\/tasks\/(T\d+)$/);
   if (tm && m === 'PUT') {
     const t = tasks.get(tm[1]); if (!t || t.deleted) return ok({ error: 'not found' }, 404);
     if (body.title) t.title = body.title;
+    if (body.description) t.description = body.description;
     if (body.deadline) t.deadline = body.deadline;
     if (body.completed !== undefined) t.completed = body.completed;
     if (body.deleted) t.deleted = true;
@@ -56,61 +58,68 @@ const stickers: any[] = [{ id: 'S1', name: 'Приоритет', states: [{ id: 
   const f = await import('../api/_lib/finance');
   const y = await import('../api/_lib/financeYougile');
   const ddate = (t: Task) => new Date(t.deadline.deadline + 3 * 3_600_000).toISOString().slice(0, 10);
+  const open = () => [...tasks.values()].filter(t => !t.deleted && !t.completed);
   try {
     const at = (day: string, h = 11) => Date.parse(`${day}T${String(h - 3).padStart(2, '0')}:00:00Z`);   // h — час по Москве
-    check('напоминание: за 3 дня', y.stageFor('2026-11-25', '2026-11-22'), 3);
-    check('напоминание: рано', y.stageFor('2026-11-26', '2026-11-22'), null);
-    check('напоминание: дата прошла', y.stageFor('2026-11-21', '2026-11-22'), null);
 
-    const pay = f.saveOp({ date: '2026-11-25', type: 'out', cat: 'Ко-Фи — платёж по займу', descr: '', plan: 117280, status: 'План' }, 'проверка');
+    const kofi = f.saveOp({ date: '2026-11-25', type: 'out', cat: 'Ко-Фи — платёж по займу', descr: '', plan: 117280, status: 'План' }, 'проверка');
     const salary = f.saveOp({ date: '2026-11-25', type: 'out', cat: 'ЗП дизайнера', descr: '', plan: 30000, status: 'Подтверждено' }, 'проверка');
-    f.saveOp({ date: '2026-11-24', type: 'in', cat: 'Вывод WB', descr: '', plan: 500000, status: 'Прогноз' }, 'проверка');
+    f.saveOp({ date: '2026-11-24', type: 'in', cat: 'Выплата Ozon', descr: '', plan: 500000, status: 'Подтверждено' }, 'проверка');
     f.saveOp({ date: '2026-12-10', type: 'out', cat: 'Аренда помещения', descr: '', plan: 50000, status: 'План' }, 'проверка');
+    f.saveOp({ date: '2026-11-01', type: 'out', cat: 'Старый неотмеченный', descr: '', plan: 1000, status: 'План' }, 'проверка');
+
+    // Задача старой схемы (по одной на платёж) — должна удалиться при первом проходе.
+    tasks.set('T0', { id: 'T0', col: 'C1', title: 'Ко-Фи — платёж по займу', stickers: {}, completed: false, deleted: false, assigned: ['U-A'], msgs: [] });
+    f.finDb().exec(`CREATE TABLE IF NOT EXISTS fin_yougile (op_id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, stage INTEGER, sig TEXT NOT NULL DEFAULT '',
+      done INTEGER NOT NULL DEFAULT 0, critical INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+    f.finDb().prepare("INSERT INTO fin_yougile (op_id, task_id, created_at, updated_at) VALUES (?, 'T0', 'x', 'x')").run(kofi.id);
 
     const night = await y.syncYougile(at('2026-11-22', 4));
-    check('ночью задачи не ставим', [night?.ok, tasks.size], [true, 0]);
+    check('ночью задачу не ставим, старую по платежу убрали', [night?.ok, open().length, tasks.get('T0')!.deleted], [true, 0, true]);
 
     const s1 = await y.syncYougile(at('2026-11-22'));
-    check('за 3 дня: две задачи, вывод и далёкая аренда — без задач', [s1?.ok, s1?.created, tasks.size], [true, 2, 2]);
-    const t1 = [...tasks.values()].find(t => t.title.startsWith('Ко-Фи'))!;
-    check('задача: колонка «К работе», исполнитель Александр, дедлайн = дата платежа', [t1.col, t1.assigned, ddate(t1)], ['C1', ['U-A'], '2026-11-25']);
-    check('первое упоминание с суммой', [t1.msgs.length, t1.msgs[0].includes('[!mention:U-A!]'), t1.msgs[0].includes('117 280 ₽'), t1.msgs[0].includes('через 3 дня')], [1, true, true, true]);
-    check('взята своя плашка «Приоритет: критично важно», новая не создана, включена на доске', [stickers.length, boardCustom.S1], [1, true]);
+    const d1 = open();
+    check('утром — одна задача на все платежи ближайших 3 дней', [s1?.created, d1.length, d1[0]?.title], [1, 1, 'Пора платить по платежам · 22.11']);
+    check('в задаче: Александр, колонка «К работе», дедлайн — ближайший платёж', [d1[0].assigned, d1[0].col, ddate(d1[0])], [['U-A'], 'C1', '2026-11-25']);
+    const msg = d1[0].msgs[0] ?? '';
+    check('комментарий: упоминание, оба платежа, итог; вывод, аренда и старьё не попали',
+      [msg.startsWith('[!mention:U-A!], дорогой друг, пора платить'), msg.includes('Ко-Фи — платёж по займу — 117 280 ₽'), msg.includes('ЗП дизайнера'), msg.includes('Итого: 2 платежа на 147 280 ₽'),
+        msg.includes('Выплата Ozon'), msg.includes('Аренда'), msg.includes('Старый')], [true, true, true, true, false, false, false]);
+    check('за 3 дня плашки нет', Object.keys(d1[0].stickers).length, 0);
 
     const again = await y.syncYougile(at('2026-11-22', 15));
-    check('в тот же день повторно не пишем', [again?.reminded, t1.msgs.length, tasks.size], [0, 1, 2]);
-
-    await y.syncYougile(at('2026-11-23'));
-    check('за 2 дня — второе упоминание', [t1.msgs.length, t1.msgs[1].startsWith('[!mention:U-A!], Повторно'), Object.keys(t1.stickers).length], [2, true, 0]);
+    check('в тот же день вторую задачу не ставим', [again?.created, open().length, d1[0].msgs.length], [0, 1, 1]);
 
     f.saveOp({ ...salary, status: 'Исполнено', fact: 30000 }, 'проверка');
+    const s2 = await y.syncYougile(at('2026-11-22', 16));
+    check('отметили «Исполнено» — строка ушла из списка (описание поправлено)', [s2?.updated, d1[0].description.includes('ЗП дизайнера'), d1[0].description.includes('Итого: 1 платёж')], [1, false, true]);
+
     const s3 = await y.syncYougile(at('2026-11-24'));
-    const t2 = [...tasks.values()].find(t => t.title.startsWith('ЗП'))!;
-    check('за 1 день — «Критически важно»', [t1.msgs.length, t1.stickers.S1, t1.msgs[2].includes('Критически важно')], [3, 'ST1', true]);
-    check('исполнено — задача закрыта, напоминаний больше нет', [t2.completed, t2.msgs.length, s3?.closed], [true, 2, 1]);
+    const d2 = open();
+    check('на следующий день: вчерашняя закрыта, новая одна, с плашкой (платёж завтра)', [s3?.closed, d1[0].completed, d2.length, d2[0]?.title, d2[0]?.stickers.S1], [1, true, 1, 'Пора платить по платежам · 24.11', 'ST1']);
+    check('в новой — «завтра, 25.11»', (d2[0]?.msgs[0] ?? '').includes('завтра, 25.11'), true);
 
-    f.saveOp({ ...pay, date: '2026-12-05' }, 'проверка');
-    await y.syncYougile(at('2026-11-24', 16));
-    check('дату отодвинули — дедлайн новый, плашка снята', [ddate(t1), t1.stickers.S1 ?? null], ['2026-12-05', null]);
-    await y.syncYougile(at('2026-12-02'));
-    check('…и напоминания пошли заново за 3 дня', [t1.msgs.length, t1.msgs[3]?.includes('через 3 дня')], [4, true]);
+    f.saveOp({ ...kofi, status: 'Исполнено', fact: 117280 }, 'проверка');
+    const s4 = await y.syncYougile(at('2026-11-24', 13));
+    check('всё оплачено — задача закрыта', [s4?.closed, d2[0].completed, open().length], [1, true, 0]);
+    await y.syncYougile(at('2026-11-24', 14));
+    check('после закрытия в тот же день новую не ставим', open().length, 0);
 
-    f.saveOp({ ...pay, date: '2026-12-05', status: 'Отменено' }, 'проверка');
-    const s5 = await y.syncYougile(at('2026-12-02', 12));
-    check('отменено — задача удалена', [t1.deleted, s5?.removed], [true, 1]);
+    const late = f.saveOp({ date: '2026-11-24', type: 'out', cat: 'Услуги банка', descr: '', plan: 990, status: 'План' }, 'проверка');
+    await y.syncYougile(at('2026-11-26'));
+    const d3 = open();
+    check('просроченный и не отмеченный — в списке, с плашкой', [d3.length, (d3[0]?.msgs[0] ?? '').includes('просрочено (24.11)'), d3[0]?.stickers.S1], [1, true, 'ST1']);
 
-    // Задачу удалили в YouGile руками — связь забывается и задача ставится заново.
-    const bank = f.saveOp({ date: '2026-12-04', type: 'out', cat: 'Услуги банка', descr: '', plan: 990, status: 'План' }, 'проверка');
-    await y.syncYougile(at('2026-12-02', 13));
-    [...tasks.values()].find(t => t.title === 'Услуги банка')!.deleted = true;
-    f.saveOp({ ...bank, plan: 1200 }, 'проверка');
-    await y.syncYougile(at('2026-12-02', 14));
-    await y.syncYougile(at('2026-12-02', 15));
-    check('задачу удалили руками — поставлена заново', [...tasks.values()].filter(t => t.title === 'Услуги банка' && !t.deleted).length, 1);
+    // Задачу дня удалили руками — ставится заново.
+    d3[0].deleted = true;
+    f.saveOp({ ...late, plan: 1200 }, 'проверка');
+    await y.syncYougile(at('2026-11-26', 12));
+    await y.syncYougile(at('2026-11-26', 13));
+    check('задачу дня удалили руками — поставлена заново', open().length, 1);
 
     check('последний проход записан', y.ygState()?.ok, true);
     delete process.env.YOUGILE_KEY;
-    check('без ключа связка спит', await y.syncYougile(at('2026-12-03')), null);
+    check('без ключа связка спит', await y.syncYougile(at('2026-11-27')), null);
   } finally { f.closeFinDb(); rmSync(dir, { recursive: true, force: true }); }
   if (fails) { console.error(`check-fin-yougile: ошибок ${fails}`); process.exit(1); }
   console.log('check-fin-yougile: всё верно');

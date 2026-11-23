@@ -7,6 +7,7 @@
  * Все расчёты — на сервере и в shared/finance.ts; экран только показывает и отправляет правки.
  */
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { CaretLeftIcon, CaretRightIcon, PlusIcon, PencilSimpleIcon, TrashIcon, CheckIcon, ArrowClockwiseIcon, XIcon, CaretDownIcon, CaretUpIcon } from '@phosphor-icons/react';
 import { Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import '../finance.css';
@@ -257,6 +258,23 @@ function CalendarTab({ month, setMonth, meta, linkForm, onLinkFormUsed, onMetaCh
   const [q, setQ] = useState('');
   const [showEmpty, setShowEmpty] = useState(false);
   const [menu, setMenu] = useState<number | null>(null);
+  // 23.11: список статусов — поверх всей страницы (fixed), а не внутри строки: в низких строках и у прошедших дней его обрезало.
+  // Не влезает вниз — открывается вверх. При прокрутке и изменении окна закрывается.
+  const [menuAt, setMenuAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
+  const openMenu = (id: number, el: HTMLElement) => {
+    if (menu === id) { setMenu(null); return; }
+    const r = el.getBoundingClientRect(), need = OP_STATUSES.length * 46 + 16;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - 220));
+    setMenuAt(window.innerHeight - r.bottom >= need || r.top < need ? { left, top: r.bottom + 4 } : { left, bottom: window.innerHeight - r.top + 4 });
+    setMenu(id);
+  };
+  useEffect(() => {
+    if (menu === null) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('resize', close); window.addEventListener('scroll', close, true); window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('resize', close); window.removeEventListener('scroll', close, true); window.removeEventListener('keydown', onKey); };
+  }, [menu]);
   const [toast, setToast] = useState('');
   const v = data?.view; const min = v?.settings.minBalance ?? 0;
 
@@ -367,10 +385,13 @@ function CalendarTab({ month, setMonth, meta, linkForm, onLinkFormUsed, onMetaCh
                     {o.status === 'Исполнено' && o.fact !== null && o.fact !== o.plan && <span className="muted">план {rub(o.plan)}</span>}
                   </div>
                   <div className="fin-st">
-                    <button className={`fin-pill ${STATUS_CLASS[o.status]}`} onClick={() => setMenu(menu === o.id ? null : o.id)}>{o.status} <CaretDownIcon size={14} /></button>
-                    {menu === o.id && <div className="fin-menu" onMouseLeave={() => setMenu(null)}>
-                      {OP_STATUSES.map(s => <button key={s} className={s === o.status ? 'on' : ''} onClick={() => void setStatus(o, s)}>{s}</button>)}
-                    </div>}
+                    <button className={`fin-pill ${STATUS_CLASS[o.status]}`} onClick={e => openMenu(o.id, e.currentTarget)}>{o.status} <CaretDownIcon size={14} /></button>
+                    {menu === o.id && menuAt && createPortal(<>
+                      <div className="fin-menu-back" onClick={() => setMenu(null)} />
+                      <div className="fin-menu fin-menu-float" style={menuAt} role="menu">
+                        {OP_STATUSES.map(s => <button key={s} className={s === o.status ? 'on' : ''} onClick={() => void setStatus(o, s)}>{s}</button>)}
+                      </div>
+                    </>, document.body)}
                   </div>
                   <div className="fin-tools">
                     <button className="btn btn-sm" aria-label="Изменить" onClick={() => setForm(o)}><PencilSimpleIcon /></button>

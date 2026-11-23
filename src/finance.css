@@ -484,3 +484,10 @@
   .fin-caltop .fin-kpi { box-shadow: none; }
   .fin-day { scroll-margin-top: 300px; }
 }
+
+/* 23.11: список статусов поверх страницы (портал в body) — не обрезается строками и соседними днями. */
+.fin-menu.fin-menu-float { position: fixed; z-index: 1200; top: auto; margin-top: 0; font-family: inherit; }
+.fin-menu-back { position: fixed; inset: 0; z-index: 1199; background: transparent; }
+.fin-menu.fin-menu-float button { font-size: 20px; color: var(--text, #121820); }
+.fin-menu.fin-menu-float button.on { color: var(--accent); }
+@media (max-width: 640px) { .fin-menu.fin-menu-float button { font-size: 17px; } }

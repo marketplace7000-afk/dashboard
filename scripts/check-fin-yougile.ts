@@ -92,7 +92,7 @@ const stickers: any[] = [{ id: 'S1', name: 'Приоритет', states: [{ id: 
 
     f.saveOp({ ...salary, status: 'Исполнено', fact: 30000 }, 'проверка');
     const s2 = await y.syncYougile(at('2026-11-22', 16));
-    check('отметили «Исполнено» — строка ушла из списка (описание поправлено)', [s2?.updated, d1[0].description.includes('ЗП дизайнера'), d1[0].description.includes('Итого: 1 платёж')], [1, false, true]);
+    check('отметили «Исполнено» — строка ушла из списка (описание поправлено)', [s2?.updated, d1[0].description!.includes('ЗП дизайнера'), d1[0].description!.includes('Итого: 1 платёж')], [1, false, true]);
 
     const s3 = await y.syncYougile(at('2026-11-24'));
     const d2 = open();

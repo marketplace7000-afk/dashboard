@@ -22,7 +22,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import * as routeModule from './api/route';
-import { SLOTS, everyAligned } from './api/_lib/cronSchedule';
+import { SLOTS, everyAligned, mskHour } from './api/_lib/cronSchedule';
 
 // api/ — CommonJS (см. api/package.json), а server.ts — ESM. Интероп tsx
 // заворачивает default-экспорт в несколько слоёв ({ default: { default: fn } }).
@@ -200,6 +200,20 @@ function scheduleCacheWarm() {
     import('./api/_lib/finance')
       .then(m => m.refreshBalance('Обновление раз в час'))
       .catch(e => console.warn('[finance] остаток из финучёта не обновился:', (e as Error).message));
+  });
+
+  // «Финансы» ← выплаты Ozon (23.11.2026, согласовано с диспетчером API): 08:06, 12:06, 18:06 МСК; 08:36 — повтор, если утро не прошло.
+  everyAligned(SLOTS.finOzon, () => {
+    if (![8, 12, 18].includes(mskHour())) return;
+    import('./api/_lib/financeOzon')
+      .then(m => m.syncOzonPayouts())
+      .catch(e => console.warn('[finance-ozon] проход не запущен:', (e as Error).message));
+  });
+  everyAligned(SLOTS.finOzonRetry, () => {
+    if (mskHour() !== 8) return;
+    import('./api/_lib/financeOzon')
+      .then(m => { const s = m.ozState(); if (s && !s.ok) return m.syncOzonPayouts('повтор после неудачного утра'); })
+      .catch(e => console.warn('[finance-ozon] повтор не запущен:', (e as Error).message));
   });
 
   // «Финансы» → YouGile (21.11.2026): расходы календаря за 3 дня до даты — задачи партнёру на доске «К работе»,

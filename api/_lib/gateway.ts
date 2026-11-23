@@ -64,6 +64,8 @@ const RULES: Rule[] = [
   { bucket: 'oz:accrual',        host: 'api-seller.ozon.ru', path: /^\/v1\/finance\/accrual\//,                     intervalMs: 2_000 },
   // Поисковые запросы карточки: и «Ведение карточек», и «Конкуренты Ozon» ходят в один метод друг за
   // другом — общий интервал ставит их в одну очередь (12.11.2026: второй модуль всегда получал 429).
+  // Выплаты Ozon для «Финансов» (23.11.2026, диспетчер API): 3 раза в день, лимит метода не назван — не чаще раза в 5 с.
+  { bucket: 'oz:cashflow',       host: 'api-seller.ozon.ru', path: /^\/v1\/finance\/cash-flow-statement\//,      intervalMs: 5_000 },
   { bucket: 'oz:queries',        host: 'api-seller.ozon.ru', path: /^\/v1\/analytics\/product-queries\//,       intervalMs: 30_000 },
   // 12.11.2026: у Ozon общий счётчик ~50 запросов в секунду на кабинет (заголовок ratelimit-remaining),
   // его делят сайт, Baloo и боты. Без интервала наши модули могли выстрелить пачкой — держим ≤ 10 в секунду.

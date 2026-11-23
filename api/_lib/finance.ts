@@ -489,6 +489,7 @@ export async function handleFinance(parts: string[], method: string, query: any,
       if (a === 'catalog') return { status: 200, json: { ok: true, ...(await catalog()) } };
       if (a === 'purchases') return { status: 200, json: { ok: true, today, purchases: purchaseItems(today, Number(query?.days) > 0 ? Math.min(365, Number(query.days)) : 60) } };
       if (a === 'yougile') { const m = await import('./financeYougile'); return { status: 200, json: { ok: true, enabled: !!process.env.YOUGILE_KEY, state: m.ygState() } }; }
+      if (a === 'ozon') { const m = await import('./financeOzon'); return { status: 200, json: { ok: true, state: m.ozState() } }; }
       if (a === 'log') return { status: 200, json: { ok: true, log: finDb().prepare('SELECT * FROM fin_log ORDER BY id DESC LIMIT 200').all() } };
     }
     if (method === 'POST') {
@@ -506,6 +507,7 @@ export async function handleFinance(parts: string[], method: string, query: any,
       if (a === 'op') return { status: 200, json: { ok: true, op: saveOp(b.op ?? b, who) } };
       if (a === 'lists') return { status: 200, json: { ok: true, lists: editList(b, who) } };
       if (a === 'settings') return { status: 200, json: { ok: true, settings: setSettings(b, who) } };
+      if (a === 'ozon' && c === 'refresh' && who !== 'Агент финансов') { const m = await import('./financeOzon'); return { status: 200, json: { ok: true, state: await m.syncOzonPayouts('кнопка ' + who) } }; }
       if (a === 'balance' && c === 'refresh') return { status: 200, json: { ok: true, ...(await refreshBalance(who)) } };
       if (a === 'investors' && c === 'deal') return { status: 200, json: { ok: true, deal: saveDeal(b.deal ?? b, who) } };
       if (a === 'investors' && c === 'move') return { status: 200, json: { ok: true, deal: addMove(b.move ?? b, who) } };
